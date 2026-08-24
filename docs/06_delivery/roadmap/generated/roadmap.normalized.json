@@ -7703,7 +7703,14 @@
       "acceptance_parent": null,
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: roadmap-catalog-and-generated"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -7891,7 +7898,14 @@
       ],
       "optional": false,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "roadmap-catalog-and-generated"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -7919,9 +7933,16 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
       "can_start": false,
       "change_surfaces": [
         "core-evaluation-activation"
@@ -7946,7 +7967,14 @@
         "E-LGV2-C-B",
         "E-LGV2-C-I"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -7978,6 +8006,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8027,6 +8061,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8053,6 +8093,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8104,6 +8150,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8130,6 +8182,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8181,6 +8239,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8207,6 +8271,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8258,6 +8328,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8284,6 +8360,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8337,6 +8419,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8363,6 +8451,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8414,6 +8508,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8440,6 +8540,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8491,6 +8597,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8517,6 +8629,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8568,6 +8686,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8594,6 +8718,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8647,6 +8777,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8673,6 +8809,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8727,6 +8869,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 1,
@@ -8753,6 +8901,12 @@
           "constraint": "start/activate/exit",
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
@@ -8869,6 +9023,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 3,
@@ -8905,6 +9065,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -8935,6 +9101,12 @@
       "resource_conflicts": [
         {
           "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -8973,6 +9145,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -9009,6 +9187,12 @@
       "resource_conflicts": [
         {
           "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -9056,6 +9240,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -9099,6 +9289,12 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
         }
       ],
       "revision": 0,
@@ -9137,6 +9333,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
         }
       ],
       "can_activate": false,
@@ -9173,6 +9375,12 @@
       "resource_conflicts": [
         {
           "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
           "surfaces": [
             "core-evaluation-activation"
           ]
@@ -9502,7 +9710,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: guard-api-production-wiring"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9548,7 +9763,14 @@
         "E-025-CT03B-CT05",
         "E-103-CT03B-FE06"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -9616,7 +9838,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -9731,7 +9960,14 @@
         "E-064-CT05-I03",
         "E-155-CT05-G-A"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -9765,6 +10001,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, langgraph-runtime-integration"
         }
       ],
       "can_activate": false,
@@ -9883,6 +10125,14 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "langgraph-runtime-integration"
+          ]
         }
       ],
       "revision": 3,
@@ -9956,15 +10206,22 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
-      "can_activate": true,
-      "can_exit": true,
-      "can_start": true,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
       "change_surfaces": [
         "guard-api-production-wiring",
         "audit-schema-and-storage"
       ],
-      "effective_status": "ready",
+      "effective_status": "not_ready",
       "evidence_gap": false,
       "evidence_items": [],
       "evidence_refs": [],
@@ -9987,7 +10244,15 @@
         "E-143-CT06-MASTER-FINAL",
         "E-156-CT06-G-A"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10007,7 +10272,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -10109,7 +10381,15 @@
         "E-120-CT04M-FE10A",
         "E-158-CT04M-C11"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -10441,6 +10721,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10515,6 +10801,14 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
         }
       ],
       "revision": 2,
@@ -10564,6 +10858,12 @@
           "from": null,
           "id": "node:blocked",
           "rationale": "blocked"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: openclaw-host-capability"
         }
       ],
       "can_activate": false,
@@ -10718,7 +11018,14 @@
         "E-113-R05-FE08",
         "E-116-R05-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "openclaw-host-capability"
+          ]
+        }
+      ],
       "revision": 4,
       "roles": [
         "task"
@@ -10762,6 +11069,12 @@
           "from": "G-B",
           "id": "E-052-G-B-R06",
           "rationale": "Program scheduling opens RTE-06 after Gate B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10794,7 +11107,14 @@
         "E-079-R06-G-SR",
         "E-146-R06-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10832,6 +11152,12 @@
           "from": "G-B",
           "id": "E-053-G-B-R07",
           "rationale": "Program scheduling opens RTE-07 after Gate B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10864,7 +11190,14 @@
         "E-080-R07-G-SR",
         "E-147-R07-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10885,6 +11218,123 @@
       "work": null
     },
     {
+      "activation_blockers": [],
+      "blocked": false,
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-B",
+          "id": "resource:LGV2-B",
+          "rationale": "exclusive surface conflict: competition-langgraph-bench-runner"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "LGV2-C",
+          "id": "resource:LGV2-C",
+          "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "R05",
+          "id": "resource:R05",
+          "rationale": "exclusive surface conflict: openclaw-host-capability"
+        }
+      ],
+      "can_activate": false,
+      "can_exit": false,
+      "can_start": false,
+      "change_surfaces": [
+        "core-evaluation-activation",
+        "guard-api-production-wiring",
+        "audit-schema-and-storage",
+        "runtime-binding-activation",
+        "openclaw-host-capability",
+        "langgraph-runtime-integration",
+        "competition-langgraph-bench-runner",
+        "dashboard-types-mappers-store",
+        "roadmap-catalog-and-generated",
+        "productization-alpha-stabilization"
+      ],
+      "effective_status": "in_progress",
+      "evidence_gap": true,
+      "evidence_items": [
+        {
+          "id": "EV-PA01-WORKTREE",
+          "kind": "worktree",
+          "metadata": {
+            "base_sha": "5986538050fcc1ee3af42b75060a043435b7d72c",
+            "draft_pr": 189,
+            "worktree": "<repo>"
+          },
+          "node_id": "PA01",
+          "recorded_at": null,
+          "ref": "codex/productization-alpha",
+          "schema_version": "1.0.0",
+          "status": "pending",
+          "summary": "The Productization Alpha integration branch is under Draft PR review; hosted exit gates and final dev integration remain pending."
+        }
+      ],
+      "evidence_refs": [
+        "evidence/PA01/EV-PA01-WORKTREE.json"
+      ],
+      "exact_title": "Productization Alpha — Cross-cutting stabilization",
+      "exit_blockers": [],
+      "hold": false,
+      "id": "PA01",
+      "incoming_edges": [],
+      "kind": "task",
+      "lane": "integration",
+      "lifecycle": "in_progress",
+      "notes": [
+        "Feature development is frozen while installation, contracts, security boundaries, structure, documentation, CI, and release engineering are stabilized.",
+        "This is an internal milestone only; it does not publish a SemVer release, update main, or claim production readiness."
+      ],
+      "optional": false,
+      "outgoing_edges": [],
+      "resource_conflicts": [
+        {
+          "node_id": "LGV2-B",
+          "surfaces": [
+            "competition-langgraph-bench-runner"
+          ]
+        },
+        {
+          "node_id": "LGV2-C",
+          "surfaces": [
+            "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "R05",
+          "surfaces": [
+            "openclaw-host-capability"
+          ]
+        }
+      ],
+      "revision": 0,
+      "roles": [
+        "task"
+      ],
+      "schema_version": "1.0.0",
+      "source_refs": [
+        {
+          "heading": "# Productization Alpha Status",
+          "line_hint": 1,
+          "path": "docs/06_delivery/productization_alpha_status.md"
+        }
+      ],
+      "topological_rank": 0,
+      "unmet_dependencies": [],
+      "work": {
+        "base_sha": "5986538050fcc1ee3af42b75060a043435b7d72c",
+        "branch": "codex/productization-alpha",
+        "owner": "codex-root",
+        "started_at": null,
+        "substate": "active",
+        "worktree_slug": "productization-alpha"
+      }
+    },
+    {
       "activation_blockers": [
         "E-LGV2-C-I"
       ],
@@ -10895,6 +11345,12 @@
           "from": "LGV2-C",
           "id": "E-LGV2-C-I",
           "rationale": "Guard API and RTE authoritative wiring requires the completed deterministic Core selector and official evidence contract."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -10929,7 +11385,16 @@
         "E-LGV2-I-B",
         "E-LGV2-I-FE"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -10965,6 +11430,12 @@
           "from": "LGV2-I",
           "id": "E-LGV2-I-B",
           "rationale": "The real product matrix cannot close before selected decisions, ASK/binding, receipts and replay are wired end to end."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: competition-langgraph-bench-runner"
         }
       ],
       "can_activate": false,
@@ -10999,7 +11470,14 @@
       "outgoing_edges": [
         "E-LGV2-B-FE"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "competition-langgraph-bench-runner"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -11147,7 +11625,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -11238,7 +11723,14 @@
         "E-105-RSC-CTPROV-FE07",
         "E-107-RSC-CTPROV-S2"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -11272,6 +11764,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11405,6 +11903,13 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
+          ]
         }
       ],
       "revision": 3,
@@ -11440,6 +11945,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, langgraph-runtime-integration"
         }
       ],
       "can_activate": false,
@@ -11577,6 +12088,14 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "langgraph-runtime-integration"
+          ]
         }
       ],
       "revision": 3,
@@ -11614,6 +12133,12 @@
           "from": "G-B",
           "id": "E-065-G-B-I03",
           "rationale": "I03 requires G-B."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11648,7 +12173,15 @@
         "E-140-I03-CT-FINAL-DOD",
         "E-144-I03-MASTER-FINAL"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "guard-api-production-wiring"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -11691,6 +12224,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -11731,6 +12270,14 @@
           "node_id": "LGV2-C",
           "surfaces": [
             "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
           ]
         }
       ],
@@ -11777,6 +12324,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: core-evaluation-activation, guard-api-production-wiring, runtime-binding-activation"
         }
       ],
       "can_activate": false,
@@ -11819,6 +12372,14 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "core-evaluation-activation",
+            "guard-api-production-wiring",
+            "runtime-binding-activation"
+          ]
         }
       ],
       "revision": 0,
@@ -11857,6 +12418,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11893,6 +12460,14 @@
           "node_id": "LGV2-C",
           "surfaces": [
             "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -11938,6 +12513,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -11979,6 +12560,14 @@
           "node_id": "LGV2-C",
           "surfaces": [
             "core-evaluation-activation"
+          ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
           ]
         }
       ],
@@ -12025,6 +12614,12 @@
           "from": "LGV2-C",
           "id": "resource:LGV2-C",
           "rationale": "exclusive surface conflict: core-evaluation-activation"
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: audit-schema-and-storage, core-evaluation-activation, guard-api-production-wiring"
         }
       ],
       "can_activate": false,
@@ -12064,6 +12659,14 @@
           "surfaces": [
             "core-evaluation-activation"
           ]
+        },
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "audit-schema-and-storage",
+            "core-evaluation-activation",
+            "guard-api-production-wiring"
+          ]
         }
       ],
       "revision": 0,
@@ -12088,7 +12691,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12130,7 +12740,14 @@
         "E-089-FE00-FE01",
         "E-092-FE00-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12150,7 +12767,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12239,7 +12863,14 @@
         "E-119-FE08-S4",
         "E-124-FE08-FE10B"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -12267,7 +12898,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12311,7 +12949,14 @@
         "E-090-FE01-FE02",
         "E-093-FE01-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12331,7 +12976,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12376,7 +13028,14 @@
         "E-094-FE02-S0",
         "E-099-FE02-FE05"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12410,6 +13069,12 @@
           "from": "LGV2-B",
           "id": "E-LGV2-B-FE",
           "rationale": "Dashboard work may begin from the API contract, but its typed competition report cannot close until the runner artifact shape is complete."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12441,7 +13106,14 @@
       ],
       "optional": false,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12463,7 +13135,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12506,7 +13185,14 @@
       "outgoing_edges": [
         "E-095-FE03-S0"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12526,7 +13212,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12569,7 +13262,14 @@
       "outgoing_edges": [
         "E-097-FE04-S1"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "task"
@@ -12597,6 +13297,12 @@
           "from": "CT03R",
           "id": "E-098-CT03R-FE05",
           "rationale": "FE05 requires CT03R."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12627,7 +13333,14 @@
       "outgoing_edges": [
         "E-101-FE05-S2R"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12649,7 +13362,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12740,7 +13460,14 @@
       "outgoing_edges": [
         "E-104-FE06-FE07"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -12768,7 +13495,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -12859,7 +13593,14 @@
       "outgoing_edges": [
         "E-108-FE07-S2"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 3,
       "roles": [
         "task"
@@ -12895,6 +13636,12 @@
           "from": "G-SCHEMA-DIFF",
           "id": "E-088-G-SCHEMA-DIFF-FE09",
           "rationale": "FE09 requires G-SCHEMA-DIFF."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -12924,7 +13671,14 @@
       ],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -12946,7 +13700,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -13034,7 +13795,14 @@
       "outgoing_edges": [
         "E-121-FE10A-S5C"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 2,
       "roles": [
         "task"
@@ -13077,6 +13845,12 @@
           "from": "C11",
           "id": "E-126-C11-FE10B",
           "rationale": "FE10B requires C11."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -13110,7 +13884,14 @@
       "outgoing_edges": [
         "E-132-FE10B-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "task"
@@ -13133,7 +13914,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -13188,7 +13976,14 @@
       "outgoing_edges": [
         "E-096-S0-FE04"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -13208,7 +14003,14 @@
     {
       "activation_blockers": [],
       "blocked": false,
-      "blocked_reasons": [],
+      "blocked_reasons": [
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
+        }
+      ],
       "can_activate": false,
       "can_exit": false,
       "can_start": false,
@@ -13266,7 +14068,14 @@
         "E-153-S1-CT05",
         "E-154-S1-CT03R"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -13298,9 +14107,15 @@
           "from": "FE05",
           "id": "E-101-FE05-S2R",
           "rationale": "S2R requires FE05."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13329,7 +14144,14 @@
       "outgoing_edges": [
         "E-109-S2R-S2"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13433,9 +14255,15 @@
           "from": "A-S2-14",
           "id": "E-A-S2-14-S2",
           "rationale": "S2 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13495,7 +14323,14 @@
         "E-110-S2-S3",
         "E-157-S2-I01"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 1,
       "roles": [
         "stage"
@@ -13581,9 +14416,15 @@
           "from": "A-S3-10",
           "id": "E-A-S3-10-S3",
           "rationale": "S3 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13633,7 +14474,14 @@
         "E-112-S3-S3PLUS",
         "E-114-S3-S4"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13661,6 +14509,12 @@
           "from": "S3",
           "id": "E-112-S3-S3PLUS",
           "rationale": "S3PLUS requires S3."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
       "can_activate": false,
@@ -13688,7 +14542,14 @@
       "notes": [],
       "optional": true,
       "outgoing_edges": [],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13800,9 +14661,15 @@
           "from": "A-S4-12",
           "id": "E-A-S4-12-S4",
           "rationale": "S4 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13860,7 +14727,14 @@
       "outgoing_edges": [
         "E-127-S4-S5O"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -13916,9 +14790,15 @@
           "from": "A-S5C-06",
           "id": "E-A-S5C-06-S5C",
           "rationale": "S5C cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -13957,7 +14837,14 @@
       "outgoing_edges": [
         "E-133-S5C-S5"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage",
@@ -14176,9 +15063,15 @@
           "from": "A-S5O-27",
           "id": "E-A-S5O-27-S5O",
           "rationale": "S5O cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -14269,7 +15162,14 @@
       "outgoing_edges": [
         "E-134-S5O-S5"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage",
@@ -14326,9 +15226,15 @@
           "from": "A-S5-04",
           "id": "E-A-S5-04-S5",
           "rationale": "S5 cannot exit until this documented acceptance item is verified."
+        },
+        {
+          "constraint": "start/activate/exit",
+          "from": "PA01",
+          "id": "resource:PA01",
+          "rationale": "exclusive surface conflict: dashboard-types-mappers-store"
         }
       ],
-      "can_activate": true,
+      "can_activate": false,
       "can_exit": false,
       "can_start": false,
       "change_surfaces": [
@@ -14366,7 +15272,14 @@
         "E-135-S5-S6",
         "E-159-S5-C12"
       ],
-      "resource_conflicts": [],
+      "resource_conflicts": [
+        {
+          "node_id": "PA01",
+          "surfaces": [
+            "dashboard-types-mappers-store"
+          ]
+        }
+      ],
       "revision": 0,
       "roles": [
         "stage"
@@ -27741,10 +28654,37 @@
   ],
   "ready_queue": [
     "CT03R",
-    "CT-O1",
-    "CT06"
+    "CT-O1"
   ],
-  "resource_conflicts": [],
+  "resource_conflicts": [
+    {
+      "nodes": [
+        "LGV2-B",
+        "PA01"
+      ],
+      "surfaces": [
+        "competition-langgraph-bench-runner"
+      ]
+    },
+    {
+      "nodes": [
+        "LGV2-C",
+        "PA01"
+      ],
+      "surfaces": [
+        "core-evaluation-activation"
+      ]
+    },
+    {
+      "nodes": [
+        "PA01",
+        "R05"
+      ],
+      "surfaces": [
+        "openclaw-host-capability"
+      ]
+    }
+  ],
   "schema_version": "1.0.0",
-  "source_digest": "1c94f1003c2890dab41a543f3817b06e47585760b1ec16687f2e90f7119d5fcc"
+  "source_digest": "1376a0197f797d7160fc9d9ab1283e812bebd63ccf71aaad866c68353b4a1892"
 }

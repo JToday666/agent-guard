@@ -138,6 +138,13 @@
       ]
     },
     {
+      "id": "productization-alpha-stabilization",
+      "label": "Productization Alpha cross-cutting stabilization freeze",
+      "path_patterns": [
+        "**"
+      ]
+    },
+    {
       "id": "roadmap-catalog-and-generated",
       "label": "Roadmap catalog and generated artifacts",
       "path_patterns": [

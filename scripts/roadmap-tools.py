@@ -473,8 +473,7 @@ class Roadmap:
         active = [
             node
             for node in self.nodes
-            if node.get("lifecycle") == "in_progress"
-            and not node.get("hold")
+            if node.get("lifecycle") == "in_progress" and not node.get("hold")
         ]
         evidence_by_node: dict[str, list[dict[str, Any]]] = defaultdict(list)
         for item in rendered_evidence:
@@ -1229,9 +1228,15 @@ def _valid_lifecycle_transition(before: str, after: str) -> bool:
 
 def _is_standalone_benchmark_diff(paths: Sequence[str]) -> bool:
     """Return whether a Claude Code benchmark-only diff needs no claim."""
-    return bool(paths) and any(
-        _matches_any(path, STANDALONE_BENCHMARK_MARKER_PATTERNS) for path in paths
-    ) and all(_matches_any(path, STANDALONE_BENCHMARK_PATH_PATTERNS) for path in paths)
+    return (
+        bool(paths)
+        and any(
+            _matches_any(path, STANDALONE_BENCHMARK_MARKER_PATTERNS) for path in paths
+        )
+        and all(
+            _matches_any(path, STANDALONE_BENCHMARK_PATH_PATTERNS) for path in paths
+        )
+    )
 
 
 def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
@@ -1367,6 +1372,15 @@ def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
                 f"branch={branch or '<detached>'}, evidence_nodes="
                 + ",".join(sorted(added_evidence_nodes))
             )
+        evidence_only_prefix = f"{evidence_prefix}{candidates[0]['id']}/"
+        forbidden_evidence_only_paths = sorted(
+            path for path in changed_paths if not path.startswith(evidence_only_prefix)
+        )
+        if forbidden_evidence_only_paths:
+            raise RoadmapError(
+                "evidence-only diff may only append its active claim evidence; "
+                "forbidden paths: " + ", ".join(forbidden_evidence_only_paths)
+            )
     if implementation_paths:
         if push_context:
             candidates = [
@@ -1393,17 +1407,6 @@ def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
             raise RoadmapError(
                 f"implementation diff for {claim['id']} must append node evidence"
             )
-        forbidden_control_changes = sorted(
-            path
-            for path in changed_paths
-            if _matches_any(path, CONTROL_PLANE_PATTERNS)
-            and not path.startswith(f"{evidence_prefix}{claim['id']}/")
-        )
-        if forbidden_control_changes:
-            raise RoadmapError(
-                "feature worktree may only append its own evidence; forbidden paths: "
-                + ", ".join(forbidden_control_changes)
-            )
         surface_map = {
             surface["id"]: surface.get("path_patterns", [])
             for surface in roadmap.catalog.get("exclusive_surfaces", [])
@@ -1413,6 +1416,21 @@ def _check_diff(roadmap: Roadmap, base_ref: str, head_ref: str) -> int:
             for surface_id in claim.get("change_surfaces", [])
             for pattern in surface_map.get(surface_id, [])
         ]
+        forbidden_control_changes = sorted(
+            path
+            for path in changed_paths
+            if _matches_any(path, CONTROL_PLANE_PATTERNS)
+            and not path.startswith(f"{evidence_prefix}{claim['id']}/")
+            and not (
+                claim.get("lane") == "integration"
+                and _matches_any(path, allowed_patterns)
+            )
+        )
+        if forbidden_control_changes:
+            raise RoadmapError(
+                "feature worktree may only append its own evidence; forbidden paths: "
+                + ", ".join(forbidden_control_changes)
+            )
         outside = [
             path
             for path in implementation_paths
