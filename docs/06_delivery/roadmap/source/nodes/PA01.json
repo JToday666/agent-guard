@@ -34,7 +34,7 @@
     "The initial critical/high dependency batch is merged at dev 2fdbe203; GitHub readback confirms 64 alerts fixed without dismissal and zero critical/high alerts remain."
   ],
   "optional": false,
-  "revision": 4,
+  "revision": 5,
   "roles": [
     "task"
   ],
@@ -47,11 +47,11 @@
     }
   ],
   "work": {
-    "base_sha": "2fdbe20396b3dda4d3990a89688106e7720ddc6b",
-    "branch": "codex/productization-alpha-dependency-security-closeout",
-    "owner": "codex-root",
-    "started_at": "2026-08-24T17:53:00Z",
+    "base_sha": "cc3c229da9f625a784e7f0c0f4f562652b0b511d",
+    "branch": "dev",
+    "owner": "maintainers",
+    "started_at": "2026-08-24T18:20:29Z",
     "substate": "active",
-    "worktree_slug": "productization-alpha-dependency-security-closeout"
+    "worktree_slug": "productization-alpha-feature-freeze"
   }
 }
