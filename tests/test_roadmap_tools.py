@@ -129,6 +129,15 @@ def mutate_object(
     return value
 
 
+def active_claim_branch(root: Path, node_id: str) -> str:
+    node = read_json(object_path(root, "nodes", node_id))
+    work = node.get("work")
+    assert isinstance(work, dict)
+    branch = work.get("branch")
+    assert isinstance(branch, str) and branch
+    return branch
+
+
 def build_normalized(root: Path) -> dict[str, Any]:
     result = run_tool(root, "build")
     assert_succeeds(result)
@@ -830,7 +839,9 @@ def test_evidence_only_diff_must_belong_to_current_branch_claim(
 def test_integration_claim_can_own_declared_control_plane_paths(
     roadmap_root: Path,
 ) -> None:
-    initialize_git_fixture(roadmap_root, branch="codex/productization-alpha")
+    initialize_git_fixture(
+        roadmap_root, branch=active_claim_branch(roadmap_root, "PA01")
+    )
     workflow = roadmap_root / ".github/workflows/ci.yml"
     workflow.parent.mkdir(parents=True, exist_ok=True)
     workflow.write_text("name: productization integration\n", encoding="utf-8")
@@ -877,7 +888,9 @@ def test_integration_claim_rejects_undeclared_control_plane_paths(
         "PA01",
         change_surfaces=["guard-api-production-wiring"],
     )
-    initialize_git_fixture(roadmap_root, branch="codex/productization-alpha")
+    initialize_git_fixture(
+        roadmap_root, branch=active_claim_branch(roadmap_root, "PA01")
+    )
     workflow = roadmap_root / ".github/workflows/ci.yml"
     workflow.parent.mkdir(parents=True, exist_ok=True)
     workflow.write_text("name: undeclared integration path\n", encoding="utf-8")

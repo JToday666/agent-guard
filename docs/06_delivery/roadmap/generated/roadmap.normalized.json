@@ -11256,8 +11256,19 @@
         "productization-alpha-stabilization"
       ],
       "effective_status": "in_progress",
-      "evidence_gap": true,
+      "evidence_gap": false,
       "evidence_items": [
+        {
+          "id": "EV-PA01-2636E7E5C8BA",
+          "kind": "worktree",
+          "metadata": {},
+          "node_id": "PA01",
+          "recorded_at": "2026-08-24T09:14:31Z",
+          "ref": "codex/productization-alpha-closeout",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "Productization Alpha is integrated at dev a9702bc; ownership moved to the closeout branch while PA01 stays active solely to enforce the feature freeze"
+        },
         {
           "id": "EV-PA01-WORKTREE",
           "kind": "worktree",
@@ -11280,6 +11291,7 @@
         }
       ],
       "evidence_refs": [
+        "evidence/PA01/EV-PA01-2636E7E5C8BA.json",
         "evidence/PA01/EV-PA01-WORKTREE.json"
       ],
       "exact_title": "Productization Alpha — Cross-cutting stabilization",
@@ -11292,7 +11304,8 @@
       "lifecycle": "in_progress",
       "notes": [
         "Feature development is frozen while installation, contracts, security boundaries, structure, documentation, CI, and release engineering are stabilized.",
-        "This is an internal milestone only; it does not publish a SemVer release, update main, or claim production readiness."
+        "This is an internal milestone only; it does not publish a SemVer release, update main, or claim production readiness.",
+        "The internal Productization Alpha milestone is integrated at dev a9702bc; this claim remains active only to enforce the feature freeze until a separate resumption review."
       ],
       "optional": false,
       "outgoing_edges": [],
@@ -11316,7 +11329,7 @@
           ]
         }
       ],
-      "revision": 0,
+      "revision": 1,
       "roles": [
         "task"
       ],
@@ -11331,12 +11344,12 @@
       "topological_rank": 0,
       "unmet_dependencies": [],
       "work": {
-        "base_sha": "5986538050fcc1ee3af42b75060a043435b7d72c",
-        "branch": "codex/productization-alpha",
+        "base_sha": "a9702bc83ce1b9f24d987368912f20fd7c4e3e0e",
+        "branch": "codex/productization-alpha-closeout",
         "owner": "codex-root",
         "started_at": null,
         "substate": "active",
-        "worktree_slug": "productization-alpha"
+        "worktree_slug": "productization-alpha-closeout"
       }
     },
     {
@@ -28691,5 +28704,5 @@
     }
   ],
   "schema_version": "1.0.0",
-  "source_digest": "05c9008201cf798c03b7710b288423f1d362de4f892b76eeb5d8213d7ac0c721"
+  "source_digest": "e4458bf4b6ad2aa984388aede73d5c574c1bece3e9db222a7c6c527b0bea0b44"
 }
