@@ -47,11 +47,11 @@
 
 ## CI 状态口径
 
-本分支定义了以下自动 job：clean-checkout 最小示例验收、静态检查、unit/contract/integration/e2e Python 测试、PostgreSQL 16 migration/tests、Node 检查、Dashboard build、Playwright Chromium E2E。`live` 仅在手动 workflow dispatch 明确 opt-in 时运行。
+本分支定义了以下自动 job：clean-checkout 最小示例验收、静态检查、unit/contract/integration/e2e Python 测试、PostgreSQL 16 migration/tests、Node 检查、Dashboard build、Playwright Chromium E2E。浏览器 job 除 mock/API-stub 模式外，还以 memory backend 启动真实 Guard API 与 Dashboard，执行 S1 allow、浏览器审批、deny 零调用和 flag-off 回滚四场景。连接真实外部宿主或 Provider 的 `live` 仍仅在手动 workflow dispatch 明确 opt-in 时运行。
 
 Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,533 项：unit 1,187、contract 383、integration 782、postgres 156、e2e 24、live 1。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当前也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
 
-Dashboard 的 API-mode Playwright 当前会拦截 `/api/v1/**`，不是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 会在隔离临时目录中真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销；它仍不等于浏览器 UI 通过真实 API 完成数据交互。
+Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API 映射；独立 S1 memory 场景才是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 另在隔离临时目录中验证安装后健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销，两者覆盖边界不同。
 
 这些 job 只有在同一已验证代码 SHA 的 GitHub Actions 全部成功后，才构成本轮通过证据。维护者应以单独的状态证明提交记录其 parent SHA、run URL/ID 和结果；在此之前状态保持 **in progress**。本地通过、workflow 定义存在或历史报告都不能替代托管 CI 结果。
 
@@ -66,6 +66,7 @@ Dashboard 的 API-mode Playwright 当前会拦截 `/api/v1/**`，不是 Dashboar
 - Markdown 相对目标检查对全部 137 份 tracked/unignored 文档通过。
 - 隔离 clean-clone acceptance 在 memory backend 下完成 8/8：真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源、凭证撤销与临时资源清理；外部 Provider 保持关闭。
 - Dashboard 隐藏页暂停与终态停止轮询的两项定向 Playwright 回归通过。
+- Dashboard 到真实 Guard API 的 memory 浏览器闭环本地为 4/4 passed：official allow、浏览器 allow-once 审批、deny 零调用/not-invoked receipt、flag-off 回滚只读。
 
 受本机环境限制，本轮没有把完整 integration 层、PostgreSQL job、完整 Python/浏览器 E2E、Docker/SBOM 构建或托管 GitHub Actions 标记为已验证。它们仍是 Alpha 出口的必需门禁；上面的本地结果不能替代。
 
