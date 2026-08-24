@@ -1,6 +1,6 @@
 # AgentGuard 全轨实施路线图
 
-> Source digest: `1c94f1003c2890dab41a543f3817b06e47585760b1ec16687f2e90f7119d5fcc`
+> Source digest: `1376a0197f797d7160fc9d9ab1283e812bebd63ccf71aaad866c68353b4a1892`
 
 状态：🟢 已完成 · 🟠 正在实施 · 🔵 可启动 · ⚪ 未实施且不可启动。
 
@@ -54,6 +54,7 @@ flowchart LR
     N_R07["R07 · PR-RTE-07 — Reliability Evidence"]
   end
   subgraph L_N_integration["Integration"]
+    N_PA01["PA01 · Productization Alpha — Cross-cutting stabilization"]
     N_LGV2_I["LGV2-I · LGV2-I — Guard API, ASK, RTE and replay wiring"]
     N_LGV2_B["LGV2-B · LGV2-B — Real LLM runner, experiment matrix and artifacts"]
     N_RSC_CT01["RSC-CT01 · INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback"]
@@ -289,9 +290,9 @@ flowchart LR
   N_LGV2_I == "exit · join" ==> N_LGV2_B
   N_LGV2_I == "start · hard_dependency" ==> N_LGV2_FE
   class N_B0,N_RM_00,N_C00,N_C01,N_C02,N_C03,N_C04,N_C05,N_C06,N_C07,N_C08,N_C09,N_C10,N_CT00,N_CT01,N_CT02A,N_CT02B,N_CT03A,N_CT03B,N_CT05,N_CT04,N_CT04M,N_R01,N_R02,N_R03,N_R04,N_R05P,N_RSC_CT01,N_RSC_CTPROV,N_I01,N_I02A,N_FE00,N_FE08,N_FE01,N_FE02,N_FE03,N_FE04,N_FE06,N_FE07,N_FE10A,N_S0,N_S1,N_G_HOOK_CAP,N_G_TIER3,N_G_R05F,N_G_NATIVE_ID,N_G_C2,N_RTE_P0_DOD,N_G_CTACT,N_G_A completed
-  class N_LGV2_C,N_R05,N_LGV2_B inProgress
-  class N_CT03R,N_CT_O1,N_CT06 ready
-  class N_C13,N_C14,N_C11,N_C12,N_CT_O2,N_R06,N_R07,N_LGV2_I,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_LGV2_FE,N_FE05,N_FE09,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
+  class N_LGV2_C,N_R05,N_PA01,N_LGV2_B inProgress
+  class N_CT03R,N_CT_O1 ready
+  class N_C13,N_C14,N_C11,N_C12,N_CT06,N_CT_O2,N_R06,N_R07,N_LGV2_I,N_I03,N_I02B,N_I04,N_C12_R,N_ROL1,N_I03_R,N_LGV2_FE,N_FE05,N_FE09,N_FE10B,N_S2R,N_S2,N_S3,N_S3PLUS,N_S4,N_S5C,N_S5O,N_S5,N_G_TARGET,N_G_ADDITIVE,N_RTE_P1_DOD,N_G_SCHEMA_DIFF,N_G_B,N_G_SEM,N_G_SL,N_G_ENG,N_G_PR12,N_G_CLAIM,N_G_SR,N_G_CONSOLE_FINAL,N_G_STAGE,N_CT_FINAL_DOD,N_MASTER_FINAL,N_S6 notReady
   classDef completed fill:#1F9D63,color:#fff,stroke:#126540
   classDef inProgress fill:#D99000,color:#111,stroke:#8a5900
   classDef ready fill:#2774D8,color:#fff,stroke:#174985
@@ -302,7 +303,6 @@ flowchart LR
 
 - `CT03R`
 - `CT-O1`
-- `CT06`
 
 ## 完整节点表
 
@@ -336,7 +336,7 @@ flowchart LR
 | `CT05` | ct | task | completed | 否 | CT-PR-05 — Memory Bridge |
 | `CT04` | ct | task | completed | 否 | CT-PR-04 — Context Builder |
 | `CT-O1` | ct | task | ready | 是 | logical isolation |
-| `CT06` | ct | task | ready | 是 | CT-PR-06 — Declassification Evidence |
+| `CT06` | ct | task | not_ready | 否 | CT-PR-06 — Declassification Evidence |
 | `CT04M` | ct | task | completed | 否 | CT-PR-04-M/INT — Bounded Manifest Producer |
 | `CT-O2` | ct | task | not_ready | 否 | actual context rewrite |
 | `R01` | rte | task | completed | 否 | PR-RTE-01 — Contract & Field Freeze |
@@ -347,6 +347,7 @@ flowchart LR
 | `R05` | rte | task | in_progress | 否 | PR-RTE-05 — Strong Approval Binding |
 | `R06` | rte | task | not_ready | 否 | PR-RTE-06 — Result Evidence Hardening |
 | `R07` | rte | task | not_ready | 否 | PR-RTE-07 — Reliability Evidence |
+| `PA01` | integration | task | in_progress | 否 | Productization Alpha — Cross-cutting stabilization |
 | `LGV2-I` | integration | task | not_ready | 否 | LGV2-I — Guard API, ASK, RTE and replay wiring |
 | `LGV2-B` | integration | task | in_progress | 否 | LGV2-B — Real LLM runner, experiment matrix and artifacts |
 | `RSC-CT01` | integration | task | completed | 否 | INT-RSC-CT-01 — V21 + secret + CT readiness and commit readback |

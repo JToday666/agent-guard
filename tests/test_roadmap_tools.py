@@ -287,9 +287,7 @@ def test_lgv2_competition_dependencies_and_surfaces_are_scoped(
     assert nodes["LGV2-FE"]["unmet_dependencies"] == ["E-LGV2-I-FE"]
 
     assert nodes["R05"]["change_surfaces"] == ["openclaw-host-capability"]
-    assert nodes["LGV2-B"]["change_surfaces"] == [
-        "competition-langgraph-bench-runner"
-    ]
+    assert nodes["LGV2-B"]["change_surfaces"] == ["competition-langgraph-bench-runner"]
     assert "openclaw-host-capability" not in nodes["LGV2-I"]["change_surfaces"]
 
 
@@ -412,7 +410,9 @@ def test_ct04_check_diff_accepts_langgraph_and_rejects_openclaw(
     forbidden.write_text("// forbidden residual host change\n", encoding="utf-8")
     append_evidence("EV-CT04-FORBIDDEN")
     assert git(roadmap_root, "add", ".").returncode == 0
-    assert git(roadmap_root, "commit", "-m", "forbidden OpenClaw change").returncode == 0
+    assert (
+        git(roadmap_root, "commit", "-m", "forbidden OpenClaw change").returncode == 0
+    )
 
     result = run_tool(
         roadmap_root,
@@ -703,6 +703,56 @@ def test_unreferenced_evidence_is_excluded_from_render_until_close(
     assert normalized_nodes(after)["CT03R"]["evidence_items"] == []
 
 
+def test_evidence_only_diff_accepts_current_branch_claim(
+    roadmap_root: Path,
+) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "CT03R",
+        lifecycle="in_progress",
+        revision=1,
+        work={
+            "branch": "codex/ct03r-test",
+            "worktree_slug": "ct03r-test",
+            "owner": "test-owner",
+            "base_sha": "cdf3625",
+            "started_at": None,
+            "substate": "active",
+        },
+    )
+    initialize_git_fixture(roadmap_root)
+    evidence_dir = machine_dir(roadmap_root) / "evidence" / "CT03R"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        evidence_dir / "EV-CT03R-CURRENT-BRANCH.json",
+        {
+            "schema_version": "1.0.0",
+            "id": "EV-CT03R-CURRENT-BRANCH",
+            "node_id": "CT03R",
+            "kind": "test",
+            "ref": "pytest:current-owner",
+            "status": "pending",
+            "summary": "current branch evidence remains appendable",
+            "recorded_at": None,
+            "metadata": {},
+        },
+    )
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "current branch evidence").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_succeeds(result)
+
+
 def test_evidence_only_diff_must_belong_to_current_branch_claim(
     roadmap_root: Path,
 ) -> None:
@@ -753,6 +803,93 @@ def test_evidence_only_diff_must_belong_to_current_branch_claim(
     assert_validation_failure(result, "evidence-only", "active roadmap claim")
 
 
+def test_integration_claim_can_own_declared_control_plane_paths(
+    roadmap_root: Path,
+) -> None:
+    initialize_git_fixture(roadmap_root, branch="codex/productization-alpha")
+    workflow = roadmap_root / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("name: productization integration\n", encoding="utf-8")
+    runtime = roadmap_root / "apps/guard-api/guard_api/main.py"
+    runtime.parent.mkdir(parents=True, exist_ok=True)
+    runtime.write_text("# productization integration fixture\n", encoding="utf-8")
+    evidence_dir = machine_dir(roadmap_root) / "evidence" / "PA01"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        evidence_dir / "EV-PA01-INTEGRATION-TEST.json",
+        {
+            "schema_version": "1.0.0",
+            "id": "EV-PA01-INTEGRATION-TEST",
+            "node_id": "PA01",
+            "kind": "test",
+            "ref": "pytest:integration-control-plane-ownership",
+            "status": "pending",
+            "summary": "integration claims may change explicitly owned control paths",
+            "recorded_at": None,
+            "metadata": {},
+        },
+    )
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert git(roadmap_root, "commit", "-m", "integration claim change").returncode == 0
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_succeeds(result)
+
+
+def test_integration_claim_rejects_undeclared_control_plane_paths(
+    roadmap_root: Path,
+) -> None:
+    mutate_object(
+        roadmap_root,
+        "nodes",
+        "PA01",
+        change_surfaces=["guard-api-production-wiring"],
+    )
+    initialize_git_fixture(roadmap_root, branch="codex/productization-alpha")
+    workflow = roadmap_root / ".github/workflows/ci.yml"
+    workflow.parent.mkdir(parents=True, exist_ok=True)
+    workflow.write_text("name: undeclared integration path\n", encoding="utf-8")
+    evidence_dir = machine_dir(roadmap_root) / "evidence" / "PA01"
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    write_json(
+        evidence_dir / "EV-PA01-UNDECLARED-CONTROL.json",
+        {
+            "schema_version": "1.0.0",
+            "id": "EV-PA01-UNDECLARED-CONTROL",
+            "node_id": "PA01",
+            "kind": "test",
+            "ref": "pytest:undeclared-integration-control",
+            "status": "pending",
+            "summary": "undeclared control paths remain forbidden",
+            "recorded_at": None,
+            "metadata": {},
+        },
+    )
+    assert git(roadmap_root, "add", ".").returncode == 0
+    assert (
+        git(roadmap_root, "commit", "-m", "undeclared integration path").returncode == 0
+    )
+
+    result = run_tool(
+        roadmap_root,
+        "check-diff",
+        "--base-ref",
+        "HEAD^",
+        "--head-ref",
+        "HEAD",
+    )
+
+    assert_validation_failure(result, "evidence-only", ".github/workflows/ci.yml")
+
+
 def test_claude_code_benchmark_only_diff_is_outside_roadmap_claims(
     roadmap_root: Path,
 ) -> None:
@@ -766,7 +903,10 @@ def test_claude_code_benchmark_only_diff_is_outside_roadmap_claims(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("# benchmark fixture\n", encoding="utf-8")
     assert git(roadmap_root, "add", ".").returncode == 0
-    assert git(roadmap_root, "commit", "-m", "Claude benchmark maintenance").returncode == 0
+    assert (
+        git(roadmap_root, "commit", "-m", "Claude benchmark maintenance").returncode
+        == 0
+    )
 
     result = run_tool(
         roadmap_root,
