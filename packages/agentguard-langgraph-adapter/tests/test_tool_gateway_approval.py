@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -14,6 +15,8 @@ from agentguard_langgraph_adapter.event_models import (  # noqa: E402
     AuditEvent,
     Decision,
     PolicyDecision,
+    RuntimeGuardEvent,
+    SecurityContext,
     ToolCallEvent,
     ToolDescriptor,
 )
@@ -30,7 +33,9 @@ def test_guard_api_v03_client_preserves_top_level_approval(monkeypatch) -> None:
         )
     )
 
-    def fake_post_json(self: AgentGuardCoreClient, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def fake_post_json(
+        self: AgentGuardCoreClient, path: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
         assert path == "/v1/guard/evaluate"
         return {
             "decision": {
@@ -75,7 +80,12 @@ def test_gateway_executes_ask_tool_call_after_allow_once_approval() -> None:
     )
 
     assert guard.waited_for == "app_allow"
-    assert runtime.calls == [("memory_write", {"namespace": "user_preferences", "key": "style", "value": "concise"})]
+    assert runtime.calls == [
+        (
+            "memory_write",
+            {"namespace": "user_preferences", "key": "style", "value": "concise"},
+        )
+    ]
     assert result.executed is True
     assert result.blocked is False
     assert result.decision == "ask"
@@ -142,20 +152,134 @@ def test_message_gate_fails_closed_when_approval_stays_pending() -> None:
     assert runtime.calls == []
 
 
+def test_message_gate_fails_closed_when_allow_arrives_after_deadline() -> None:
+    guard = _MessageSendApprovingGuardAdapter(
+        main_decision="allow",
+        approval_sequence=[{"status": "resolved", "decision": "allow_once"}],
+        wait_delay_seconds=0.03,
+    )
+    runtime = _Runtime()
+    gateway = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=runtime,
+        approval_timeout=0.01,
+        approval_poll_interval=0.001,
+    )
+
+    result = gateway.invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_late_approval",
+        call_id="call_message_late_approval",
+    )
+
+    assert guard.wait_calls == ["app_message"]
+    assert result.executed is False
+    assert result.blocked is True
+    assert result.decision == "ask"
+    assert result.block_semantics == "approval_block"
+    assert runtime.calls == []
+
+
+def test_approved_message_gate_owns_started_and_terminal_receipts() -> None:
+    guard = _ReceiptMessageSendApprovingGuardAdapter()
+    runtime = _Runtime()
+
+    result = GuardedToolGateway(guard_adapter=guard, tool_runtime=runtime).invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_receipt",
+        call_id="call_message_receipt",
+    )
+
+    assert result.executed is True
+    assert [receipt["record_type"] for receipt in guard.receipts] == [
+        "runtime_observation",
+        "runtime_outcome",
+    ]
+    started, terminal = guard.receipts
+    for receipt in (started, terminal):
+        assert receipt["links"]["event_id"] == "evt_call_message_receipt"
+        assert receipt["links"]["action_id"] == "act_evt_call_message_receipt"
+        assert receipt["links"]["decision_id"] == "dec_ask_message"
+        assert receipt["links"]["policy_audit_id"] == "audit_policy_message"
+        assert receipt["links"]["approval_id"] == "app_message"
+        assert receipt["evidence"]["approval"]["status"] == "allowed"
+        assert receipt["evidence"]["approval"]["decision"] == "allow_once"
+    assert started["links"]["parent_audit_id"] == "audit_policy_message"
+    assert terminal["links"]["parent_audit_id"] == started["audit_id"]
+
+
+def test_late_message_approval_records_message_linked_not_invoked_receipt() -> None:
+    guard = _ReceiptMessageSendApprovingGuardAdapter(wait_delay_seconds=0.03)
+    runtime = _Runtime()
+
+    result = GuardedToolGateway(
+        guard_adapter=guard,
+        tool_runtime=runtime,
+        approval_timeout=0.01,
+        approval_poll_interval=0.001,
+    ).invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_timeout_receipt",
+        call_id="call_message_timeout_receipt",
+    )
+
+    assert result.blocked is True
+    assert runtime.calls == []
+    assert len(guard.receipts) == 1
+    terminal = guard.receipts[0]
+    assert terminal["record_type"] == "runtime_outcome"
+    assert terminal["links"] == {
+        "event_id": "evt_call_message_timeout_receipt",
+        "decision_id": "dec_ask_message",
+        "policy_audit_id": "audit_policy_message",
+        "action_id": "act_evt_call_message_timeout_receipt",
+        "approval_id": "app_message",
+    }
+    assert terminal["evidence"]["execution"]["status"] == "not_invoked"
+    assert terminal["evidence"]["approval"]["status"] == "expired"
+
+
+def test_allowed_message_gate_keeps_primary_tool_receipt_context() -> None:
+    guard = _ReceiptMessageSendAllowingGuardAdapter()
+
+    result = GuardedToolGateway(
+        guard_adapter=guard, tool_runtime=_Runtime()
+    ).invoke_tool(
+        tool_name="send_email",
+        arguments={"to": "owner@example.test", "body": "status update"},
+        security={"user_task": "Send my status update."},
+        trace_id="trace_message_allow_receipt",
+        call_id="call_message_allow_receipt",
+    )
+
+    assert result.executed is True
+    for receipt in guard.receipts:
+        assert receipt["links"]["action_id"] == "call_message_allow_receipt"
+        assert receipt["links"]["policy_audit_id"] == "audit_policy_tool"
+        assert "approval_id" not in receipt["links"]
+
+
 class _ApprovingGuardAdapter:
     def __init__(
         self,
         *,
         main_decision: Decision = "ask",
         approval_sequence: list[dict[str, Any]] | None = None,
+        wait_delay_seconds: float = 0.0,
     ) -> None:
         self.main_decision: Decision = main_decision
         self.approval_sequence = list(
-            approval_sequence
-            or [{"status": "resolved", "decision": "allow_once"}]
+            approval_sequence or [{"status": "resolved", "decision": "allow_once"}]
         )
         self.waited_for: str | None = None
         self.wait_calls: list[str] = []
+        self.wait_delay_seconds = wait_delay_seconds
 
     def evaluate_before_tool(
         self,
@@ -168,7 +292,12 @@ class _ApprovingGuardAdapter:
     ) -> tuple[ToolCallEvent, PolicyDecision]:
         event = ToolCallEvent(
             trace_id=trace_id,
-            tool=ToolDescriptor(name=tool_name, category="memory", kind="memory_write", call_id=call_id or "call"),
+            tool=ToolDescriptor(
+                name=tool_name,
+                category="memory",
+                kind="memory_write",
+                call_id=call_id or "call",
+            ),
             arguments=arguments,
         )
         decision = PolicyDecision(
@@ -187,7 +316,9 @@ class _ApprovingGuardAdapter:
         )
         return event, decision
 
-    def build_audit_event(self, event: ToolCallEvent, decision: PolicyDecision) -> AuditEvent:
+    def build_audit_event(
+        self, event: ToolCallEvent, decision: PolicyDecision
+    ) -> AuditEvent:
         return AuditEvent(
             trace_id=event.trace_id,
             summary="review memory write",
@@ -204,6 +335,8 @@ class _ApprovingGuardAdapter:
     def wait_for_approval(self, approval_id: str) -> dict[str, Any]:
         self.waited_for = approval_id
         self.wait_calls.append(approval_id)
+        if self.wait_delay_seconds:
+            time.sleep(self.wait_delay_seconds)
         if len(self.approval_sequence) > 1:
             return self.approval_sequence.pop(0)
         return self.approval_sequence[0]
@@ -217,16 +350,20 @@ class _MessageSendApprovingGuardAdapter(_ApprovingGuardAdapter):
         security: dict[str, Any],
         trace_id: str,
         call_id: str | None = None,
-    ) -> tuple[ToolCallEvent, PolicyDecision]:
-        event = ToolCallEvent(
+    ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
+        event = RuntimeGuardEvent(
+            event_id=f"evt_{call_id or 'message'}",
+            event_type="message_send_proposed",
             trace_id=trace_id,
-            tool=ToolDescriptor(
-                name="send_email",
-                category="message",
-                kind="send_email",
-                call_id=call_id or "call",
-            ),
-            arguments=arguments,
+            security_context=SecurityContext(agent_id="langgraph"),
+            payload={
+                "channel": "email",
+                "recipient": arguments.get("to"),
+                "content_preview": arguments.get("body", ""),
+                "contains_sensitive_data": False,
+                "sanitized": False,
+                "derived_resources": [],
+            },
         )
         decision = PolicyDecision(
             decision_id="dec_ask_message",
@@ -241,6 +378,81 @@ class _MessageSendApprovingGuardAdapter(_ApprovingGuardAdapter):
         return event, decision
 
 
+class _ReceiptMessageSendApprovingGuardAdapter(_MessageSendApprovingGuardAdapter):
+    def __init__(self, *, wait_delay_seconds: float = 0.0) -> None:
+        super().__init__(
+            main_decision="allow",
+            approval_sequence=[{"status": "resolved", "decision": "allow_once"}],
+            wait_delay_seconds=wait_delay_seconds,
+        )
+        self.config = SimpleNamespace(
+            core_api_mode="guard-api-v0.3",
+            defense_enabled=True,
+            competition_mode=False,
+        )
+        self.receipts: list[dict[str, Any]] = []
+
+    def evaluate_before_tool(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[ToolCallEvent, PolicyDecision]:
+        event, decision = super().evaluate_before_tool(
+            tool_name=tool_name,
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+        )
+        decision.policy_audit_id = "audit_policy_tool"
+        return event, decision
+
+    def evaluate_message_send(
+        self,
+        *,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
+        event, decision = super().evaluate_message_send(
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+        )
+        decision.policy_audit_id = "audit_policy_message"
+        return event, decision
+
+    def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
+        self.receipts.append(audit_event.model_dump(mode="json"))
+        return {"ok": True, "audit_id": audit_event.audit_id}
+
+
+class _ReceiptMessageSendAllowingGuardAdapter(_ReceiptMessageSendApprovingGuardAdapter):
+    def evaluate_message_send(
+        self,
+        *,
+        arguments: dict[str, Any],
+        security: dict[str, Any],
+        trace_id: str,
+        call_id: str | None = None,
+    ) -> tuple[RuntimeGuardEvent, PolicyDecision]:
+        event, decision = super().evaluate_message_send(
+            arguments=arguments,
+            security=security,
+            trace_id=trace_id,
+            call_id=call_id,
+        )
+        decision.decision = "allow"
+        decision.approval = None
+        return event, decision
+
+
 class _Runtime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
@@ -252,5 +464,7 @@ class _Runtime:
         self.calls.append((tool_name, dict(arguments)))
         return {"ok": True}
 
-    def diff(self, before: list[tuple[str, dict[str, Any]]] | None) -> list[dict[str, Any]]:
+    def diff(
+        self, before: list[tuple[str, dict[str, Any]]] | None
+    ) -> list[dict[str, Any]]:
         return [{"type": "call", "count": len(self.calls) - len(before or [])}]

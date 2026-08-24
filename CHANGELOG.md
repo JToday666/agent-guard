@@ -16,6 +16,11 @@
 - 历史竞赛证据移至 `docs/archive/competition-2026/`，并明确其不可复现依赖和证据边界。
 - 当前未发布源码的 OpenClaw hook 契约统一为 24；公开 Beta 1 制品仍是历史 22-hook 构建，两者不混称。
 
+### Fixed
+
+- LangGraph message approval 在本地等待截止时间后保持 fail closed；获批 C1 message 的 started/terminal receipt 关联其真实 message action 与 policy audit。
+- 显式启用 evidence content preview 时，服务端同时脱敏 AgentGuard runtime credential 与 execution lease token；默认关闭行为不变。
+
 ### Known limitations
 
 - Productization Alpha 状态仍为 `in progress`；最终集成 SHA 和门禁结果尚待填写。

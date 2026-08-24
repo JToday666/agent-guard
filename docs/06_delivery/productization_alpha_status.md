@@ -48,7 +48,7 @@
 
 本分支定义了以下自动 job：clean-checkout 最小示例验收、静态检查、unit/contract/integration/e2e Python 测试、PostgreSQL 16 migration/tests、Node 检查、Dashboard build、Playwright Chromium E2E。`live` 仅在手动 workflow dispatch 明确 opt-in 时运行。
 
-Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,521 项：unit 1,182、contract 380、integration 778、postgres 156、e2e 24、live 1。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当前也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
+Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,530 项：unit 1,187、contract 380、integration 782、postgres 156、e2e 24、live 1。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当前也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
 
 Dashboard 的 API-mode Playwright 当前会拦截 `/api/v1/**`，不是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 会在隔离临时目录中真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销；它仍不等于浏览器 UI 通过真实 API 完成数据交互。
 
@@ -58,7 +58,8 @@ Dashboard 的 API-mode Playwright 当前会拦截 `/api/v1/**`，不是 Dashboar
 
 本分支整理期间已在当前工作区完成以下验证：
 
-- 完整 unit 层为 1,166 passed、16 skipped；完整 contract 层为 380 passed，其中 Markdown 链接契约 5 项、exact-wheel 选择契约 2 项。
+- 完整 unit 层为 1,171 passed、16 skipped；完整 contract 层为 380 passed，其中 Markdown 链接契约 5 项、exact-wheel 选择契约 2 项。
+- 审批截止时间、C1 message receipt/action 关联和 AgentGuard runtime/lease token 脱敏的定向回归为 87 passed；受影响的 legacy benchmark gateway 定向回归另为 41 passed、3 skipped。
 - Productization Alpha 默认 Python 门禁范围内的 Ruff 与 Pyright 通过；Python 发布包的 Black 检查逐文件通过；`git diff --check` 与 roadmap contract 检查通过。该范围明确不含上文披露的 legacy benchmark tree 及其现存 Ruff 诊断。
 - Dashboard format/lint/typecheck/unit（40 个测试文件）和 production build 通过；OpenClaw 插件 18 个测试文件通过，本地 shim/installer/runtime 相关测试 68 passed。
 - Markdown 相对目标检查对全部 137 份 tracked/unignored 文档通过。

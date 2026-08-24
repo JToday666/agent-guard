@@ -360,7 +360,12 @@ class GuardedToolGateway:
             else (event, decision)
         )
 
-        message_gate, message_release, message_receipt_context = _evaluate_message_send_gate(
+        (
+            message_gate,
+            message_release,
+            message_receipt_context,
+            message_approval_resolution,
+        ) = _evaluate_message_send_gate(
             self.guard_adapter,
             tool_name=tool_name,
             arguments=arguments,
@@ -397,7 +402,11 @@ class GuardedToolGateway:
             approval_decision = "allow_once"
             latency_ms = message_release.approval_wait_latency_ms
             assert message_receipt_context is not None
+        if message_receipt_context is not None:
+            assert message_approval_resolution is not None
             receipt_event, receipt_decision = message_receipt_context
+            approval_resolution = message_approval_resolution
+            approval_decision = _approval_decision(approval_resolution)
 
         lease_id = strong_release.lease.lease_id if strong_release is not None else None
         consumption_id = (
@@ -550,9 +559,7 @@ class GuardedToolGateway:
                     receipt_event,
                     receipt_decision,
                     execution_status="executed",
-                    approval_resolution=(
-                        approval_resolution if decision.decision == "ask" else None
-                    ),
+                    approval_resolution=approval_resolution,
                     invoked_at=invoked_at,
                     side_effects=side_effects,
                     side_effects_measured=True,
@@ -575,9 +582,7 @@ class GuardedToolGateway:
                 receipt_event,
                 receipt_decision,
                 execution_status="failed",
-                approval_resolution=(
-                    approval_resolution if decision.decision == "ask" else None
-                ),
+                approval_resolution=approval_resolution,
                 invoked_at=invoked_at,
                 error=str(exc),
                 side_effects=side_effects,

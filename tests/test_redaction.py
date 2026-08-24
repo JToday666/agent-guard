@@ -62,8 +62,12 @@ def test_redact_structure_replaces_sensitive_values() -> None:
 
 
 def test_scrub_text_cleans_credential_content() -> None:
+    runtime_token = "agt_tok_" + "a" * 32
+    lease_token = "lease-v1:" + "b" * 64
     text = (
         "use sk-abcdefghijklmnop for openai; "
+        f"runtime credential {runtime_token}; "
+        f"execution lease {lease_token}; "
         "password: hunter2; "
         "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.payload.signature; "
         "export DB_PASSWORD=${DB_PASSWORD}; "
@@ -74,10 +78,24 @@ def test_scrub_text_cleans_credential_content() -> None:
     scrubbed = scrub_text(text)
 
     assert "sk-abcdefghijklmnop" not in scrubbed
+    assert runtime_token not in scrubbed
+    assert lease_token not in scrubbed
     assert "hunter2" not in scrubbed
     assert "eyJhbGciOiJSUzI1NiJ9" not in scrubbed
     assert "MIIE" not in scrubbed
     assert REDACTED in scrubbed
+
+
+def test_scrub_text_preserves_agentguard_token_near_misses() -> None:
+    values = (
+        "runtime reference agt_tok_" + "a" * 31,
+        "runtime reference AGT_TOK_" + "A" * 32,
+        "lease reference lease-v1:" + "b" * 63,
+        "lease reference LEASE-V1:" + "B" * 64,
+    )
+
+    for value in values:
+        assert scrub_text(value) == value
 
 
 def test_truncate_text_boundary() -> None:
