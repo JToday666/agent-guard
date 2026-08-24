@@ -1,0 +1,11 @@
+{
+  "id": "EV-PA01-FC184075B932",
+  "kind": "rollback",
+  "metadata": {},
+  "node_id": "PA01",
+  "recorded_at": "2026-08-24T09:16:27Z",
+  "ref": "playwright:s1-live:flag-off",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "Default-off and flag-off rollback stayed read-only; deny and timeout paths produced not-invoked evidence with zero tool invocation"
+}
