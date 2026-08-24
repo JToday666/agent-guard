@@ -43,7 +43,7 @@
 - `scripts/` 已完成职责分类和兼容入口说明，但物理迁移与超大模块拆分尚未完成；继续拆分时必须保持公共 import、CLI 和 `/v1` 行为不变。
 - legacy benchmark 的 standalone LangGraph subprocess 已移除开发者机器默认路径，必须显式提供 agent command/path；但对应 849 项旧测试仍未进入门禁，它也不属于产品示例或 clean-clone acceptance。测试和依赖完成重整前不得把该 adapter 称为 Alpha 支持入口。
 - 四份既有 demo 设计/运行文档因 roadmap 与外部链接兼容暂留 `docs/06_delivery/`，已统一标记 historical/unsupported 并从产品入口降级；物理迁入 archive 留待保留引用关系的独立迁移。
-- CODEOWNERS 已进入仓库；截至 2026-08-24，通过 GitHub API 核验到 `dev` **未启用分支保护**，因此 required checks 尚不是平台强制规则。GitHub Private Vulnerability Reporting 状态仍未核验；二者都必须在外部试用前由维护者处理并记录。
+- CODEOWNERS 已进入仓库；截至 2026-08-24，通过 GitHub API 核验到 `dev` **未启用分支保护**，Private Vulnerability Reporting、secret scanning、push protection 与 Dependabot security updates 也均为 disabled。因此 required checks 尚不是平台强制规则，仓库侧秘密与漏洞入口也未形成闭环；这些平台治理项必须在外部试用前由维护者处理并记录。
 
 ## CI 状态口径
 
