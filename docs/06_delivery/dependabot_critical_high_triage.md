@@ -60,4 +60,11 @@ Node 安全版本通过根 `pnpm-workspace.yaml` 的同主版本 override 固化
 
 候选分支的本地 registry 审计结果为：workspace `pnpm audit --audit-level high` 的 critical/high 均为 0，仍有 moderate 6、low 1；11 份字节一致 fixture 锁中的代表目录执行 `npm audit --omit=dev --audit-level=high` 后 critical/high 均为 0，仍有 moderate 2、low 4。Python `uv pip check` 报告全部已安装包兼容。残余 medium/low 属于下一批分诊输入，不因本批通过而被忽略或宣称清零。
 
-在第 4 项完成前，不解除“禁止开始外部技术试用”的限制。
+## 5. 合入与 GitHub 回读
+
+- [PR #192](https://github.com/JToday666/agent-guard/pull/192) 的 11 项 required checks 全部成功，候选以 squash commit [`2fdbe203`](https://github.com/JToday666/agent-guard/commit/2fdbe20396b3dda4d3990a89688106e7720ddc6b) 合入 `dev`；`main` 未更新，也没有发布包、镜像、标签或 release。
+- [PR CI run 32758020031](https://github.com/JToday666/agent-guard/actions/runs/32758020031)、[source build run 32758019835](https://github.com/JToday666/agent-guard/actions/runs/32758019835) 与精确针对合入提交运行的 [post-merge dev CI run 32759050061](https://github.com/JToday666/agent-guard/actions/runs/32759050061) 均成功；手动 OpenClaw live gate 按阶段契约为 skipped，不计入 required checks。
+- [Dependency Graph run 32759055721](https://github.com/JToday666/agent-guard/actions/runs/32759055721) 成功后，GitHub REST 回读确认本批 1 条 critical 与 63 条 high 全部为 `fixed`，`dismissed_at` 均为空；修复时间范围为 `2026-08-24T17:52:41Z` 至 `2026-08-24T17:52:57Z`。
+- 重扫后的开放告警为 critical 0、high 0、medium 28、low 67。medium/low 仍须进入后续分诊，不能把本批结论扩大成“依赖零风险”。
+
+第 4 项已经达成，critical/high 依赖告警不再构成单独阻塞项；这不会自动授权外部试用或生产发布，仍须遵守 Productization Alpha 的其他限制和单独 go/no-go 决策。
