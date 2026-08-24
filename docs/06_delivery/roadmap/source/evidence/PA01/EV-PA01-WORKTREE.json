@@ -5,11 +5,16 @@
   "kind": "worktree",
   "ref": "codex/productization-alpha",
   "status": "pending",
-  "summary": "The Productization Alpha integration branch is under Draft PR review; hosted exit gates and final dev integration remain pending.",
-  "recorded_at": null,
+  "summary": "The Productization Alpha candidate passed all hosted automatic exit gates; final dev integration and the post-merge status proof remain pending.",
+  "recorded_at": "2026-08-24T07:14:40Z",
   "metadata": {
     "base_sha": "5986538050fcc1ee3af42b75060a043435b7d72c",
     "worktree": "<repo>",
-    "draft_pr": 189
+    "draft_pr": 189,
+    "validated_sha": "ee2800277c79fd841b2341a2fdfe2dfd015abeef",
+    "ci_run": 32699929514,
+    "release_check_run": 32699929536,
+    "container_image_digest": "sha256:e0c704993f4594816de70267251af9b7b79dd907fe79b23bd2bd1bcb746d35b3",
+    "spdx_sbom_sha256": "719870ddf6360a3056c58b880bc2c755f09411ccda77e0857077fcd8b8a25d7d"
   }
 }
