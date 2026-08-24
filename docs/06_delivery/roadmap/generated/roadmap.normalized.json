@@ -11270,6 +11270,17 @@
           "summary": "Productization Alpha is integrated at dev a9702bc; ownership moved to the closeout branch while PA01 stays active solely to enforce the feature freeze"
         },
         {
+          "id": "EV-PA01-768E9449D3FC",
+          "kind": "review",
+          "metadata": {},
+          "node_id": "PA01",
+          "recorded_at": "2026-08-24T17:05:31Z",
+          "ref": "docs/06_delivery/dependabot_critical_high_triage.md",
+          "schema_version": "1.0.0",
+          "status": "verified",
+          "summary": "64 critical/high Dependabot alerts statically triaged with every alert mapped to a supported-boundary verdict and a security-version remediation"
+        },
+        {
           "id": "EV-PA01-C907547056E1",
           "kind": "review",
           "metadata": {
@@ -11328,6 +11339,7 @@
         "evidence/PA01/EV-PA01-C907547056E1.json",
         "evidence/PA01/EV-PA01-F3D35F371C70.json",
         "evidence/PA01/EV-PA01-2636E7E5C8BA.json",
+        "evidence/PA01/EV-PA01-768E9449D3FC.json",
         "evidence/PA01/EV-PA01-WORKTREE.json"
       ],
       "exact_title": "Productization Alpha — Cross-cutting stabilization",
@@ -11366,7 +11378,7 @@
           ]
         }
       ],
-      "revision": 2,
+      "revision": 3,
       "roles": [
         "task"
       ],
@@ -11381,12 +11393,12 @@
       "topological_rank": 0,
       "unmet_dependencies": [],
       "work": {
-        "base_sha": "f0ae6226b1f30db3f6274396f6a1560ce2aaf379",
-        "branch": "codex/productization-alpha-platform-hardening",
+        "base_sha": "7f58e531c63cb7a3c6f372f4255bb6d80e06e1cf",
+        "branch": "codex/productization-alpha-dependency-security",
         "owner": "codex-root",
-        "started_at": "2026-08-24T14:05:21Z",
+        "started_at": "2026-08-24T17:01:26Z",
         "substate": "active",
-        "worktree_slug": "productization-alpha-platform-hardening"
+        "worktree_slug": "productization-alpha-dependency-security"
       }
     },
     {
@@ -28741,5 +28753,5 @@
     }
   ],
   "schema_version": "1.0.0",
-  "source_digest": "e15833441d4c8036bbf0d24828a191238e9293097f28eed3c97269ee4159b3d8"
+  "source_digest": "413e6e78eef6d71413107036d5770133dfeca5691965ba56ffa5cc24f4edd6f5"
 }

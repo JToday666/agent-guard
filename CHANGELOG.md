@@ -20,6 +20,7 @@
 
 - LangGraph message approval 在本地等待截止时间后保持 fail closed；获批 C1 message 的 started/terminal receipt 关联其真实 message action 与 policy audit。
 - 显式启用 evidence content preview 时，服务端同时脱敏 AgentGuard runtime credential 与 execution lease token；默认关闭行为不变。
+- 提升 Guard API、OpenClaw/MCP、Dashboard 构建链和 legacy benchmark fixture 的 critical/high 传递依赖安全下限，并增加锁文件回退契约。
 
 ### Known limitations
 

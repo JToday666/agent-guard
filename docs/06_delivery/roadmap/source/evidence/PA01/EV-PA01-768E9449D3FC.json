@@ -1,0 +1,11 @@
+{
+  "id": "EV-PA01-768E9449D3FC",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "PA01",
+  "recorded_at": "2026-08-24T17:05:31Z",
+  "ref": "docs/06_delivery/dependabot_critical_high_triage.md",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "64 critical/high Dependabot alerts statically triaged with every alert mapped to a supported-boundary verdict and a security-version remediation"
+}

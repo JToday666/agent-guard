@@ -16,6 +16,7 @@
     "evidence/PA01/EV-PA01-C907547056E1.json",
     "evidence/PA01/EV-PA01-F3D35F371C70.json",
     "evidence/PA01/EV-PA01-2636E7E5C8BA.json",
+    "evidence/PA01/EV-PA01-768E9449D3FC.json",
     "evidence/PA01/EV-PA01-WORKTREE.json"
   ],
   "exact_title": "Productization Alpha — Cross-cutting stabilization",
@@ -31,7 +32,7 @@
     "GitHub platform governance is enabled: dev requires 11 source-bound checks, and repository security reporting, secret scanning, push protection, and Dependabot security updates are active."
   ],
   "optional": false,
-  "revision": 2,
+  "revision": 3,
   "roles": [
     "task"
   ],
@@ -44,11 +45,11 @@
     }
   ],
   "work": {
-    "base_sha": "f0ae6226b1f30db3f6274396f6a1560ce2aaf379",
-    "branch": "codex/productization-alpha-platform-hardening",
+    "base_sha": "7f58e531c63cb7a3c6f372f4255bb6d80e06e1cf",
+    "branch": "codex/productization-alpha-dependency-security",
     "owner": "codex-root",
-    "started_at": "2026-08-24T14:05:21Z",
+    "started_at": "2026-08-24T17:01:26Z",
     "substate": "active",
-    "worktree_slug": "productization-alpha-platform-hardening"
+    "worktree_slug": "productization-alpha-dependency-security"
   }
 }
