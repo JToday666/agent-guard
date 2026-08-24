@@ -89,9 +89,7 @@ def load_frozen_competition_activation(
         return None
     path = Path(path_value)
     if not path.is_absolute():
-        raise GuardApiConfigurationError(
-            "competition activation path must be absolute"
-        )
+        raise GuardApiConfigurationError("competition activation path must be absolute")
     try:
         before = path.lstat()
     except OSError as exc:

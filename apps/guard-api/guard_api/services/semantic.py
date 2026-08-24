@@ -137,9 +137,7 @@ def _digest_projection(payload: dict[str, Any]) -> dict[str, Any]:
     ``created_at`` / ``expires_at``）天然不在白名单内。
     """
 
-    return {
-        name: payload[name] for name in sorted(SemanticJudgment.digest_fields())
-    }
+    return {name: payload[name] for name in sorted(SemanticJudgment.digest_fields())}
 
 
 def _judgment_identity(
@@ -344,16 +342,12 @@ class HttpSemanticJudge:
                 {"role": "system", "content": _SYSTEM_PROMPT_V1},
                 {
                     "role": "user",
-                    "content": json.dumps(
-                        summary, ensure_ascii=False, sort_keys=True
-                    ),
+                    "content": json.dumps(summary, ensure_ascii=False, sort_keys=True),
                 },
             ],
         }
 
-    def _post_chat_completions(
-        self, payload: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    def _post_chat_completions(self, payload: dict[str, Any]) -> dict[str, Any] | None:
         """POST ``{base_url}/chat/completions``；非 2xx/异常 → None。"""
 
         headers = {

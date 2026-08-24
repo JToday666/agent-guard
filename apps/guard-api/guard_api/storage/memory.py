@@ -373,9 +373,7 @@ class MemoryControlPlaneStore:
                 raise
 
     @contextmanager
-    def runtime_outcome_transaction(
-        self, approval_id: str | None
-    ) -> Iterator[None]:
+    def runtime_outcome_transaction(self, approval_id: str | None) -> Iterator[None]:
         """Serialize receipt first-write authority with lease consumption.
 
         The lock order matches ``evaluation_transaction``.  The approval lock
@@ -445,10 +443,11 @@ class MemoryControlPlaneStore:
                     raise CtProvenanceBatchConflictError(edge.edge_id)
                 identity = (edge.trace_id, flow_id)
                 existing_flow_edge = known_flows.get(identity)
-                if existing_flow_edge is not None and existing_flow_edge != edge.edge_id:
-                    raise CtProvenanceBatchConflictError(
-                        f"{edge.trace_id}:{flow_id}"
-                    )
+                if (
+                    existing_flow_edge is not None
+                    and existing_flow_edge != edge.edge_id
+                ):
+                    raise CtProvenanceBatchConflictError(f"{edge.trace_id}:{flow_id}")
                 source = next_nodes.get(edge.source_node_id)
                 target = next_nodes.get(edge.target_node_id)
                 if (
@@ -957,9 +956,7 @@ class MemoryControlPlaneStore:
                 binding.action_id,
             )
             consumption = self.grant_consumption_records.get(consumption_id)
-            lease = self.execution_lease_records.get(
-                _derive_lease_id(consumption_id)
-            )
+            lease = self.execution_lease_records.get(_derive_lease_id(consumption_id))
             exact_pair_exists = bool(
                 consumption is not None
                 and lease is not None

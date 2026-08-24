@@ -80,11 +80,7 @@ DIVERGENCE_GRID: Mapping[tuple[Decision, FastDisposition], str | None] = {
 
 #: 封闭词表全集（九宫格非 parity 值 + 三个降级类目），供校验与离线聚合。
 DIVERGENCE_VOCABULARY: frozenset[str] = frozenset(
-    {
-        category
-        for category in DIVERGENCE_GRID.values()
-        if category is not None
-    }
+    {category for category in DIVERGENCE_GRID.values() if category is not None}
     | {DEGRADED_NO_SNAPSHOT, DEGRADED_COMPONENT_FAILURE, DEGRADED_STALE_JUDGMENT}
 )
 

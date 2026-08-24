@@ -394,9 +394,7 @@ class EvaluationService:
         if (
             context_requested
             and context_plan is None
-            and not (
-                self.v21_pipeline is not None and self.v21_pipeline.enabled
-            )
+            and not (self.v21_pipeline is not None and self.v21_pipeline.enabled)
             and self.context_builder_service is not None
         ):
             context_result = (
@@ -675,9 +673,7 @@ class EvaluationService:
                         selected_decision=decision.decision,
                         revalidation_stale_reason_codes=stale_codes,
                     )
-                    v21_evidence = decision_evidence_v21_envelope(
-                        selected_evidence
-                    )
+                    v21_evidence = decision_evidence_v21_envelope(selected_evidence)
                 phase_c_plan = self.v21_pipeline.prepare_phase_c(outcome)
                 if phase_c_plan is not None:
                     state_delta_evidence = phase_c_plan.envelope
@@ -714,15 +710,11 @@ class EvaluationService:
                     # typed bound 证据通道（仿 ct_transient_facts 先例），
                     # shadow 初版只落确定性引用。
                     semantic_metadata = {
-                        "v21_semantic_judgment_id": (
-                            semantic_judgment.judgment_id
-                        ),
+                        "v21_semantic_judgment_id": (semantic_judgment.judgment_id),
                         "v21_semantic_digest": semantic_judgment.semantic_digest,
                         "v21_semantic_verdict": semantic_judgment.verdict,
                         "v21_semantic_degraded": semantic_judgment.degraded,
-                        "v21_semantic_binding_valid": (
-                            outcome.semantic_binding_valid
-                        ),
+                        "v21_semantic_binding_valid": (outcome.semantic_binding_valid),
                     }
         if (
             self.competition_activation is not None
@@ -824,18 +816,14 @@ class EvaluationService:
             )
         raw_mode = self.v21_pipeline.mode
         if raw_mode not in {"shadow", "limited_enable", "active"}:
-            raise V21OfficialEvaluationUnavailableError(
-                "V21_OFFICIAL_MODE_INVALID"
-            )
+            raise V21OfficialEvaluationUnavailableError("V21_OFFICIAL_MODE_INVALID")
         mode = cast(
             Literal["shadow", "limited_enable", "active"],
             raw_mode,
         )
         manifest = activation.manifest
         auth = materials.auth_context
-        expected_binding = (
-            f"binding:{auth.principal_id}" if auth is not None else None
-        )
+        expected_binding = f"binding:{auth.principal_id}" if auth is not None else None
         scope = materials.snapshot.scope if materials.snapshot is not None else None
         scope_identity_valid = bool(
             scope is None
@@ -929,9 +917,7 @@ class EvaluationService:
                 eligibility=eligibility,
                 snapshot_id=snapshot_id,
                 state_version=(
-                    materials.state_version
-                    if materials.snapshot is not None
-                    else 0
+                    materials.state_version if materials.snapshot is not None else 0
                 ),
             )
         except V21AuthoritySelectionError as exc:
@@ -1114,8 +1100,7 @@ class EvaluationService:
 
         approval_release = (
             decision_authority.approval_release
-            if decision_authority is not None
-            and decision_authority.source == "v21"
+            if decision_authority is not None and decision_authority.source == "v21"
             else None
         )
         if approval_release == "forbidden":

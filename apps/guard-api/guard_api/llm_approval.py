@@ -137,9 +137,7 @@ class HttpLlmApprovalReviewer:
             self._post_chat_completions(
                 payload, timeout_seconds=timeout_seconds, retries=0
             )
-            logger.info(
-                "llm approval endpoint warmup completed (model=%s)", self.model
-            )
+            logger.info("llm approval endpoint warmup completed (model=%s)", self.model)
         except Exception as exc:  # noqa: BLE001 - best-effort warmup
             logger.warning("llm approval endpoint warmup failed: %s", exc)
 
@@ -169,7 +167,9 @@ class HttpLlmApprovalReviewer:
             "Content-Type": "application/json",
         }
         url = f"{self.base_url}/chat/completions"
-        timeout = timeout_seconds if timeout_seconds is not None else self.timeout_seconds
+        timeout = (
+            timeout_seconds if timeout_seconds is not None else self.timeout_seconds
+        )
         attempts = retries + 1
         last_error: Exception | None = None
         for attempt in range(attempts):

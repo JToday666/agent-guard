@@ -35,9 +35,7 @@ __all__ = [
 #: typed upsert handler 纯函数签名：消费 delta 中单个容器的 items，
 #: 返回新状态（不修改输入）。handler 必须是确定性纯函数（core
 #: stateless 纪律）。
-TypedUpsertHandler = Callable[
-    [OnlineSecurityState, list[Any]], OnlineSecurityState
-]
+TypedUpsertHandler = Callable[[OnlineSecurityState, list[Any]], OnlineSecurityState]
 
 #: 实施分支所有权（Phase 1 三分支隔离纪律）。
 ImplementationBranch = Literal["provenance", "capability", "behavior"]

@@ -189,9 +189,7 @@ def build_decision_evidence_v21(
         dropped = len(values) - len(bounded)
         if dropped > 0:
             overflow_degradations.append(
-                _truncation_degradation(
-                    event_id=event_id, field=field, dropped=dropped
-                )
+                _truncation_degradation(event_id=event_id, field=field, dropped=dropped)
             )
         return bounded
 
@@ -236,8 +234,7 @@ def build_decision_evidence_v21(
         # 预留 overflow 截断登记 + 1 条合并截断降级的槽位。
         original_slots = MAX_DEGRADATION_IDS - len(overflow_ids) - 1
         kept_original = [
-            degradation.degradation_id
-            for degradation in assessment.degradations
+            degradation.degradation_id for degradation in assessment.degradations
         ][: max(original_slots, 0)]
         dropped = len(degradation_ids) - len(kept_original) - len(overflow_ids) - 1
         merged = _truncation_degradation(
@@ -279,9 +276,7 @@ def build_decision_evidence_v21(
         degradation_ids=degradation_ids,
         # V21-13 Stage 1 shadow：semantic 缺席时恒 None（逐字节不变）；
         # 在场时只登记确定性身份/摘要，不影响 final_decision。
-        semantic_judgment_id=(
-            None if semantic is None else semantic.judgment_id
-        ),
+        semantic_judgment_id=(None if semantic is None else semantic.judgment_id),
         semantic_digest=(None if semantic is None else semantic.semantic_digest),
         legacy_decision=legacy_decision,
         v21_fast_disposition=assessment.disposition,

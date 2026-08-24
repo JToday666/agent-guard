@@ -163,9 +163,7 @@ class GuardEngine:
             revoked_grant_ids=revoked_grant_ids,
             transient_facts=transient_facts,
             memory_not_required_actions=memory_not_required_actions,
-            source_dataflow_not_required_actions=(
-                source_dataflow_not_required_actions
-            ),
+            source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
         )
 
     def finalize(

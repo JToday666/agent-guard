@@ -190,9 +190,7 @@ class DecisionAuthority(BaseModel):
     matched_path_ids: list[str] = Field(default_factory=list)
     legacy_floor_applied: bool
     activation_ref_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    approval_release: Literal[
-        "not_applicable", "strong_binding_required", "forbidden"
-    ]
+    approval_release: Literal["not_applicable", "strong_binding_required", "forbidden"]
 
 
 class PolicyDecision(BaseModel):
@@ -369,55 +367,58 @@ class RuntimeOutcomeReceipt(AuditEvent):
                 enforcement.binding_check_status,
                 frozenset(enforcement.reason_codes),
             )
-            blocked_after_consume = self.metadata.outcome_kind == "pre_execution_deny" and (
-                post_consume_deny_shape
-                in {
-                    (
-                        "binding_failed",
-                        "failed",
-                        frozenset(
-                            {
-                                "rte-05:binding_mismatch",
-                                "rte-05:lease_consumed",
-                            }
+            blocked_after_consume = (
+                self.metadata.outcome_kind == "pre_execution_deny"
+                and (
+                    post_consume_deny_shape
+                    in {
+                        (
+                            "binding_failed",
+                            "failed",
+                            frozenset(
+                                {
+                                    "rte-05:binding_mismatch",
+                                    "rte-05:lease_consumed",
+                                }
+                            ),
                         ),
-                    ),
-                    (
-                        "timed_out",
-                        "passed",
-                        frozenset(
-                            {
-                                "rte-05:binding_exact",
-                                "rte-05:lease_consume_timed_out",
-                            }
+                        (
+                            "timed_out",
+                            "passed",
+                            frozenset(
+                                {
+                                    "rte-05:binding_exact",
+                                    "rte-05:lease_consume_timed_out",
+                                }
+                            ),
                         ),
-                    ),
-                    (
-                        "binding_failed",
-                        "passed",
-                        frozenset(
-                            {
-                                "rte-05:binding_exact",
-                                "rte-05:lease_expired",
-                            }
+                        (
+                            "binding_failed",
+                            "passed",
+                            frozenset(
+                                {
+                                    "rte-05:binding_exact",
+                                    "rte-05:lease_expired",
+                                }
+                            ),
                         ),
-                    ),
-                    (
-                        "binding_failed",
-                        "passed",
-                        frozenset(
-                            {
-                                "rte-05:binding_exact",
-                                "rte-05:lease_response_invalid",
-                            }
+                        (
+                            "binding_failed",
+                            "passed",
+                            frozenset(
+                                {
+                                    "rte-05:binding_exact",
+                                    "rte-05:lease_response_invalid",
+                                }
+                            ),
                         ),
-                    ),
-                    (
-                        "binding_failed",
-                        "failed",
-                        frozenset({"rte-05:multiple_binding_conflict"}),
-                    ),
-                }
+                        (
+                            "binding_failed",
+                            "failed",
+                            frozenset({"rte-05:multiple_binding_conflict"}),
+                        ),
+                    }
+                )
             )
             if consumed and (
                 not has_execution_lease

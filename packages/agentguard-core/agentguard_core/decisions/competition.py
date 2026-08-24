@@ -54,9 +54,7 @@ ACTIVATION_SIGNATURE_DOMAIN = "agentguard/competition-langgraph-v2/activation/v1
 V21Mode = Literal["off", "shadow", "limited_enable", "active"]
 DecisionSource = Literal["current", "v21"]
 SelectionBasis = Literal["current", "path_allowlist", "profile_all"]
-ApprovalRelease = Literal[
-    "not_applicable", "strong_binding_required", "forbidden"
-]
+ApprovalRelease = Literal["not_applicable", "strong_binding_required", "forbidden"]
 EnabledV21PathId = Literal[
     "credential_unauthorized_external_egress",
     "capability_scope_mismatch_high_impact",
@@ -168,9 +166,7 @@ class DecisionAuthority(BaseModel):
                 "profile_all" if self.mode == "active" else "path_allowlist"
             )
             if self.selection_basis != expected_basis:
-                raise ValueError(
-                    f"{self.mode} V2 authority requires {expected_basis}"
-                )
+                raise ValueError(f"{self.mode} V2 authority requires {expected_basis}")
         return self
 
 
@@ -225,7 +221,9 @@ class DecisionAuthorityEvidenceV1(BaseModel):
                 raise ValueError("raw_v21_decision_digest does not match decision")
         if self.decision_authority.source == "current":
             if self.selected_decision != self.current_decision:
-                raise ValueError("current authority must select current_decision exactly")
+                raise ValueError(
+                    "current authority must select current_decision exactly"
+                )
         elif self.raw_v21_decision is None:
             raise ValueError("V2 authority requires raw_v21_decision")
         if self.selected_decision.decision == "ask":
@@ -354,7 +352,9 @@ def _activation_signature(server_secret: bytes, activation_ref_digest: str) -> s
 
 def _require_strong_server_secret(server_secret: bytes) -> None:
     if not isinstance(server_secret, bytes) or len(server_secret) < 32:
-        raise ValueError("competition activation server_secret must be at least 32 bytes")
+        raise ValueError(
+            "competition activation server_secret must be at least 32 bytes"
+        )
 
 
 def match_limited_paths(
@@ -387,8 +387,7 @@ def match_limited_paths(
 
     reason_codes = _all_reason_codes(assessment)
     forged_issuer = any(
-        code == "v21-06:forged_issuer"
-        or code.startswith("v21-06:forged_issuer:")
+        code == "v21-06:forged_issuer" or code.startswith("v21-06:forged_issuer:")
         for code in reason_codes
     )
     allow_once_mismatch = any(

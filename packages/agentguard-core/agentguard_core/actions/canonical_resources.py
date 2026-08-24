@@ -104,7 +104,9 @@ def _display_summary(target: str) -> str:
     return redact_credential_text(target)[:_DISPLAY_SUMMARY_LIMIT]
 
 
-def _unresolved_other(inp: ResourceNormalizationInput, *, type_name: str) -> OtherResource:
+def _unresolved_other(
+    inp: ResourceNormalizationInput, *, type_name: str
+) -> OtherResource:
     """不可规范化输入的 fail-closed 收敛：unresolved 不能证明明确授权。
 
     ``canonical_id`` 只内嵌 target 的确定性摘要，绝不内嵌 event 级随机量
@@ -140,9 +142,7 @@ def _has_escape(path: str, platform: str) -> bool:
     """在折叠前检测 ``..`` 越界段：越过根目录或相对基目录即视为逃逸。"""
     segments = [seg for seg in re.split(r"[\\/]+", path) if seg not in ("", ".")]
     start_index = 0
-    if platform == "windows" and (
-        path.startswith("//") or path.startswith("\\\\")
-    ):
+    if platform == "windows" and (path.startswith("//") or path.startswith("\\\\")):
         # UNC 根 ``\\server\share`` 占 server/share 两段，两段都是根：
         # 深度回落到根之下（``..`` 越出 share）即逃逸。
         start_index = 2

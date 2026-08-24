@@ -73,9 +73,7 @@ class CoverageContext(BaseModel):
 
 #: 单域 coverage 判定纯函数签名：输入在线状态 + 完整上下文，输出
 #: 现有冻结的 ``DomainCoverage`` 结果模型（V21-01，不新造类型）。
-DomainCoverageFn = Callable[
-    [OnlineSecurityState, CoverageContext], DomainCoverage
-]
+DomainCoverageFn = Callable[[OnlineSecurityState, CoverageContext], DomainCoverage]
 
 # 六域判定纯函数导入（置于 CoverageContext 定义之后：域函数模块以
 # TYPE_CHECKING 方式反向引用 CoverageContext，该顺序打破导入环）。
@@ -93,15 +91,13 @@ from .projection.provenance_coverage import (  # noqa: E402
 #: 域 → 判定函数分发表：六域（task 域由 ``compute_coverage`` 总分派
 #: 内既有逻辑处理，不入本表）。Phase 2 集成 PR 一次性静态装配，
 #: 禁止任何运行时追加/替换。
-DOMAIN_COVERAGE_DISPATCH: Mapping[CoverageDomain, DomainCoverageFn] = (
-    MappingProxyType(
-        {
-            "source": source_coverage,
-            "capability": capability_coverage,
-            "behavior": behavior_coverage,
-            "dataflow": dataflow_coverage,
-            "memory": memory_coverage,
-            "runtime_outcome": runtime_outcome_coverage,
-        }
-    )
+DOMAIN_COVERAGE_DISPATCH: Mapping[CoverageDomain, DomainCoverageFn] = MappingProxyType(
+    {
+        "source": source_coverage,
+        "capability": capability_coverage,
+        "behavior": behavior_coverage,
+        "dataflow": dataflow_coverage,
+        "memory": memory_coverage,
+        "runtime_outcome": runtime_outcome_coverage,
+    }
 )

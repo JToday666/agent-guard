@@ -41,8 +41,7 @@ def validate_context_isolation_mode(value: object) -> ContextIsolationMode:
     if mode not in SUPPORTED_CONTEXT_ISOLATION_MODES:
         supported = ", ".join(SUPPORTED_CONTEXT_ISOLATION_MODES)
         raise ValueError(
-            "context_isolation_mode must be one of: "
-            f"{supported}; got {value!r}"
+            "context_isolation_mode must be one of: " f"{supported}; got {value!r}"
         )
     return mode  # type: ignore[return-value]
 

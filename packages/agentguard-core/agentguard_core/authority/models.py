@@ -91,9 +91,7 @@ def canonical_constraints_projection(
     return {
         "action_constraints": _canonical_constraint_list(action_constraints),
         "resource_constraints": _canonical_constraint_list(resource_constraints),
-        "destination_constraints": _canonical_constraint_list(
-            destination_constraints
-        ),
+        "destination_constraints": _canonical_constraint_list(destination_constraints),
     }
 
 
@@ -164,9 +162,7 @@ class EvaluationClock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     evaluated_at: str
-    source: Literal["guard_api_authoritative_clock"] = (
-        "guard_api_authoritative_clock"
-    )
+    source: Literal["guard_api_authoritative_clock"] = "guard_api_authoritative_clock"
     clock_version: str
 
 
@@ -258,9 +254,7 @@ def task_digest_projection(task_fact: TaskFact) -> str:
     return canonical_sha256(payload)
 
 
-def scope_digest_projection(
-    scope: SecurityStateScope, *, server_key: bytes
-) -> str:
+def scope_digest_projection(scope: SecurityStateScope, *, server_key: bytes) -> str:
     """``scope_digest``：``canonical_hmac_sha256(server_key, 白名单投影)``。
 
     输出 ``hmac-sha256:`` 前缀；规范化口径同样是受限 JCS，只投影

@@ -29,9 +29,9 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         auth_context = auth.verify_bearer(authorization, "task:write")
         if auth_context.runtime is not None:
             auth.verify_runtime_identity(auth_context, runtime=payload.runtime)
-        return task_ingress_service.create_task(
-            payload, auth_context
-        ).model_dump(mode="json")
+        return task_ingress_service.create_task(payload, auth_context).model_dump(
+            mode="json"
+        )
 
     @app.put("/v1/tasks/{task_id}")
     def revise_task(

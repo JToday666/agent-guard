@@ -249,8 +249,7 @@ def build_ct_facts_delta(
             or memory_fact.change_id != source_record_id
             or memory_fact.last_write_sequence is None
             or memory_fact.last_write_sequence.domain != "memory"
-            or memory_fact.last_write_sequence.producer_binding_id
-            != source_record_id
+            or memory_fact.last_write_sequence.producer_binding_id != source_record_id
             or memory_fact.last_write_sequence.value != expected_revision
         ):
             logger.warning(

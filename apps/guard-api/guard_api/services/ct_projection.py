@@ -266,9 +266,7 @@ def decode_ct_transient_facts(
     if envelope.get("_budget_dropped") is True:
         digest = envelope.get("_envelope_sha256")
         if isinstance(digest, str) and digest.startswith("sha256:"):
-            return CtEnvelopeDecodeResult(
-                kind="budget_dropped", envelope_digest=digest
-            )
+            return CtEnvelopeDecodeResult(kind="budget_dropped", envelope_digest=digest)
         return CtEnvelopeDecodeResult(
             kind="invalid", issues=("ct-envelope:dropped_digest_invalid",)
         )
@@ -280,7 +278,9 @@ def decode_ct_transient_facts(
     }:
         return CtEnvelopeDecodeResult(
             kind="unsupported",
-            schema_version=(schema_version if isinstance(schema_version, str) else None),
+            schema_version=(
+                schema_version if isinstance(schema_version, str) else None
+            ),
             issues=("ct-envelope:unsupported_version",),
         )
     payload = envelope.get("payload")
@@ -415,7 +415,9 @@ def decode_ct_transient_facts(
             fact_builder_version=fact_builder_version,
             payload=payload,
             bundle=bundle,
-            source_record_id=(source_record_id if isinstance(source_record_id, str) else None),
+            source_record_id=(
+                source_record_id if isinstance(source_record_id, str) else None
+            ),
             projection_eligible=projection_eligible,
             issues=tuple(issues),
         )
@@ -428,7 +430,9 @@ def decode_ct_transient_facts(
         source_record_id=source_record_id,
         source_revision=_OBSERVATION_SOURCE_REVISION,
         projection_eligible=(
-            True if schema_version == LEGACY_CT_FACTS_ENVELOPE_VERSION else projection_eligible
+            True
+            if schema_version == LEGACY_CT_FACTS_ENVELOPE_VERSION
+            else projection_eligible
         ),
     )
 
@@ -479,10 +483,7 @@ class CtProjectionService:
         # It may build ephemeral facts without enabling post-commit projection.
         self._fact_building_requested = bool(
             settings.ct_fact_projection_enabled
-            or (
-                settings.context_builder_enabled
-                and settings.v21_enabled()
-            )
+            or (settings.context_builder_enabled and settings.v21_enabled())
         )
         self._server_secret = self._load_server_secret(settings)
 
@@ -1116,9 +1117,7 @@ class CtProjectionService:
             return
         scope_digest, canonical_fact = binding
         try:
-            self._project_memory_lifecycle(
-                audit, change, scope_digest, canonical_fact
-            )
+            self._project_memory_lifecycle(audit, change, scope_digest, canonical_fact)
         except Exception:  # noqa: BLE001 - authority 已提交，投影失败只置脏。
             self._state_service.store_access.mark_security_state_dirty(
                 scope_digest, ["memory"]
@@ -1154,9 +1153,7 @@ class CtProjectionService:
             )
         ).canonical_id
         matches = [
-            fact
-            for fact in decoded.bundle.memory_facts
-            if fact.memory_id == canonical
+            fact for fact in decoded.bundle.memory_facts if fact.memory_id == canonical
         ]
         if len(matches) != 1:
             return None
@@ -1170,9 +1167,7 @@ class CtProjectionService:
         canonical_fact: MemoryFact,
     ) -> None:
         initial_status = (
-            "quarantined"
-            if _should_quarantine_memory_change(change)
-            else "proposed"
+            "quarantined" if _should_quarantine_memory_change(change) else "proposed"
         )
         statuses = [initial_status]
         if change.status in {"committed", "rejected"}:

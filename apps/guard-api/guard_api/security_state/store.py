@@ -98,9 +98,7 @@ class SecurityStateStoreAccess:
             scope_digest, expected_state_version, record
         )
 
-    def mark_security_state_dirty(
-        self, scope_digest: str, domains: list[str]
-    ) -> None:
+    def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         self._store.mark_security_state_dirty(scope_digest, domains)
 
     def record_projection(

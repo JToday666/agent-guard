@@ -296,9 +296,7 @@ def apply_delta(
                 reason_codes=["v21-04:idempotent_replay_noop"],
             )
         if existing is not None:
-            dirty = sorted(
-                set(state.dirty_domains) | set(delta.dirty_domain_updates)
-            )
+            dirty = sorted(set(state.dirty_domains) | set(delta.dirty_domain_updates))
             return ApplyResult(
                 outcome="conflict",
                 state=state.model_copy(update={"dirty_domains": dirty}),
@@ -395,9 +393,7 @@ def _max_sequence(existing: Any, incoming: Any) -> Any:
     return incoming
 
 
-def _merge_gaps(
-    current_gaps: list[Any], delta_watermark: Any
-) -> list[Any]:
+def _merge_gaps(current_gaps: list[Any], delta_watermark: Any) -> list[Any]:
     """合并缺口：移除 resolved_gaps，追加 new_gaps（按身份去重）。"""
     resolved = {
         (gap.domain, gap.producer_binding_id, gap.start_sequence, gap.end_sequence)
@@ -555,15 +551,12 @@ def rebuild_state(
                 "new_state_version": state.state_version + 1,
             }
         )
-        delta = delta.model_copy(
-            update={"delta_digest": _delta_digest(delta)}
-        )
+        delta = delta.model_copy(update={"delta_digest": _delta_digest(delta)})
         result = apply_delta(state, delta)
         if result.outcome == "conflict":
             raise ProjectionError(
                 "v21-04:rebuild_digest_conflict",
-                "digest conflict during rebuild: state dirty, no silent "
-                "overwrite",
+                "digest conflict during rebuild: state dirty, no silent " "overwrite",
             )
         if result.outcome == "needs_rebuild":
             raise ProjectionError(

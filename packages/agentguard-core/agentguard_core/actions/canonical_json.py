@@ -91,9 +91,7 @@ def _serialize(value: Any, *, path: str) -> str:
                 raise CanonicalizationError(
                     f"{path}: object keys must be str, got {type(key).__name__}"
                 )
-            rendered_key = json.dumps(
-                key, ensure_ascii=False, separators=(",", ":")
-            )
+            rendered_key = json.dumps(key, ensure_ascii=False, separators=(",", ":"))
             rendered_value = _serialize(value[key], path=f"{path}.{key}")
             parts.append(f"{rendered_key}:{rendered_value}")
         return "{" + ",".join(parts) + "}"
