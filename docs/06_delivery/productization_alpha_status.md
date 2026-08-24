@@ -2,14 +2,14 @@
 
 | 字段 | 当前值 |
 | --- | --- |
-| Status | **in progress** |
+| Status | **ready for integration** |
 | 状态日期 | 2026-08-24 |
 | 集成分支 | `codex/productization-alpha` |
 | 代码基线 | `origin/dev@5986538`，另含已归档竞赛证据提交 |
-| 已验证代码 SHA | `<由状态证明提交填写其 parent SHA>` |
-| 托管 CI run | `<由维护者填写 run URL/ID 与结果>` |
+| 已验证代码 SHA | `ee2800277c79fd841b2341a2fdfe2dfd015abeef`（本状态证明提交的 parent） |
+| 托管 CI run | [CI 32699929514](https://github.com/JToday666/agent-guard/actions/runs/32699929514)：全部自动门禁通过；[Release Check 32699929536](https://github.com/JToday666/agent-guard/actions/runs/32699929536)：通过 |
 
-> 本页在已验证代码 SHA 和托管 CI run 填写前不得改为 completed，也不得用“CI 已配置”替代“CI 已成功运行”。为避免提交自引用，状态证明提交记录其 parent（被验证代码）SHA，而不是声称包含自身 SHA。
+> 为避免提交自引用，本状态证明记录其 parent（被验证代码）SHA，而不是声称包含自身 SHA。上述代码与门禁已满足集成条件，但 PR 尚未进入 `dev`，因此状态为 **ready for integration**，不是 completed；合入后必须以实际 `dev` 集成 SHA 关闭 `PA01` 并形成最终状态证明。
 
 ## 本轮目标
 
@@ -37,13 +37,13 @@
 - 真实外部 Provider 的固定 A0–A4、70 例、`70×5=350` qualifying matrix 尚未完成；stub/contracts/demo 运行不能替代。
 - R05 仍被 OpenClaw 宿主缺少 atomic replace-and-seal 与 authoritative invocation-start 阻塞，因此 Gate B 和正式 S4 不能关闭。
 - Memory Guard 的 `commit` / `rollback` 目前只更新控制面变更记录，不会回滚或恢复真实 runtime memory。
-- action receipt 覆盖率、跨 run 回归阈值、完整生产运维、容器公开发布、SBOM、签名、provenance 和 Trusted Publishing 仍未完成。
+- action receipt 覆盖率、跨 run 回归阈值、完整生产运维、容器/包公开发布、可归档与可复现 SBOM、签名、provenance 和 Trusted Publishing 仍未完成。本轮仅为精确候选 SHA 本地生成并校验 SBOM，不构成发布或长期制品归档。
 - 多租户、用户登录、OAuth/SSO、自动备份与恢复不属于当前 Alpha 已有能力。
 - 公开 `v0.1.0-beta.1`/对应 npm 制品是 22-hook 基线，当前未发布源码为 24 hooks，但包版本仍为 `0.1.0-beta.1`。本阶段不发布；下一次构建可发布制品前必须统一提升 Python/Node 版本和映射，禁止以同版本覆盖不同内容。
 - `scripts/` 已完成职责分类和兼容入口说明，但物理迁移与超大模块拆分尚未完成；继续拆分时必须保持公共 import、CLI 和 `/v1` 行为不变。
 - legacy benchmark 的 standalone LangGraph subprocess 已移除开发者机器默认路径，必须显式提供 agent command/path；但对应 849 项旧测试仍未进入门禁，它也不属于产品示例或 clean-clone acceptance。测试和依赖完成重整前不得把该 adapter 称为 Alpha 支持入口。
 - 四份既有 demo 设计/运行文档因 roadmap 与外部链接兼容暂留 `docs/06_delivery/`，已统一标记 historical/unsupported 并从产品入口降级；物理迁入 archive 留待保留引用关系的独立迁移。
-- CODEOWNERS、required checks、分支保护和 GitHub Private Vulnerability Reporting 是否实际启用属于平台外部状态，仓库文件无法自证；外部试用前必须由维护者核验并记录。
+- CODEOWNERS 已进入仓库；截至 2026-08-24，通过 GitHub API 核验到 `dev` **未启用分支保护**，因此 required checks 尚不是平台强制规则。GitHub Private Vulnerability Reporting 状态仍未核验；二者都必须在外部试用前由维护者处理并记录。
 
 ## CI 状态口径
 
@@ -53,9 +53,9 @@ Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共
 
 Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API 映射；独立 S1 memory 场景才是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 另在隔离临时目录中验证安装后健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销，两者覆盖边界不同。
 
-这些 job 只有在同一已验证代码 SHA 的 GitHub Actions 全部成功后，才构成本轮通过证据。维护者应以单独的状态证明提交记录其 parent SHA、run URL/ID 和结果；在此之前状态保持 **in progress**。本地通过、workflow 定义存在或历史报告都不能替代托管 CI 结果。
+已验证代码 `ee2800277c79fd841b2341a2fdfe2dfd015abeef` 的 [CI run 32699929514](https://github.com/JToday666/agent-guard/actions/runs/32699929514) 中，11 个自动作业全部成功；其中 Playwright 作业真实执行了 mock、API-stub 和 memory Guard API 全栈三组场景。`Manual OpenClaw live gate` 按阶段契约跳过，未被计作自动通过。相同 SHA 的 [Release Check run 32699929536](https://github.com/JToday666/agent-guard/actions/runs/32699929536) 成功构建并验证临时源码制品，没有发布或上传 release artifact。
 
-## 本地验证（非 Alpha 出口证明）
+## 验证与出口证据
 
 本分支整理期间已在当前工作区完成以下验证：
 
@@ -67,12 +67,14 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 - 隔离 clean-clone acceptance 在 memory backend 下完成 8/8：真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源、凭证撤销与临时资源清理；外部 Provider 保持关闭。
 - Dashboard 隐藏页暂停与终态停止轮询的两项定向 Playwright 回归通过。
 - Dashboard 到真实 Guard API 的 memory 浏览器闭环本地为 4/4 passed：official allow、浏览器 allow-once 审批、deny 零调用/not-invoked receipt、flag-off 回滚只读。
+- 使用精确候选 SHA 的本地 wheel 构建 `agentguard-api:productization-alpha-ee28002`，镜像摘要为 `sha256:e0c704993f4594816de70267251af9b7b79dd907fe79b23bd2bd1bcb746d35b3`；非特权用户、memory backend、无端口暴露的临时容器启动成功，Docker health 状态为 healthy，`/health` 返回 `200 {"status":"ok"}`，随后容器已停止并自动移除。
+- 对该本地镜像生成未发布的 SPDX SBOM：Docker Scout 索引 155 个依赖包，SPDX 文档含 156 个 package entry、大小 3,424,170 bytes，SHA-256 为 `719870ddf6360a3056c58b880bc2c755f09411ccda77e0857077fcd8b8a25d7d`。SBOM 留在临时本地证据路径，不进入 Git、不上传、不发布。
 
-受本机环境限制，本轮没有把完整 integration 层、PostgreSQL job、完整 Python/浏览器 E2E、Docker/SBOM 构建或托管 GitHub Actions 标记为已验证。它们仍是 Alpha 出口的必需门禁；上面的本地结果不能替代。
+托管 CI 已覆盖完整默认 integration、PostgreSQL、Python E2E、浏览器 E2E 与真实 Dashboard→Guard API memory 链路；本地补充完成了镜像启动和 SBOM 生成。仍未验证的能力只按上文范围限制处理，不得把本次 Alpha 结论扩大为生产就绪、真实 Provider 效果完成、OpenClaw live 宿主完成或 legacy benchmark 全仓通过。
 
 ## 后续优先级
 
-1. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
-2. 验证新增 CI 在托管环境真实通过，处理 flaky、超时和 marker 误分类。
-3. 推进真实 Memory Guard/runtime receipt 和 OpenClaw 宿主能力，不用演示绕过替代产品实现。
-4. 再开展模块拆分、供应链和生产部署自动化。
+1. 将通过全部自动门禁的 PR #189 合入 `dev`，以实际集成 SHA 追加 commit/test/CI/review/rollback evidence，关闭 `PA01` 并形成最终状态证明。
+2. 在 GitHub 平台启用并核验 `dev` 分支保护、required checks 与安全报告入口，再开始外部技术试用。
+3. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
+4. Alpha 完成后另行评审是否恢复功能开发；真实 Memory Guard、R05 host capability、正式 350-run 与生产发布仍留在后续里程碑。
