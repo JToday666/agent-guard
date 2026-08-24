@@ -1,7 +1,13 @@
 {
+  "name": "agentguard-benchmark-fixture",
+  "private": true,
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "minimist": "^1.2.8"
+  },
+  "overrides": {
+    "body-parser": "1.20.3",
+    "path-to-regexp": "0.1.13"
   }
 }
