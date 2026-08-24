@@ -11,6 +11,7 @@ from agentguard_core import (
 )
 from guard_api.services.audit import AuditService
 from guard_api.services.evidence import build_audit_event
+from guard_api.services.redaction import REDACTED, sanitize_audit_event
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 
@@ -383,6 +384,49 @@ def test_content_preview_is_redacted_when_enabled() -> None:
     projected = str(guard_event["content_preview"])
     assert "abcdef1234567890" not in projected
     assert "[redacted]" in projected
+
+
+@pytest.mark.parametrize(
+    ("event_type", "credential"),
+    [
+        ("model_output_produced", "agt_tok_" + "a" * 32),
+        ("model_output_produced", "lease-v1:" + "b" * 64),
+        ("message_send_proposed", "agt_tok_" + "c" * 32),
+        ("message_send_proposed", "lease-v1:" + "d" * 64),
+    ],
+)
+def test_content_preview_redacts_agentguard_credentials_before_persistence(
+    event_type: str,
+    credential: str,
+) -> None:
+    if event_type == "model_output_produced":
+        payload: dict[str, object] = {
+            "phase": "output",
+            "content_preview": f"result contains {credential}",
+            "contains_instruction_like_text": False,
+            "contains_sensitive_data": True,
+            "sanitized": False,
+        }
+    else:
+        payload = {
+            "channel": "email",
+            "recipient": "reviewer@example.com",
+            "content_preview": f"message contains {credential}",
+            "contains_sensitive_data": True,
+            "sanitized": False,
+        }
+
+    audit = sanitize_audit_event(
+        _audit(
+            _event(event_type, payload),
+            content_preview_enabled=True,
+        )
+    )
+    guard_event = audit.evidence["guard_event"]
+    assert isinstance(guard_event, dict)
+    projected = str(guard_event["content_preview"])
+    assert credential not in projected
+    assert REDACTED in projected
 
 
 def test_content_preview_is_truncated_when_enabled() -> None:

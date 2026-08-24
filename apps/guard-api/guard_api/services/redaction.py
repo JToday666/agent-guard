@@ -101,6 +101,15 @@ _COOKIE_VALUE_RE = re.compile(r"(cookie\s*[:=]\s*)([^\r\n\"]+)", re.IGNORECASE)
 _PRIVATE_KEY_BODY_RE = re.compile(
     r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"
 )
+# Keep these patterns aligned with the canonical credential issuer and lease
+# validator. Both token forms are lowercase and have fixed-size hexadecimal
+# payloads; broader opaque-token matching would redact ordinary evidence text.
+_AGENTGUARD_RUNTIME_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9_])agt_tok_[0-9a-f]{32}(?![0-9a-f])"
+)
+_EXECUTION_LEASE_TOKEN_RE = re.compile(
+    r"(?<![A-Za-z0-9])lease-v1:[0-9a-f]{64}(?![0-9a-f])"
+)
 
 
 def looks_sensitive_key(key: str) -> bool:
@@ -113,6 +122,8 @@ def scrub_text(value: str) -> str:
 
     # 私钥块必须最先替换，避免被后续 key=value / Cookie 清洗吞掉首行。
     redacted = _PRIVATE_KEY_BODY_RE.sub(REDACTED, value)
+    redacted = _AGENTGUARD_RUNTIME_TOKEN_RE.sub(f"agt_tok_{REDACTED}", redacted)
+    redacted = _EXECUTION_LEASE_TOKEN_RE.sub(f"lease-v1:{REDACTED}", redacted)
     redacted = PROVIDER_KEY_RE.sub(f"sk-{REDACTED}", redacted)
     redacted = CREDENTIAL_ASSIGNMENT_RE.sub(
         lambda match: f"{match.group('key')}{match.group('sep')}{REDACTED}",

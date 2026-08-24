@@ -414,6 +414,12 @@ def _action_id(event: dict[str, Any]) -> str | None:
         value = tool.get("call_id") or tool.get("tool_call_id")
         if isinstance(value, str) and value:
             return value
+    if event.get("event_type") == "message_send_proposed":
+        event_id = event.get("event_id")
+        if isinstance(event_id, str) and event_id:
+            # Mirror agentguard_core.actions.canonical_action_id for message
+            # events that do not carry an explicit action ID.
+            return f"act_{event_id}"
     return None
 
 

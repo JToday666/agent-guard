@@ -202,7 +202,12 @@ class GuardedToolGateway:
             if memory_release is not None and memory_receipt_context is not None
             else (event, decision)
         )
-        message_gate, message_release, message_receipt_context = _evaluate_message_send_gate(
+        (
+            message_gate,
+            message_release,
+            message_receipt_context,
+            message_approval_resolution,
+        ) = _evaluate_message_send_gate(
             self.guard_adapter,
             tool_name=tool_name,
             arguments=arguments,
@@ -232,9 +237,11 @@ class GuardedToolGateway:
                     receipt_decision=message_receipt_context[1],
                 )
             strong_release = message_release
-            approval_resolution = message_release.approval_resolution
             assert message_receipt_context is not None
+        if message_receipt_context is not None:
+            assert message_approval_resolution is not None
             receipt_event, receipt_decision = message_receipt_context
+            approval_resolution = message_approval_resolution
 
         lease_id = strong_release.lease.lease_id if strong_release is not None else None
         consumption_id = (
@@ -617,11 +624,10 @@ def _evaluate_message_send_gate(
     ToolExecutionResult | None,
     StrongBindingRelease | None,
     tuple[Any, Any] | None,
+    dict[str, Any] | None,
 ]:
-    if tool_name != "send_email" or not hasattr(
-        guard_adapter, "evaluate_message_send"
-    ):
-        return None, None, None
+    if tool_name != "send_email" or not hasattr(guard_adapter, "evaluate_message_send"):
+        return None, None, None, None
     event, decision = guard_adapter.evaluate_message_send(
         arguments=arguments,
         security=security,
@@ -643,6 +649,7 @@ def _evaluate_message_send_gate(
                     error=audit_error,
                     compatibility=compatibility,
                 ),
+                None,
                 None,
                 None,
             )
@@ -672,6 +679,7 @@ def _evaluate_message_send_gate(
                 ),
                 None,
                 None,
+                None,
             )
     if strong_release is not None:
         approval_blocked = False
@@ -684,10 +692,16 @@ def _evaluate_message_send_gate(
             poll_interval_seconds=approval_poll_interval,
         )
     if decision.decision != "deny" and not approval_blocked:
+        receipt_context = (
+            (event, decision)
+            if strong_release is not None or approval_resolution is not None
+            else None
+        )
         return (
             None,
             strong_release,
-            (event, decision) if strong_release is not None else None,
+            receipt_context,
+            approval_resolution if receipt_context is not None else None,
         )
     payload = ToolExecutionResult(
         tool_name=tool_name,
@@ -722,6 +736,7 @@ def _evaluate_message_send_gate(
         ToolExecutionResult.model_validate(
             tool_result_with_compatibility(payload.model_dump(), compatibility)
         ),
+        None,
         None,
         None,
     )
@@ -880,6 +895,10 @@ def _event_action_id(event: Any) -> str | None:
         call_id = tool.get("call_id") or tool.get("tool_call_id")
         if isinstance(call_id, str) and call_id:
             return call_id
+    if dumped.get("event_type") == "message_send_proposed":
+        event_id = dumped.get("event_id")
+        if isinstance(event_id, str) and event_id:
+            return f"act_{event_id}"
     return None
 
 
@@ -958,11 +977,29 @@ def _resolve_approval(
             "decision": None,
             "approval_id": approval_id,
         }
-    deadline = time.monotonic() + timeout_seconds if timeout_seconds else None
+    deadline = (
+        time.monotonic() + timeout_seconds if timeout_seconds is not None else None
+    )
     poll_interval = max(0.1, min(poll_interval_seconds, 5.0))
     resolution: Any = None
     while True:
-        resolution = guard_adapter.wait_for_approval(approval_id)
+        if deadline is None:
+            resolution = guard_adapter.wait_for_approval(approval_id)
+        else:
+            remaining = max(deadline - time.monotonic(), 0.0)
+            if remaining <= 0:
+                return True, _approval_timeout_resolution(approval_id)
+            try:
+                resolution = guard_adapter.wait_for_approval(
+                    approval_id, timeout=remaining
+                )
+            except TypeError:
+                # Compatibility with legacy/custom adapters that only accept
+                # the approval ID. The post-call deadline check below remains
+                # the authoritative fail-closed boundary.
+                resolution = guard_adapter.wait_for_approval(approval_id)
+            if time.monotonic() >= deadline:
+                return True, _approval_timeout_resolution(approval_id)
         if not isinstance(resolution, dict):
             return True, {
                 "status": "error",
@@ -992,6 +1029,15 @@ def _resolve_approval(
         "allow_session",
     }
     return not approved, resolution
+
+
+def _approval_timeout_resolution(approval_id: str) -> dict[str, Any]:
+    return {
+        "status": "timeout",
+        "decision": "timeout",
+        "approval_id": approval_id,
+        "reason": "approval_deadline_exceeded",
+    }
 
 
 def _v21_approval_release(decision: Any) -> str | None:
@@ -1113,13 +1159,9 @@ def _strong_binding_failure_result(
     result.approval_id = _approval_id(getattr(binding_decision, "approval", None))
     result.approval_resolution = failure.approval_resolution
     result.approval_wait_latency_ms = failure.approval_wait_latency_ms
-    lease_id = (
-        failure.correlation.lease_id if failure.correlation is not None else None
-    )
+    lease_id = failure.correlation.lease_id if failure.correlation is not None else None
     consumption_id = (
-        failure.correlation.consumption_id
-        if failure.correlation is not None
-        else None
+        failure.correlation.consumption_id if failure.correlation is not None else None
     )
     result.lease_id = lease_id
     result.consumption_id = consumption_id
