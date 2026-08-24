@@ -6,10 +6,11 @@
 | 状态日期 | 2026-08-24 |
 | 集成分支 | `dev` |
 | 代码基线 | `origin/dev@5986538`，其上以 PR #189 rebase 集成 20 个独立提交 |
-| 最终集成 SHA | `a9702bc83ce1b9f24d987368912f20fd7c4e3e0e`（本状态证明提交的 parent） |
-| 托管 CI run | [CI 32709561355](https://github.com/JToday666/agent-guard/actions/runs/32709561355)：全部自动门禁通过；[Release Check 32709561323](https://github.com/JToday666/agent-guard/actions/runs/32709561323)：通过 |
+| 产品代码集成 SHA | `a9702bc83ce1b9f24d987368912f20fd7c4e3e0e` |
+| 平台治理记录基线 | `dev@f0ae6226b1f30db3f6274396f6a1560ce2aaf379`（本记录分支的 base） |
+| 托管 CI run | [CI 32713623227](https://github.com/JToday666/agent-guard/actions/runs/32713623227)：全部自动门禁通过；[Internal Source Build Check 32713623191](https://github.com/JToday666/agent-guard/actions/runs/32713623191)：通过 |
 
-> Productization Alpha 内部里程碑已进入 `dev`，本状态证明记录其 parent（实际集成并经 push CI 验证的代码）SHA，避免提交自引用。`PA01` 继续保持活动以执行功能冻结，直到独立的恢复开发评审决定是否协调释放其表面并关闭节点。completed 不代表生产就绪，也不扩大下文明确列出的能力边界。
+> Productization Alpha 产品代码在 `a9702bc` 进入 `dev`，收尾状态在 `f0ae622` 进入 `dev`；本记录使用分支 base 表达平台治理前置状态，避免提交自引用。`PA01` 继续保持活动以执行功能冻结，直到独立的恢复开发评审决定是否协调释放其表面并关闭节点。completed 不代表生产就绪，也不扩大下文明确列出的能力边界。
 
 ## 本轮目标
 
@@ -43,11 +44,14 @@
 - `scripts/` 已完成职责分类和兼容入口说明，但物理迁移与超大模块拆分尚未完成；继续拆分时必须保持公共 import、CLI 和 `/v1` 行为不变。
 - legacy benchmark 的 standalone LangGraph subprocess 已移除开发者机器默认路径，必须显式提供 agent command/path；但对应 849 项旧测试仍未进入门禁，它也不属于产品示例或 clean-clone acceptance。测试和依赖完成重整前不得把该 adapter 称为 Alpha 支持入口。
 - 四份既有 demo 设计/运行文档因 roadmap 与外部链接兼容暂留 `docs/06_delivery/`，已统一标记 historical/unsupported 并从产品入口降级；物理迁入 archive 留待保留引用关系的独立迁移。
-- CODEOWNERS 已进入仓库；截至 2026-08-24，classic branch protection endpoint 对 `dev` 返回未启用，但 active repository ruleset `dev merge check` 会阻止删除、非快进和绕过 PR，并已恢复为 squash-only。该 ruleset 没有配置 required status checks；Private Vulnerability Reporting、secret scanning、push protection 与 Dependabot security updates 也均为 disabled。仓库侧强制门禁、秘密扫描与漏洞入口尚未形成闭环，这些平台治理项必须在外部试用前由维护者处理并记录。
+- CODEOWNERS 已进入仓库；截至 2026-08-24，classic branch protection endpoint 对 `dev` 仍返回未启用，但 active repository ruleset `dev merge check` 会阻止删除、非快进和绕过 PR，只允许 squash，并严格要求下文 11 个 GitHub Actions checks 基于最新 `dev` 全部通过。每个 context 均绑定 GitHub Actions App `integration_id=15368`，ruleset 无 bypass actor。
+- 仓库级 secret scanning、push protection、Private Vulnerability Reporting、Dependabot alerts 与 Dependabot security updates 已启用并经 API 回读确认。启用后的初始快照为 secret scanning 开放告警 0 个、Dependabot 开放告警 162 个（critical 1、high 63、medium 28、low 70）；这是治理入口与待办基线，不是“依赖安全”或“无漏洞”的证明。critical/high 告警完成去重、可达性分析和修复前，不开始外部技术试用。
 
 ## CI 状态口径
 
 本阶段进入 `dev` 的 CI 定义包含以下自动 job：clean-checkout 最小示例验收、静态检查、unit/contract/integration/e2e Python 测试、PostgreSQL 16 migration/tests、Node 检查、Dashboard build、Playwright Chromium E2E。浏览器 job 除 mock/API-stub 模式外，还以 memory backend 启动真实 Guard API 与 Dashboard，执行 S1 allow、浏览器审批、deny 零调用和 flag-off 回滚四场景。连接真实外部宿主或 Provider 的 `live` 仍仅在手动 workflow dispatch 明确 opt-in 时运行。
+
+`dev` ruleset 现强制以上 10 个 CI job context，加上独立的 `Build and verify ephemeral source artifacts`，共 11 项。手动 `Manual OpenClaw live gate` 因正常状态为 skipped，不属于 required checks；任何 required context 改名都必须先迁移 ruleset，避免形成永久等待。
 
 Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,533 项：unit 1,187、contract 383、integration 782、postgres 156、e2e 24、live 1。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当前也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
 
@@ -69,12 +73,14 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 - Dashboard 到真实 Guard API 的 memory 浏览器闭环本地为 4/4 passed：official allow、浏览器 allow-once 审批、deny 零调用/not-invoked receipt、flag-off 回滚只读。
 - 使用运行时代码候选 `ee2800277c79fd841b2341a2fdfe2dfd015abeef` 的本地 wheel 构建 `agentguard-api:productization-alpha-ee28002`；其后的提交只更新状态证明与 roadmap 证据，没有修改发布包或运行时代码。镜像摘要为 `sha256:e0c704993f4594816de70267251af9b7b79dd907fe79b23bd2bd1bcb746d35b3`；非特权用户、memory backend、无端口暴露的临时容器启动成功，Docker health 状态为 healthy，`/health` 返回 `200 {"status":"ok"}`，随后容器已停止并自动移除。
 - 对该本地镜像生成未发布的 SPDX SBOM：Docker Scout 索引 155 个依赖包，SPDX 文档含 156 个 package entry、大小 3,424,170 bytes，SHA-256 为 `719870ddf6360a3056c58b880bc2c755f09411ccda77e0857077fcd8b8a25d7d`。SBOM 留在临时本地证据路径，不进入 Git、不上传、不发布。
+- GitHub API 回读确认 `dev` ruleset 的 11 个 required checks、strict latest-base policy、GitHub Actions 来源绑定和无 bypass 均已生效；secret scanning、push protection、Private Vulnerability Reporting、Dependabot alerts/security updates 也均已启用。告警数量只记录启用后的初始快照，后续以 GitHub Security 页面实时状态为准。
 
 托管 CI 已覆盖完整默认 integration、PostgreSQL、Python E2E、浏览器 E2E 与真实 Dashboard→Guard API memory 链路；本地补充完成了镜像启动和 SBOM 生成。仍未验证的能力只按上文范围限制处理，不得把本次 Alpha 结论扩大为生产就绪、真实 Provider 效果完成、OpenClaw live 宿主完成或 legacy benchmark 全仓通过。
 
 ## 后续优先级
 
-1. 在 GitHub 平台启用并核验 required checks、秘密扫描与安全报告入口，再开始外部技术试用。
+1. 对 162 个初始 Dependabot 告警去重并按可达性分批处理，先完成 1 个 critical 与 63 个 high；安全更新仍受完整 required checks 约束，不批量绕过或自动合并。
 2. 保持 `PA01` 的功能冻结；需要恢复功能开发时，另行评审并协调释放其产品表面。
-3. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
-4. 真实 Memory Guard、R05 host capability、正式 350-run 与生产发布留在后续里程碑，不在本次 completed 结论内。
+3. 完成 Python/Node 唯一版本映射和内部 release candidate，再进行两次独立干净环境试用验收；在此之前不发布 `v0.2.0-alpha.1`。
+4. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
+5. 真实 Memory Guard、R05 host capability、正式 350-run 与生产发布留在后续里程碑，不在本次 completed 结论内。

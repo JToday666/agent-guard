@@ -14,7 +14,7 @@ AgentGuard 处理运行时动作、审批、凭证和审计证据。请把可能
 
 ## 私密报告方式
 
-在仓库已启用 GitHub Private Vulnerability Reporting 时，优先使用 **Security → Advisories → Report a vulnerability** 私密提交。本文档本身不能证明平台开关已启用；维护者必须在外部技术试用前核验该入口。若入口不可见，请不要在公开 Issue、Discussion、PR、日志或演示报告中披露可利用细节、token、真实数据或未修复的 PoC；只提交不含漏洞细节的联系请求，等待维护者建立私密渠道。
+截至 2026-08-24，本仓库已启用 GitHub Private Vulnerability Reporting；请优先使用 **Security → Advisories → Report a vulnerability** 私密提交。平台状态仍需由维护者定期回读核验。若入口不可见，请不要在公开 Issue、Discussion、PR、日志或演示报告中披露可利用细节、token、真实数据或未修复的 PoC；只提交不含漏洞细节的联系请求，等待维护者建立私密渠道。
 
 报告请尽量包含：
 

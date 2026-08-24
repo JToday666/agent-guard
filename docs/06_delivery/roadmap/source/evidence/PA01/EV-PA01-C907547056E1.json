@@ -1,0 +1,23 @@
+{
+  "id": "EV-PA01-C907547056E1",
+  "kind": "review",
+  "metadata": {
+    "dependabot_open_alerts": 162,
+    "dependabot_open_by_severity": {
+      "critical": 1,
+      "high": 63,
+      "low": 70,
+      "medium": 28
+    },
+    "github_actions_integration_id": 15368,
+    "required_check_count": 11,
+    "ruleset_id": 17259248,
+    "secret_scanning_open_alerts": 0
+  },
+  "node_id": "PA01",
+  "recorded_at": "2026-08-24T14:05:21Z",
+  "ref": "github-ruleset:17259248",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "GitHub platform governance verified: dev requires 11 source-bound checks; secret scanning, push protection, private vulnerability reporting, Dependabot alerts, and security updates are enabled"
+}
