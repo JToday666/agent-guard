@@ -189,19 +189,30 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "FE07",
     ):
         assert nodes[node_id]["effective_status"] == "completed"
-    for node_id in ("R05", "LGV2-C", "LGV2-B"):
+    for node_id in ("R05", "LGV2-C", "LGV2-B", "PA01"):
         assert nodes[node_id]["effective_status"] == "in_progress"
     assert nodes["RM-00"]["effective_status"] == "completed"
-    for node_id in ("CT03R", "CT-O1", "CT06"):
+    for node_id in ("CT03R", "CT-O1"):
         assert nodes[node_id]["effective_status"] == "ready"
         assert nodes[node_id]["can_start"] is True
+    assert nodes["CT06"]["effective_status"] == "not_ready"
+    assert nodes["CT06"]["can_start"] is False
+    assert nodes["CT06"]["resource_conflicts"] == [
+        {
+            "node_id": "PA01",
+            "surfaces": [
+                "audit-schema-and-storage",
+                "guard-api-production-wiring",
+            ],
+        }
+    ]
 
     result = run_tool(roadmap_root, "ready", "--json")
     assert_succeeds(result)
     payload = json.loads(result.stdout)
     assert isinstance(payload, dict)
     ready_ids = {node["id"] for node in payload["nodes"]}
-    assert {"CT03R", "CT-O1", "CT06"} <= ready_ids
+    assert {"CT03R", "CT-O1"} <= ready_ids
     assert {
         "FE04",
         "S1",
@@ -218,8 +229,10 @@ def test_canonical_nodes_cover_all_four_effective_states_and_ready_json(
         "CT05",
         "LGV2-C",
         "LGV2-B",
+        "PA01",
         "LGV2-I",
         "LGV2-FE",
+        "CT06",
     }.isdisjoint(ready_ids)
 
 
@@ -258,7 +271,8 @@ def test_claimed_lgv2_core_serializes_c13_on_shared_core_surface(
     assert semantic_shadow["effective_status"] == "not_ready"
     assert semantic_shadow["unmet_dependencies"] == []
     assert semantic_shadow["resource_conflicts"] == [
-        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]}
+        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]},
+        {"node_id": "PA01", "surfaces": ["core-evaluation-activation"]},
     ]
 
     result = run_tool(roadmap_root, "explain", "C13", "--json")
@@ -268,7 +282,8 @@ def test_claimed_lgv2_core_serializes_c13_on_shared_core_surface(
     assert explanation["can_start"] is False
     assert explanation["unmet_dependencies"] == []
     assert explanation["resource_conflicts"] == [
-        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]}
+        {"node_id": "LGV2-C", "surfaces": ["core-evaluation-activation"]},
+        {"node_id": "PA01", "surfaces": ["core-evaluation-activation"]},
     ]
 
 
@@ -282,7 +297,16 @@ def test_lgv2_competition_dependencies_and_surfaces_are_scoped(
     assert nodes["LGV2-B"]["effective_status"] == "in_progress"
     assert nodes["LGV2-I"]["effective_status"] == "not_ready"
     assert nodes["LGV2-I"]["unmet_dependencies"] == ["E-LGV2-C-I"]
-    assert nodes["LGV2-I"]["resource_conflicts"] == []
+    assert nodes["LGV2-I"]["resource_conflicts"] == [
+        {
+            "node_id": "PA01",
+            "surfaces": [
+                "audit-schema-and-storage",
+                "guard-api-production-wiring",
+                "runtime-binding-activation",
+            ],
+        }
+    ]
     assert nodes["LGV2-FE"]["effective_status"] == "not_ready"
     assert nodes["LGV2-FE"]["unmet_dependencies"] == ["E-LGV2-I-FE"]
 
