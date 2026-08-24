@@ -6,8 +6,8 @@
 | 状态日期 | 2026-08-24 |
 | 集成分支 | `codex/productization-alpha` |
 | 代码基线 | `origin/dev@5986538`，另含已归档竞赛证据提交 |
-| 已验证代码 SHA | `ee2800277c79fd841b2341a2fdfe2dfd015abeef`（本状态证明提交的 parent） |
-| 托管 CI run | [CI 32699929514](https://github.com/JToday666/agent-guard/actions/runs/32699929514)：全部自动门禁通过；[Release Check 32699929536](https://github.com/JToday666/agent-guard/actions/runs/32699929536)：通过 |
+| 已验证代码 SHA | `f0d5219fdc09d03459f1c35d7860aba45632e1a2`（本状态证明提交的 parent） |
+| 托管 CI run | [CI 32701756137](https://github.com/JToday666/agent-guard/actions/runs/32701756137)：全部自动门禁通过；[Release Check 32701756118](https://github.com/JToday666/agent-guard/actions/runs/32701756118)：通过 |
 
 > 为避免提交自引用，本状态证明记录其 parent（被验证代码）SHA，而不是声称包含自身 SHA。上述代码与门禁已满足集成条件，但 PR 尚未进入 `dev`，因此状态为 **ready for integration**，不是 completed；合入后必须以实际 `dev` 集成 SHA 形成最终状态证明。`PA01` 将继续保持活动以执行功能冻结，直到 Alpha 完成后的独立恢复开发评审决定是否协调释放其表面并关闭节点。
 
@@ -53,7 +53,7 @@ Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共
 
 Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API 映射；独立 S1 memory 场景才是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 另在隔离临时目录中验证安装后健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销，两者覆盖边界不同。
 
-已验证代码 `ee2800277c79fd841b2341a2fdfe2dfd015abeef` 的 [CI run 32699929514](https://github.com/JToday666/agent-guard/actions/runs/32699929514) 中，11 个自动作业全部成功；其中 Playwright 作业真实执行了 mock、API-stub 和 memory Guard API 全栈三组场景。`Manual OpenClaw live gate` 按阶段契约跳过，未被计作自动通过。相同 SHA 的 [Release Check run 32699929536](https://github.com/JToday666/agent-guard/actions/runs/32699929536) 成功构建并验证临时源码制品，没有发布或上传 release artifact。
+已验证代码 `f0d5219fdc09d03459f1c35d7860aba45632e1a2` 的 [CI run 32701756137](https://github.com/JToday666/agent-guard/actions/runs/32701756137) 中，11 个自动作业全部成功；其中 Playwright 作业真实执行了 mock、API-stub 和 memory Guard API 全栈三组场景。`Manual OpenClaw live gate` 按阶段契约跳过，未被计作自动通过。相同 SHA 的 [Release Check run 32701756118](https://github.com/JToday666/agent-guard/actions/runs/32701756118) 成功构建并验证临时源码制品，没有发布或上传 release artifact。
 
 ## 验证与出口证据
 
@@ -67,7 +67,7 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 - 隔离 clean-clone acceptance 在 memory backend 下完成 8/8：真实启动 Guard API，验证健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源、凭证撤销与临时资源清理；外部 Provider 保持关闭。
 - Dashboard 隐藏页暂停与终态停止轮询的两项定向 Playwright 回归通过。
 - Dashboard 到真实 Guard API 的 memory 浏览器闭环本地为 4/4 passed：official allow、浏览器 allow-once 审批、deny 零调用/not-invoked receipt、flag-off 回滚只读。
-- 使用精确候选 SHA 的本地 wheel 构建 `agentguard-api:productization-alpha-ee28002`，镜像摘要为 `sha256:e0c704993f4594816de70267251af9b7b79dd907fe79b23bd2bd1bcb746d35b3`；非特权用户、memory backend、无端口暴露的临时容器启动成功，Docker health 状态为 healthy，`/health` 返回 `200 {"status":"ok"}`，随后容器已停止并自动移除。
+- 使用运行时代码候选 `ee2800277c79fd841b2341a2fdfe2dfd015abeef` 的本地 wheel 构建 `agentguard-api:productization-alpha-ee28002`；其后的提交只更新状态证明与 roadmap 证据，没有修改发布包或运行时代码。镜像摘要为 `sha256:e0c704993f4594816de70267251af9b7b79dd907fe79b23bd2bd1bcb746d35b3`；非特权用户、memory backend、无端口暴露的临时容器启动成功，Docker health 状态为 healthy，`/health` 返回 `200 {"status":"ok"}`，随后容器已停止并自动移除。
 - 对该本地镜像生成未发布的 SPDX SBOM：Docker Scout 索引 155 个依赖包，SPDX 文档含 156 个 package entry、大小 3,424,170 bytes，SHA-256 为 `719870ddf6360a3056c58b880bc2c755f09411ccda77e0857077fcd8b8a25d7d`。SBOM 留在临时本地证据路径，不进入 Git、不上传、不发布。
 
 托管 CI 已覆盖完整默认 integration、PostgreSQL、Python E2E、浏览器 E2E 与真实 Dashboard→Guard API memory 链路；本地补充完成了镜像启动和 SBOM 生成。仍未验证的能力只按上文范围限制处理，不得把本次 Alpha 结论扩大为生产就绪、真实 Provider 效果完成、OpenClaw live 宿主完成或 legacy benchmark 全仓通过。
