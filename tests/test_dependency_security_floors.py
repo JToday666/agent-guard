@@ -26,15 +26,27 @@ FIXTURE_NAMES = (
     "Browser-art_G2_8",
 )
 NODE_SECURITY_FLOORS = {
+    "@hono/node-server": "1.19.15",
     "brace-expansion": "5.0.9",
     "fast-uri": "3.1.5",
+    "hono": "4.12.34",
     "immutable": "5.1.8",
     "ip-address": "10.3.1",
     "nanoid": "3.3.18",
-    "postcss": "8.5.18",
+    "postcss": "8.5.23",
+    "protobufjs": "7.6.5",
     "tar": "7.5.21",
     "undici": "8.9.0",
 }
+LEGACY_FIXTURE_SECURITY_FLOORS = {
+    "express": "4.22.2",
+    "body-parser": "1.20.6",
+    "qs": "6.15.3",
+    "cookie": "0.7.0",
+    "send": "0.19.0",
+    "serve-static": "1.16.0",
+}
+LEGACY_FIXTURE_EXACT_VERSIONS = {"path-to-regexp": "0.1.13"}
 
 
 def _version_tuple(value: str) -> tuple[int, ...]:
@@ -43,10 +55,34 @@ def _version_tuple(value: str) -> tuple[int, ...]:
 
 def _pnpm_lock_versions(lock: str, package: str) -> set[tuple[int, ...]]:
     pattern = re.compile(
-        rf"^  {re.escape(package)}@(\d+\.\d+\.\d+)(?:\([^:\n]*\))?:$",
+        rf"^  (?P<quote>['\"]?){re.escape(package)}@"
+        rf"(?P<version>\d+\.\d+\.\d+)(?:\([^:\n]*\))?(?P=quote):$",
         re.MULTILINE,
     )
-    return {_version_tuple(match.group(1)) for match in pattern.finditer(lock)}
+    return {_version_tuple(match.group("version")) for match in pattern.finditer(lock)}
+
+
+def _yaml_mapping_version(mapping: str, package: str) -> str | None:
+    pattern = re.compile(
+        rf"^  (?P<quote>['\"]?){re.escape(package)}(?P=quote): "
+        r"(?P<version>\d+\.\d+\.\d+)$",
+        re.MULTILINE,
+    )
+    match = pattern.search(mapping)
+    return match.group("version") if match is not None else None
+
+
+def _npm_lock_package_versions(
+    lock: dict[str, object], package: str
+) -> tuple[tuple[int, ...], ...]:
+    package_path = f"node_modules/{package}"
+    packages = lock["packages"]
+    assert isinstance(packages, dict)
+    return tuple(
+        _version_tuple(metadata["version"])
+        for path, metadata in packages.items()
+        if path == package_path or path.endswith(f"/{package_path}")
+    )
 
 
 def test_workspace_overrides_and_lock_hold_node_security_floors() -> None:
@@ -59,12 +95,8 @@ def test_workspace_overrides_and_lock_hold_node_security_floors() -> None:
     lock_overrides = override_match.group("body")
 
     for package, version in NODE_SECURITY_FLOORS.items():
-        assert re.search(
-            rf"^  {re.escape(package)}: {re.escape(version)}$", workspace, re.M
-        )
-        assert re.search(
-            rf"^  {re.escape(package)}: {re.escape(version)}$", lock_overrides, re.M
-        )
+        assert _yaml_mapping_version(workspace, package) == version
+        assert _yaml_mapping_version(lock_overrides, package) == version
         versions = _pnpm_lock_versions(lock, package)
         assert versions == {_version_tuple(version)}
 
@@ -95,23 +127,21 @@ def test_legacy_fixture_locks_are_private_identical_and_patched() -> None:
 
         assert manifest["name"] == "agentguard-benchmark-fixture"
         assert manifest["private"] is True
+        assert manifest["dependencies"]["express"] == "^4.22.2"
         assert manifest["overrides"] == {
-            "body-parser": "1.20.3",
+            "body-parser": "1.20.6",
             "path-to-regexp": "0.1.13",
+            "qs": "6.15.3",
         }
         assert lock["name"] == manifest["name"]
-        package_versions = {
-            package: {
-                _version_tuple(metadata["version"])
-                for path, metadata in lock["packages"].items()
-                if path.endswith(f"node_modules/{package}")
-            }
-            for package in ("body-parser", "path-to-regexp")
-        }
-        assert package_versions == {
-            "body-parser": {(1, 20, 3)},
-            "path-to-regexp": {(0, 1, 13)},
-        }
+        for package, floor in LEGACY_FIXTURE_SECURITY_FLOORS.items():
+            versions = _npm_lock_package_versions(lock, package)
+            assert versions
+            assert all(version >= _version_tuple(floor) for version in versions)
+        for package, expected in LEGACY_FIXTURE_EXACT_VERSIONS.items():
+            versions = _npm_lock_package_versions(lock, package)
+            assert versions
+            assert all(version == _version_tuple(expected) for version in versions)
         lock_digests.add(hashlib.sha256(lock_bytes).hexdigest())
 
     assert len(lock_digests) == 1
