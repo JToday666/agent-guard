@@ -3,12 +3,15 @@ packages:
   - "benchmarks/*"
   - "packages/*"
 overrides:
+  '@hono/node-server': 1.19.15
   brace-expansion: 5.0.9
   fast-uri: 3.1.5
+  hono: 4.12.34
   immutable: 5.1.8
   ip-address: 10.3.1
   nanoid: 3.3.18
-  postcss: 8.5.18
+  postcss: 8.5.23
+  protobufjs: 7.6.5
   tar: 7.5.21
   undici: 8.9.0
 allowBuilds:

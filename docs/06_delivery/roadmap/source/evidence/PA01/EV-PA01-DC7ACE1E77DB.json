@@ -1,0 +1,11 @@
+{
+  "id": "EV-PA01-DC7ACE1E77DB",
+  "kind": "review",
+  "metadata": {},
+  "node_id": "PA01",
+  "recorded_at": "2026-08-25T07:35:00Z",
+  "ref": "dependabot-medium-low-static-triage",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "95 medium/low Dependabot alerts statically triaged with exact input mapping; 6 needs_review, 89 not_actionable, no dismissals"
+}
