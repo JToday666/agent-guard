@@ -1,0 +1,591 @@
+{
+  "schema_version": 1,
+  "repository": "JToday666/agent-guard",
+  "commit_sha": "ee775dc272cf68de0535fee94585fb509c61c3ed",
+  "captured_at": "2026-08-25",
+  "source": "GitHub REST Dependabot alerts (fixed state, general classification)",
+  "input_manifest": "dependabot_medium_low_alerts.json",
+  "counts": {
+    "input_total": 95,
+    "matched": 95,
+    "fixed": 95,
+    "dismissed": 0,
+    "open_after_rescan": 0
+  },
+  "fixed_at_range": [
+    "2026-08-25T07:59:08Z",
+    "2026-08-25T07:59:18Z"
+  ],
+  "alerts": [
+    {
+      "number": 3,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 4,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 5,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 6,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 8,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 9,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 11,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 14,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 15,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 16,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 17,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 19,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 20,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 22,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 25,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 26,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 27,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 28,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 30,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 31,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 33,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 36,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 37,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 38,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 39,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 41,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 42,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 44,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 47,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 48,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 49,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 50,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 52,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 53,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 55,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 58,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 59,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 60,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 61,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 63,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 64,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 66,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 69,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 70,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 71,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 72,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 74,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:13Z"
+    },
+    {
+      "number": 75,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:13Z"
+    },
+    {
+      "number": 77,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:13Z"
+    },
+    {
+      "number": 80,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:13Z"
+    },
+    {
+      "number": 81,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 82,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 83,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 85,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 86,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 88,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 91,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 92,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 93,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 94,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 96,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 97,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 99,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 102,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 103,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 104,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 105,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 107,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 108,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 110,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 113,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 114,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 115,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 116,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 118,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 119,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 121,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 135,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:17Z"
+    },
+    {
+      "number": 144,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:17Z"
+    },
+    {
+      "number": 154,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:17Z"
+    },
+    {
+      "number": 155,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:18Z"
+    },
+    {
+      "number": 156,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:18Z"
+    },
+    {
+      "number": 157,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:18Z"
+    },
+    {
+      "number": 159,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:18Z"
+    },
+    {
+      "number": 163,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:08Z"
+    },
+    {
+      "number": 164,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:09Z"
+    },
+    {
+      "number": 165,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:10Z"
+    },
+    {
+      "number": 166,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 167,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:11Z"
+    },
+    {
+      "number": 168,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:12Z"
+    },
+    {
+      "number": 169,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:13Z"
+    },
+    {
+      "number": 170,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:14Z"
+    },
+    {
+      "number": 171,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:15Z"
+    },
+    {
+      "number": 172,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    },
+    {
+      "number": 173,
+      "state": "fixed",
+      "dismissed_at": null,
+      "fixed_at": "2026-08-25T07:59:16Z"
+    }
+  ]
+}

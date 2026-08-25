@@ -1,0 +1,11 @@
+{
+  "id": "EV-PA01-D6106F091152",
+  "kind": "ci",
+  "metadata": {},
+  "node_id": "PA01",
+  "recorded_at": "2026-08-25T08:08:35Z",
+  "ref": "github-actions:32824258903",
+  "schema_version": "1.0.0",
+  "status": "verified",
+  "summary": "PR 196 and post-merge dev CI passed all 11 required checks; source build 32824258897 succeeded; GitHub readback confirmed all 95 medium/low alerts fixed with no dismissals"
+}

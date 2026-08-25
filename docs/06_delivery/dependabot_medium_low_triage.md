@@ -52,4 +52,11 @@
 
 候选分支的本地审计结果为 workspace `pnpm audit --audit-level low` 0 个已知漏洞，代表 fixture `npm audit --package-lock-only --omit=dev --audit-level=low` 0 个已知漏洞。11 份 fixture 的 manifest 与 lock 分别字节一致；代表 fixture 的隔离 `npm ci` 与 Express 4 JSON、参数路由、OPTIONS 和 static smoke 均通过。Productization Alpha fast gate 为 2,339 passed、16 skipped、181 deselected；Dashboard 229、OpenClaw 206、bench tools 4、shim/installer/runtime 68 项 Node 测试和 Dashboard production build 均通过。
 
-当前文档记录候选修复范围；合入 SHA、托管 CI run 和 GitHub 回读将在实现进入 `dev` 后追加。它不授权更新 `main`、发布包/镜像或宣称生产就绪。
+## 5. 合入与 GitHub 回读
+
+- [PR #196](https://github.com/JToday666/agent-guard/pull/196) 的 11 项 required checks 全部成功，候选以 squash commit [`ee775dc`](https://github.com/JToday666/agent-guard/commit/ee775dc272cf68de0535fee94585fb509c61c3ed) 合入 `dev`；`main` 未更新，也没有发布包、镜像、标签或 release。
+- [PR CI run 32823275837](https://github.com/JToday666/agent-guard/actions/runs/32823275837)、[source build run 32823275756](https://github.com/JToday666/agent-guard/actions/runs/32823275756)、[post-merge dev CI run 32824258903](https://github.com/JToday666/agent-guard/actions/runs/32824258903) 与 [post-merge source build run 32824258897](https://github.com/JToday666/agent-guard/actions/runs/32824258897) 均成功；手动 OpenClaw live gate 按阶段契约为 skipped，不计入 required checks。
+- GitHub REST 逐条回读确认 95 条输入全部为 `fixed`，没有缺失项，`dismissed_at` 均为空；修复时间范围为 `2026-08-25T07:59:08Z` 至 `2026-08-25T07:59:18Z`。逐条状态固化在[机器可读回读清单](dependabot_medium_low_fixed_readback.json)。
+- 重扫后的开放 Dependabot 告警为 0。该值是当前依赖图快照，不是“永远无漏洞”的声明；新增 advisory 或依赖变更仍须重新进入分诊和门禁流程。
+
+本批出口条件已全部达成。它不授权更新 `main`、发布包/镜像或宣称生产就绪。

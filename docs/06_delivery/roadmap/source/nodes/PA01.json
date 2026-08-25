@@ -18,6 +18,8 @@
     "evidence/PA01/EV-PA01-2636E7E5C8BA.json",
     "evidence/PA01/EV-PA01-768E9449D3FC.json",
     "evidence/PA01/EV-PA01-CF6CE41EE8A1.json",
+    "evidence/PA01/EV-PA01-DC7ACE1E77DB.json",
+    "evidence/PA01/EV-PA01-D6106F091152.json",
     "evidence/PA01/EV-PA01-WORKTREE.json"
   ],
   "exact_title": "Productization Alpha — Cross-cutting stabilization",
@@ -31,10 +33,11 @@
     "This is an internal milestone only; it does not publish a SemVer release, update main, or claim production readiness.",
     "The internal Productization Alpha milestone is integrated at dev a9702bc; this claim remains active only to enforce the feature freeze until a separate resumption review.",
     "GitHub platform governance is enabled: dev requires 11 source-bound checks, and repository security reporting, secret scanning, push protection, and Dependabot security updates are active.",
-    "The initial critical/high dependency batch is merged at dev 2fdbe203; GitHub readback confirms 64 alerts fixed without dismissal and zero critical/high alerts remain."
+    "The initial critical/high dependency batch is merged at dev 2fdbe203; GitHub readback confirms 64 alerts fixed without dismissal and zero critical/high alerts remain.",
+    "The remaining medium/low dependency batch is merged at dev ee775dc; all 95 inputs are fixed without dismissal, leaving zero open Dependabot alerts at the 2026-08-25 readback."
   ],
   "optional": false,
-  "revision": 6,
+  "revision": 7,
   "roles": [
     "task"
   ],
@@ -47,11 +50,11 @@
     }
   ],
   "work": {
-    "base_sha": "8ae6c1ef5bb68b088a55eed81e06ffd1a7c2e169",
-    "branch": "codex/productization-alpha-dependency-medium-low",
+    "base_sha": "ee775dc272cf68de0535fee94585fb509c61c3ed",
+    "branch": "codex/productization-alpha-dependency-medium-low-closeout",
     "owner": "codex-root",
-    "started_at": "2026-08-25T05:21:23Z",
+    "started_at": "2026-08-25T08:08:35Z",
     "substate": "active",
-    "worktree_slug": "productization-alpha-dependency-medium-low"
+    "worktree_slug": "productization-alpha-dependency-medium-low-closeout"
   }
 }
