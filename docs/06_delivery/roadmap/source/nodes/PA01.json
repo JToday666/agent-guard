@@ -37,7 +37,7 @@
     "The remaining medium/low dependency batch is merged at dev ee775dc; all 95 inputs are fixed without dismissal, leaving zero open Dependabot alerts at the 2026-08-25 readback."
   ],
   "optional": false,
-  "revision": 7,
+  "revision": 8,
   "roles": [
     "task"
   ],
@@ -50,11 +50,11 @@
     }
   ],
   "work": {
-    "base_sha": "ee775dc272cf68de0535fee94585fb509c61c3ed",
-    "branch": "codex/productization-alpha-dependency-medium-low-closeout",
-    "owner": "codex-root",
-    "started_at": "2026-08-25T08:08:35Z",
+    "base_sha": "5381505e901f5e6b93ec735e522593fddd98b1b8",
+    "branch": "dev",
+    "owner": "maintainers",
+    "started_at": "2026-08-25T08:28:21Z",
     "substate": "active",
-    "worktree_slug": "productization-alpha-dependency-medium-low-closeout"
+    "worktree_slug": "productization-alpha-feature-freeze"
   }
 }
