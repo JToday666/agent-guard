@@ -11391,7 +11391,7 @@
           ]
         }
       ],
-      "revision": 5,
+      "revision": 6,
       "roles": [
         "task"
       ],
@@ -11406,12 +11406,12 @@
       "topological_rank": 0,
       "unmet_dependencies": [],
       "work": {
-        "base_sha": "cc3c229da9f625a784e7f0c0f4f562652b0b511d",
-        "branch": "dev",
-        "owner": "maintainers",
-        "started_at": "2026-08-24T18:20:29Z",
+        "base_sha": "8ae6c1ef5bb68b088a55eed81e06ffd1a7c2e169",
+        "branch": "codex/productization-alpha-dependency-medium-low",
+        "owner": "codex-root",
+        "started_at": "2026-08-25T05:21:23Z",
         "substate": "active",
-        "worktree_slug": "productization-alpha-feature-freeze"
+        "worktree_slug": "productization-alpha-dependency-medium-low"
       }
     },
     {
@@ -28766,5 +28766,5 @@
     }
   ],
   "schema_version": "1.0.0",
-  "source_digest": "8413e79eac4e0db8861bce6e0d78ed68200741d8229b614ac63caacec4c9cd37"
+  "source_digest": "2269484f774b8ab0970e7a6403908d80c5ed166c35c57362f303ecf3e981929a"
 }
