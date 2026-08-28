@@ -8,7 +8,7 @@
 
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [`agentguard-core` 设计](../02_core/core_design.md)
-- [实施路线与验收标准](../06_delivery/implementation_plan.md)
+- [能力与依赖路线图](../../ROADMAP.md)
 
 ## 2. 四层架构
 
@@ -96,8 +96,8 @@ Agent Runtime
 LangGraph SDK 与靶场逻辑按当前版本冻结。
 
 动作执行覆盖指标、`risk_breakdown`、结构化 `context_sources`、LLM 职责、记忆生命周期、
-生产级多租户和供应链自动化都不是可从现有能力推导出的“已完成项”；其实施边界见
-[项目状态与后续边界](../TODO.md)，涉及 Core 或跨端契约时必须单独确认。
+生产级多租户和供应链自动化都不是可从现有能力推导出的“已完成项”；细粒度缺口见
+[技术待办](../TODO.md)，涉及 Core 或跨端契约时必须单独确认。
 
 ## 6. 验收证据
 

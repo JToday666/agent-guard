@@ -2,12 +2,14 @@
 
 AgentGuard 是面向大模型智能体的运行时行为监督、攻击检测与审计系统。它不替代基础模型或 Agent 框架，而是在智能体准备执行外部动作时，将工具调用、消息发送、模型输入输出、工具结果和记忆写入等行为转换为统一安全事件，并在副作用发生前完成判定、阻断、审批和留证。
 
-当前主线处于 **Productization Alpha（in progress）**，优先收敛稳定契约、可重复安装、分层测试、运行时执行证据和生产边界。历史竞赛与答辩材料已降级为归档，不是默认产品入口，也不能替代当前验收。开始使用前请阅读：
+Productization Alpha 已完成并构成当前已验证的产品基线。后续开发按根目录 Roadmap 中人工维护的能力节点与硬依赖路线推进；Roadmap 记录开发方向，不替代契约、状态证据或发布结论。贡献范围与当前限制以贡献规范为准。历史竞赛与答辩材料不是默认产品入口，也不能替代当前验收。开始使用或参与开发前请阅读：
 
+- [能力与依赖路线图](ROADMAP.md)
 - [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md)
 - [安装、升级和故障排查](docs/06_delivery/install_upgrade_troubleshooting.md)
 - [产品化架构与目录职责](docs/01_overview/productization_architecture.md)
 - [兼容矩阵](docs/06_delivery/compatibility_matrix.md)
+- [贡献规范](CONTRIBUTING.md)
 
 ## 核心架构
 
@@ -67,7 +69,7 @@ AttackCase
 - Python 3.12，使用 `uv` 管理依赖和命令；更高版本尚未进入正式 CI 矩阵。
 - Node 24.18.0 和 pnpm 11.9.0。
 - PostgreSQL，用于 Guard API、审计、审批和指标存储。
-- 可选：OpenClaw 2026.6.6 或 2026.7.1-2，用于 runtime plugin 验证；R05 宿主能力限制仍保留。
+- 可选：OpenClaw 2026.6.6 或 2026.7.1-2，用于 runtime plugin 验证；Strong Approval Binding 的宿主能力限制仍保留。
 
 首次在仓库根目录准备依赖：
 
@@ -231,4 +233,4 @@ docs/archive/          # 历史竞赛、答辩与演示证据；非产品入口
 
 ## 历史材料与当前状态
 
-2026 年竞赛与答辩阶段的受审查材料位于 [`docs/archive/competition-2026/`](docs/archive/competition-2026/README.md)。其中部分历史运行依赖当时的 ignored staging 和临时输出，只用于追溯，不是干净 clone 复现说明、正式效果结论或生产就绪证据。当前能力、未完成项和最终门禁结果以 [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md) 为准。
+2026 年竞赛与答辩阶段的受审查材料位于 [`docs/archive/competition-2026/`](docs/archive/competition-2026/README.md)。其中部分历史运行依赖当时的 ignored staging 和临时输出，只用于追溯，不是干净 clone 复现说明、正式效果结论或生产就绪证据。Productization Alpha 的里程碑能力、限制和门禁快照以 [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md) 为准；当前开发路线见 [Roadmap](ROADMAP.md)，贡献限制见 [CONTRIBUTING.md](CONTRIBUTING.md)。

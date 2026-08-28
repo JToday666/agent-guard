@@ -12,9 +12,9 @@
 
 ### Changed
 
-- 产品入口改为运行时安全与控制面，不再以竞赛或答辩演示为默认叙事。
+- 产品入口改为运行时安全与控制面，不再以竞赛交付为默认叙事。
 - 历史竞赛证据移至 `docs/archive/competition-2026/`，并明确其不可复现依赖和证据边界。
-- 当前未发布源码的 OpenClaw hook 契约统一为 24；公开 Beta 1 制品仍是历史 22-hook 构建，两者不混称。
+- 当前未发布源码的 OpenClaw 契约统一为 24 个唯一 hook 名/25 个 handler；公开 Beta 1 制品仍是历史 22-hook 构建，两者不混称。
 
 ### Fixed
 
@@ -24,9 +24,9 @@
 
 ### Known limitations
 
-- Productization Alpha 状态仍为 `in progress`；最终集成 SHA 和门禁结果尚待填写。
+- Productization Alpha 是已完成的内部基线，不代表生产就绪；当前贡献与发布限制以 `CONTRIBUTING.md` 为准。
 - 真实外部 Provider 的 LangGraph V2 `70×5=350` 正式测评尚未完成。
-- OpenClaw R05 仍受宿主 atomic replace-and-seal / authoritative invocation-start 能力阻塞。
+- OpenClaw OC-02 strong binding 仍受宿主 atomic replace-and-seal / authoritative invocation-start 能力阻塞。
 - Memory Guard 的 commit/rollback 仍只改变控制面记录状态，尚未执行真实 runtime memory 回滚。
 - 当前源码仍沿用 Beta 1 包版本号但内容已变化；本阶段禁止发布，下一次任何可发布构建前必须统一升版并禁止同版本覆盖。
 - 容器公开发布、SBOM、签名、provenance、Trusted Publishing 和生产部署自动化尚未完成。

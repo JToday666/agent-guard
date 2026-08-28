@@ -10,7 +10,7 @@
 | 平台治理记录基线 | `dev@f0ae6226b1f30db3f6274396f6a1560ce2aaf379`（本记录分支的 base） |
 | 托管 CI run | [CI 32713623227](https://github.com/JToday666/agent-guard/actions/runs/32713623227)：全部自动门禁通过；[Internal Source Build Check 32713623191](https://github.com/JToday666/agent-guard/actions/runs/32713623191)：通过 |
 
-> Productization Alpha 产品代码在 `a9702bc` 进入 `dev`，收尾状态在 `f0ae622` 进入 `dev`；本记录使用分支 base 表达平台治理前置状态，避免提交自引用。`PA01` 继续保持活动以执行功能冻结，直到独立的恢复开发评审决定是否协调释放其表面并关闭节点。completed 不代表生产就绪，也不扩大下文明确列出的能力边界。
+> Productization Alpha 产品代码在 `a9702bc` 进入 `dev`，收尾状态在 `f0ae622` 进入 `dev`；本记录使用分支 base 表达平台治理前置状态，避免提交自引用。旧机器路线图曾通过 `PA01` 活动节点执行功能冻结，该控制面现已退役；根目录 [`ROADMAP.md`](../../ROADMAP.md) 改为人工维护的能力与依赖路线，当前贡献限制由 [`CONTRIBUTING.md`](../../CONTRIBUTING.md) 管理。completed 不代表生产就绪，也不扩大下文明确列出的能力边界。
 
 ## 本轮目标
 
@@ -21,7 +21,7 @@
 - 提供不依赖 ignored 本地脚本或临时目录的最小示例。
 - 将自动 CI 拆分为 unit、contract、integration、PostgreSQL 和 E2E；live 保持手动 opt-in。
 - 恢复 official/shadow/demo 的事实边界，避免展示层扩大权威声明。
-- 机器路线图以 `PA01` 集成节点记录本阶段；节点活动期间占用全表面，显式落实功能冻结并阻止并行功能分支误占产品路径。
+- 阶段实施期间曾由机器路线图的 `PA01` 集成节点占用全表面并落实功能冻结；这是历史治理事实，不再是当前贡献流程。
 
 这是内部里程碑：本阶段不创建或发布 `v0.2.0-alpha.1`，不推送镜像或包，不修改 `main`，也不对外宣称生产就绪。
 
@@ -29,27 +29,27 @@
 
 - Core 无状态 `allow` / `deny` / `ask` 判定与可解释规则命中。
 - Guard API 的 credential、策略快照、原子审批、AuditEvent 哈希链、Trace、指标和 PostgreSQL 存储。
-- LangGraph Adapter 和 OpenClaw 24-hook 插件接入。
+- LangGraph Adapter 和 OpenClaw Base Profile 接入；当前源码要求 24 个唯一 hook 名并注册 25 个 handler。
 - Dashboard 调查、审批、证据、评测和系统状态视图。
 - LangGraph 评测 runner、70 条主数据集及 V2 competition profile 的实现表面。
 
 ## 尚未完成或不可扩大宣称
 
 - 真实外部 Provider 的固定 A0–A4、70 例、`70×5=350` qualifying matrix 尚未完成；stub/contracts/demo 运行不能替代。
-- R05 仍被 OpenClaw 宿主缺少 atomic replace-and-seal 与 authoritative invocation-start 阻塞，因此 Gate B 和正式 S4 不能关闭。
+- `OC-02` OpenClaw Strong Approval Binding 仍被宿主缺少 atomic replace-and-seal 与 authoritative invocation-start 阻塞。
 - Memory Guard 的 `commit` / `rollback` 目前只更新控制面变更记录，不会回滚或恢复真实 runtime memory。
 - action receipt 覆盖率、跨 run 回归阈值、完整生产运维、容器/包公开发布、可归档与可复现 SBOM、签名、provenance 和 Trusted Publishing 仍未完成。本轮仅为精确候选 SHA 本地生成并校验 SBOM，不构成发布或长期制品归档。
 - 多租户、用户登录、OAuth/SSO、自动备份与恢复不属于当前 Alpha 已有能力。
-- 公开 `v0.1.0-beta.1`/对应 npm 制品是 22-hook 基线，当前未发布源码为 24 hooks，但包版本仍为 `0.1.0-beta.1`。本阶段不发布；下一次构建可发布制品前必须统一提升 Python/Node 版本和映射，禁止以同版本覆盖不同内容。
+- 公开 `v0.1.0-beta.1`/对应 npm 制品是 22 个 hook 名的基线；23-hook 只属于历史中间源码/证据；当前未发布源码要求 24 个唯一 hook 名并注册 25 个 handler，但包版本仍为 `0.1.0-beta.1`。本阶段不发布；下一次构建可发布制品前必须统一提升 Python/Node 版本和映射，禁止以同版本覆盖不同内容。
 - `scripts/` 已完成职责分类和兼容入口说明，但物理迁移与超大模块拆分尚未完成；继续拆分时必须保持公共 import、CLI 和 `/v1` 行为不变。
 - legacy benchmark 的 standalone LangGraph subprocess 已移除开发者机器默认路径，必须显式提供 agent command/path；但对应 849 项旧测试仍未进入门禁，它也不属于产品示例或 clean-clone acceptance。测试和依赖完成重整前不得把该 adapter 称为 Alpha 支持入口。
-- 四份既有 demo 设计/运行文档因 roadmap 与外部链接兼容暂留 `docs/06_delivery/`，已统一标记 historical/unsupported 并从产品入口降级；物理迁入 archive 留待保留引用关系的独立迁移。
+- 本里程碑当时使用的四份 demo 设计/运行文档已在 2026-08-28 仓库收尾中从当前树移除；如需复盘只通过 Git 历史追溯，不恢复为产品入口。
 - CODEOWNERS 已进入仓库；截至 2026-08-24，classic branch protection endpoint 对 `dev` 仍返回未启用，但 active repository ruleset `dev merge check` 会阻止删除、非快进和绕过 PR，只允许 squash，并严格要求下文 11 个 GitHub Actions checks 基于最新 `dev` 全部通过。每个 context 均绑定 GitHub Actions App `integration_id=15368`，ruleset 无 bypass actor。
 - 仓库级 secret scanning、push protection、Private Vulnerability Reporting、Dependabot alerts 与 Dependabot security updates 已启用并经 API 回读确认。启用后的初始快照为 secret scanning 开放告警 0 个、Dependabot 开放告警 162 个（critical 1、high 63、medium 28、low 70）；这是治理入口与待办基线，不是“依赖安全”或“无漏洞”的证明。critical/high 告警完成去重、可达性分析和修复前，不开始外部技术试用。
 
-2026-08-25 已对上述 64 条 critical/high 告警逐条完成静态分诊：14 条 OpenClaw/MCP 传递依赖为 `needs_review`，50 条为 `not_actionable`（其中 44 条属于未被产品或 runner 安装/启动的 legacy benchmark fixture）。本轮仍升级了全部涉及的产品、工具链和 fixture 锁文件，没有 dismiss 告警；[PR #192](https://github.com/JToday666/agent-guard/pull/192) 的 11 项 required checks 全部成功，并以 `2fdbe20396b3dda4d3990a89688106e7720ddc6b` 合入 `dev`，合入后的 [dev CI](https://github.com/JToday666/agent-guard/actions/runs/32759050061) 亦全部成功。Dependency Graph 重扫后，GitHub API 确认本批 64 条全部为 `fixed`、`dismissed_at` 均为空，开放告警变为 critical 0、high 0、medium 28、low 67。完整输入映射、边界证据和回读结果见[Dependabot critical/high 分诊与修复记录](dependabot_critical_high_triage.md)。critical/high 依赖告警不再构成单独阻塞项，但这不会自动授权外部试用、生产部署或对外发布。
+2026-08-25 已对上述 64 条 critical/high 告警逐条完成静态分诊：14 条 OpenClaw/MCP 传递依赖为 `needs_review`，50 条为 `not_actionable`（其中 44 条属于未被产品或 runner 安装/启动的 legacy benchmark fixture）。本轮仍升级了全部涉及的产品、工具链和 fixture 锁文件，没有 dismiss 告警；[PR #192](https://github.com/JToday666/agent-guard/pull/192) 的 11 项 required checks 全部成功，并以 `2fdbe20396b3dda4d3990a89688106e7720ddc6b` 合入 `dev`，合入后的 [dev CI](https://github.com/JToday666/agent-guard/actions/runs/32759050061) 亦全部成功。Dependency Graph 重扫后，GitHub API 确认本批 64 条全部为 `fixed`、`dismissed_at` 均为空，开放告警变为 critical 0、high 0、medium 28、low 67。完整输入映射、边界证据和回读结果见[Dependabot critical/high 分诊与修复记录](../archive/productization-alpha-2026/dependabot/dependabot_critical_high_triage.md)。critical/high 依赖告警不再构成单独阻塞项，但这不会自动授权外部试用、生产部署或对外发布。
 
-同日继续处理剩余 95 条 medium/low 告警：6 条 OpenClaw/MCP 传递依赖为 `needs_review`，89 条为 `not_actionable`（其中 88 条来自未被产品或 runner 安装/启动的相同 legacy benchmark fixture）。[PR #196](https://github.com/JToday666/agent-guard/pull/196) 升级了全部根锁和 fixture 输入，没有 dismiss 告警；11 项 required checks 全部成功，并以 `ee775dc272cf68de0535fee94585fb509c61c3ed` 合入 `dev`。合入后的 [dev CI](https://github.com/JToday666/agent-guard/actions/runs/32824258903) 与 [Internal Source Build Check](https://github.com/JToday666/agent-guard/actions/runs/32824258897) 均成功；GitHub API 逐条回读确认 95/95 为 `fixed`、`dismissed_at` 均为空，开放 Dependabot 告警为 0。完整映射与边界见[Dependabot medium/low 分诊与修复记录](dependabot_medium_low_triage.md)。这是当前扫描状态，不等于证明依赖树未来无漏洞，也不扩大 Alpha 支持或发布边界。
+同日继续处理剩余 95 条 medium/low 告警：6 条 OpenClaw/MCP 传递依赖为 `needs_review`，89 条为 `not_actionable`（其中 88 条来自未被产品或 runner 安装/启动的相同 legacy benchmark fixture）。[PR #196](https://github.com/JToday666/agent-guard/pull/196) 升级了全部根锁和 fixture 输入，没有 dismiss 告警；11 项 required checks 全部成功，并以 `ee775dc272cf68de0535fee94585fb509c61c3ed` 合入 `dev`。合入后的 [dev CI](https://github.com/JToday666/agent-guard/actions/runs/32824258903) 与 [Internal Source Build Check](https://github.com/JToday666/agent-guard/actions/runs/32824258897) 均成功；GitHub API 逐条回读确认 95/95 为 `fixed`、`dismissed_at` 均为空，开放 Dependabot 告警为 0。完整映射与边界见[Dependabot medium/low 分诊与修复记录](../archive/productization-alpha-2026/dependabot/dependabot_medium_low_triage.md)。这是 2026-08-25 的回读快照，不等于证明依赖树未来无漏洞，也不扩大 Alpha 支持或发布边界；当前状态以 GitHub Security 实时页面为准。
 
 ## CI 状态口径
 
@@ -57,7 +57,7 @@
 
 `dev` ruleset 现强制以上 10 个 CI job context，加上独立的 `Build and verify ephemeral source artifacts`，共 11 项。手动 `Manual OpenClaw live gate` 因正常状态为 skipped，不属于 required checks；任何 required context 改名都必须先迁移 ruleset，避免形成永久等待。
 
-Python 六层分类当前只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,536 项：unit 1,187、contract 386、integration 782、postgres 156、e2e 24、live 1。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当前也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
+2026-08-25 Alpha 收口时，Python 六层分类只覆盖根 `tests/` 与 LangGraph adapter tests，共收集 2,536 项：unit 1,187、contract 386、integration 782、postgres 156、e2e 24、live 1。该历史数量包含后续已随旧路线图工具退役的 26 项契约测试，不是当前 collection 总数。`agentguard_langgraph_bench/bench/tests` 的 849 项旧 benchmark 测试尚未纳入该矩阵：其中混有浏览器/本地 socket 用例、已移除 fixtures 和历史外部依赖，必须先完成依赖与 marker 重整；该 legacy tree 当时也有 31 项 Ruff 诊断，尚未进入默认 Ruff/Pyright。因而“Python 分层/静态检查通过”不能扩大为“全仓 benchmark 已覆盖”。
 
 Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API 映射；独立 S1 memory 场景才是 Dashboard 到真实 Guard API 的浏览器全栈验证。clean-clone acceptance 另在隔离临时目录中验证安装后健康、临时凭证、benign allow、malicious deny、审计查询、Dashboard shell/静态资源和凭证撤销，两者覆盖边界不同。
 
@@ -65,7 +65,9 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 
 ## 验证与出口证据
 
-本阶段整理期间已在当前工作区完成以下验证：
+以下是 2026-08-25 Alpha 收口时的不可回溯验证快照，不代表路线图迁移后的当前测试收集数量；其中旧 roadmap 工具及其 26 项契约测试已在 2026-08-28 的路线图迁移中退役。
+
+本阶段整理期间已在当时工作区完成以下验证：
 
 - 完整 unit 层为 1,171 passed、16 skipped；完整 contract 层为 386 passed，其中 Markdown 链接契约 5 项、exact-wheel 选择契约 2 项、roadmap 工具契约 26 项、critical/high 依赖安全下限契约 3 项。
 - 审批截止时间、C1 message receipt/action 关联和 AgentGuard runtime/lease token 脱敏的定向回归为 87 passed；受影响的 legacy benchmark gateway 定向回归另为 41 passed、3 skipped。
@@ -82,10 +84,12 @@ Dashboard 的 API-mode Playwright 会拦截 `/api/v1/**`，只验证前端 API �
 
 托管 CI 已覆盖完整默认 integration、PostgreSQL、Python E2E、浏览器 E2E 与真实 Dashboard→Guard API memory 链路；本地补充完成了镜像启动和 SBOM 生成。仍未验证的能力只按上文范围限制处理，不得把本次 Alpha 结论扩大为生产就绪、真实 Provider 效果完成、OpenClaw live 宿主完成或 legacy benchmark 全仓通过。
 
-## 后续优先级
+## 里程碑结束时记录的后续事项（历史）
+
+以下事项记录 2026-08-25 Alpha 收口时的判断，不作为当前优先级来源；当前能力路线见根目录 [`ROADMAP.md`](../../ROADMAP.md)，贡献与发布限制见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)。
 
 1. 持续监控新 Dependabot 告警；出现新输入时继续使用逐条去重、可达性分析、修复和 required-check 流程，不批量绕过、dismiss 或自动合并。
-2. 保持 `PA01` 的功能冻结；需要恢复功能开发时，另行评审并协调释放其产品表面。
+2. 当时的贡献限制及其解除方式继续由 [`CONTRIBUTING.md`](../../CONTRIBUTING.md) 维护，本历史状态页不作授权判断。
 3. 完成 Python/Node 唯一版本映射和内部 release candidate，再进行两次独立干净环境试用验收；在此之前不发布 `v0.2.0-alpha.1`。
-4. 核对 roadmap 中 LGV2-C/I/B/FE 的代码、验收和 evidence lifecycle，不凭大合并提交批量标绿。
-5. 真实 Memory Guard、R05 host capability、正式 350-run 与生产发布留在后续里程碑，不在本次 completed 结论内。
+4. 按根目录 [`ROADMAP.md`](../../ROADMAP.md) 的迁移口径核对 LGV2-C/I/B/FE 已落地表面；比赛专属未完成事项不继续作为产品任务继承。
+5. 真实 Memory Guard、`OC-02` host capability、正式 350-run 与生产发布留在后续里程碑，不在本次 completed 结论内。

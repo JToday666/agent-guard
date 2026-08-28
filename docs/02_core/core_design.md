@@ -8,7 +8,7 @@ Core 是 AgentGuard 的无状态安全判定内核。本文定义 Core 的职责
 
 - [接口契约与事件模型](interface_contract.md)
 - [威胁模型](threat_model.md)
-- [实施路线与验收标准](../06_delivery/implementation_plan.md)
+- [能力与依赖路线图](../../ROADMAP.md)
 
 ## 2. 职责边界
 
@@ -37,11 +37,11 @@ Core 不负责：
 - 渲染 Dashboard 页面或推送 WebSocket；
 - 管理 Redteam 样本 ground truth。
 
-这些状态和副作用能力逻辑上属于 Guard API / Control Plane。MVP 阶段它们实现为 `guard-api` 内部 service layer，而不是 Core 的一部分。
+这些状态和副作用能力逻辑上属于 Guard API / Control Plane。当前实现将它们放在 `guard-api` 内部 service layer，而不是 Core。
 
 ## 3. 输入与输出
 
-Core 目标接口：
+Core 公共接口：
 
 ```python
 def evaluate(event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDecision:
@@ -59,7 +59,7 @@ def evaluate(event: GuardEvent, policies: PolicyBundle | None = None) -> GuardDe
 
 `AuditEvent` 可以由 Core 提供领域 schema 或 builder，但审计入库、查询、指标聚合和 Dashboard 展示由 Guard API / Control Plane 负责。
 
-P0/P1 `PolicyBundle` 已经参与判定，但必须作为已加载快照传入 Core。它支持关闭内置规则、覆盖已触发规则的 `decision/risk_score/severity`，以及配置敏感资源标记、敏感文本标记、prompt injection / jailbreak / model leak / dangerous command / memory poisoning 标记、工具画像、允许外发域名、允许 API host/path、collection endpoint 标记和工具动作别名。规则放行使用 `disabled_rules`；`RuleOverride` 只允许把已触发规则调整为 `ask` 或 `deny`，不承担放行语义。
+`PolicyBundle` 已经参与判定，但必须作为已加载快照传入 Core。它支持关闭内置规则、覆盖已触发规则的 `decision/risk_score/severity`，以及配置敏感资源标记、敏感文本标记、prompt injection / jailbreak / model leak / dangerous command / memory poisoning 标记、工具画像、允许外发域名、允许 API host/path、collection endpoint 标记和工具动作别名。规则放行使用 `disabled_rules`；`RuleOverride` 只允许把已触发规则调整为 `ask` 或 `deny`，不承担放行语义。
 Guard API 当前提供单个持久化 `PolicyBundle` 当前快照，并记录每次替换的 revision/history 审计；若未保存快照，则使用启动时注入的 `policy_bundle` 或默认策略。Core 不知道快照来源、revision、审计记录，也不负责发布审批、回滚或多租户隔离。
 
 ## 4. 内部结构
@@ -71,7 +71,7 @@ packages/agentguard-core/
 └── agentguard_core/
     ├── events/
     │   ├── contracts.py        # GuardEvent、event_type/payload 绑定、raw payload contract
-    │   ├── payloads.py         # P0/P1 payload models
+    │   ├── payloads.py         # 事件 payload models
     │   └── resources.py        # derive_resources()
     ├── decisions/
     │   ├── models.py           # GuardDecision、AuditEvent、RuleHit
@@ -144,27 +144,27 @@ Core 只负责返回审批意图和必要证据，例如：
 ```
 
 Core 不创建 approval row，不处理浏览器鉴权，不等待审批结果。Guard API / Control Plane 根据 `ask` 决策创建审批记录、发布 Dashboard 待办，并向 Adapter 提供 wait 接口。
-审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期；resolve 由 browser session 与 CSRF 保护，并通过审批行的原子状态转换保证只能完成一次。P0 工具事件的 `subject_id` 是 tool call id，P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。审批契约只包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`，不保留工具专用别名。
+审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期；resolve 由 browser session 与 CSRF 保护，并通过审批行的原子状态转换保证只能完成一次。工具事件的 `subject_id` 是 tool call id，非工具事件的 `subject_id` 是 `GuardEvent.event_id`。审批契约只包含 `subject_id`、`subject_type`、`action_id` 和 `action_name`，不保留工具专用别名。
 
 ## 7. 检测器
 
-| 检测器 | 阶段 | 作用 |
-| ------ | ---- | ---- |
-| SensitiveFileDetector | P0 | 检测 `.env`、token、secret、key、private 路径 |
-| ToolHijackDetector | P0 | 检测工具名、工具类型和用户任务不匹配 |
-| TaskMismatchDetector | P0 | 判断工具动作与 `user_task` 是否偏离 |
-| OutboundDLPDetector | P0-P1 | 检测邮件、消息、API 外发中的敏感数据 |
-| PromptInjectionDetector | P1 | 检测不可信内容中的注入语句 |
-| JailbreakDetector | P1 | 检测模型越狱输入或输出 |
-| CodeExecDetector | P1 | 检测危险命令、系统探测、删除和外连 |
-| MemoryPoisoningDetector | P1-P2 | 检测恶意长期记忆写入 |
-| EnvironmentPoisoningDetector | P1-P2 | 检测 README、日志、API 返回污染 |
-| NetworkSSRFDetector | P2 | 检测内网、metadata 和异常外连访问 |
+| 检测器 | 支持状态 | 作用 |
+| ------ | -------- | ---- |
+| SensitiveFileDetector | 已支持 | 检测 `.env`、token、secret、key、private 路径 |
+| ToolHijackDetector | 已支持 | 检测工具名、工具类型和用户任务不匹配 |
+| TaskMismatchDetector | 已支持 | 判断工具动作与 `user_task` 是否偏离 |
+| OutboundDLPDetector | 已支持 | 检测邮件、消息、API 外发中的敏感数据 |
+| PromptInjectionDetector | 已支持 | 检测不可信内容中的注入语句 |
+| JailbreakDetector | 已支持 | 检测模型越狱输入或输出 |
+| CodeExecDetector | 已支持 | 检测危险命令、系统探测、删除和外连 |
+| MemoryPoisoningDetector | 已支持 | 检测恶意长期记忆写入 |
+| EnvironmentPoisoningDetector | 已支持 | 检测 README、日志、API 返回污染 |
+| NetworkSSRFDetector | 未支持 | 预留的内网、metadata 和异常外连检测方向 |
 
 检测器不得直接访问数据库、HTTP 服务、Dashboard 状态或 Agent runtime 私有对象。检测器只读取 `GuardEvent`、派生资源和策略快照。
 关键词类检测器使用轻量文本标准化后匹配策略 marker，包括大小写归一、空白压缩以及常见 shell 分隔符处理；自定义 marker 仍来自 `PolicyBundle`，不引入外部分类器或 LLM。
 
-当前 P1 Core 采用确定性规则，不引入外部模型或服务：
+当前 Core 的正式判定采用确定性规则，不依赖外部模型或服务：
 
 | 规则 ID | 默认动作 | 触发条件 |
 | ------- | -------- | -------- |
@@ -176,7 +176,7 @@ Core 不创建 approval row，不处理浏览器鉴权，不等待审批结果�
 
 ## 8. 策略决策
 
-P0 决策：
+当前正式决策：
 
 | 决策    | 含义               | Adapter 行为                                  |
 | ------- | ------------------ | --------------------------------------------- |
@@ -184,7 +184,7 @@ P0 决策：
 | `deny`  | 高风险             | 阻断工具并记录审计                            |
 | `ask`   | 中风险或上下文不足 | 暂停动作并等待 Guard API / Control Plane 审批 |
 
-P2 目标态扩展（当前不支持）：
+候选决策扩展（当前不支持）：
 
 | 决策          | 含义               |
 | ------------- | ------------------ |
@@ -192,13 +192,9 @@ P2 目标态扩展（当前不支持）：
 | `audit_only`  | 仅记录，不影响执行 |
 | `shadow_deny` | 影子模式模拟阻断   |
 
-## 9. P0/P1/P2 开发边界
+## 9. 当前支持边界
 
-| 阶段 | Core 交付 |
-| ---- | --------- |
-| P0 | `GuardEvent` / `ToolCallEvent`、`GuardDecision`、敏感文件检测、工具劫持检测、任务偏离检测、基础风险评分、可解释规则命中 |
-| P1 | 上下文和模型调用审计事件 schema、消息外发检测、记忆写入检测、策略快照输入、FPR/FNR 所需证据字段 |
-| P2 | Memory Guard、Action Critic、Provenance Graph、Tamper-Evident Audit 所需领域模型和检测扩展 |
+Core 已支持统一 `GuardEvent`、确定性 `GuardDecision`、工具/上下文/模型/工具结果/消息/记忆事件 payload、策略快照输入、风险评分、可解释规则命中，以及上表标记为“已支持”的检测器。`modify`、`audit_only`、`shadow_deny` 尚不是正式决策动作；真实运行时记忆事务、审批执行、审计持久化和 Provenance 投影也不能从 Core 判定本身推导。
 
 审批服务、审计入库、指标聚合、Trace 查询、PostgreSQL migration、Redis/WebSocket 推送不属于 Core 交付，它们属于 Guard API / Control Plane。
 

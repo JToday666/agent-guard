@@ -262,11 +262,11 @@ GET /v1/metrics/policy-evaluations
 }
 ```
 
-P0 只要求与窗口接口相同的策略指标。历史接口不得返回没有范围说明的“全部历史”结果。
+基础响应只要求与窗口接口相同的策略指标。历史接口不得返回没有范围说明的“全部历史”结果。
 
 ## 7. 授权终态与执行事实
 
-本节是 P1，不阻塞 P0 策略指标。P1 直接在 `/v1/audit/window` 和
+本节定义可选的授权终态与执行事实扩展，不阻塞基础策略指标。扩展直接在 `/v1/audit/window` 和
 `/v1/metrics/policy-evaluations` 的同一响应中增加同级 `action_metrics`，复用同一
 snapshot、策略评估 cohort 和 `outcomes_as_of`。不要为 Dashboard 自动刷新再拆出第三个
 指标请求；能力未启用时省略该字段，不返回伪零值。

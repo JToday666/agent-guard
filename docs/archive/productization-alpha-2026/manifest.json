@@ -1,0 +1,28 @@
+{
+  "archive_version": 1,
+  "archived_from_commit": "892b4a485211092dfe9f88cfb1594aa21e6f5f53",
+  "archived_at": "2026-08-28",
+  "scope": "productization-alpha-dependency-governance-evidence",
+  "files": [
+    {
+      "path": "dependabot/dependabot_critical_high_alerts.json",
+      "sha256": "6b9844765bb849d94fc5403488eee29def71c025b3721f45dfd365ba1e79370c"
+    },
+    {
+      "path": "dependabot/dependabot_critical_high_triage.md",
+      "sha256": "cf9b45cdf29c2776c00ebc73aac05c3e669e516c5685547b9e7ead749b4235e1"
+    },
+    {
+      "path": "dependabot/dependabot_medium_low_alerts.json",
+      "sha256": "ec62888e27d38643e60eabe43af2e859f1620ac2989d771b15bb4ee30cc74dac"
+    },
+    {
+      "path": "dependabot/dependabot_medium_low_fixed_readback.json",
+      "sha256": "14e6c8011c37fdcd434fbe887a064c5e967a7c826052581765aebd60eaef72a9"
+    },
+    {
+      "path": "dependabot/dependabot_medium_low_triage.md",
+      "sha256": "5ce6dd14e19bf04dc7019c31f2aa5175f251f5ddbee3099258fd2c1ad5c3e103"
+    }
+  ]
+}

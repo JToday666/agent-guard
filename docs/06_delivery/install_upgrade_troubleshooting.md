@@ -148,7 +148,10 @@ pnpm --filter @agentguard/dashboard exec playwright install-deps chromium
 
 ### OpenClaw hook 数量不一致
 
-当前契约固定 24 hooks。先构建并运行插件测试，再执行 verify：
+先区分制品和源码基线：公开 `v0.1.0-beta.1` 是 22 个 hook 名；23-hook 只存在于历史中间
+源码/证据；当前未发布源码契约要求 24 个唯一 hook 名。插件入口实际注册 25 个 handler，
+因为 `after_tool_call` 同时注册通用 observation 和 terminal closure handler。先构建并运行
+插件测试，再执行 verify：
 
 ```bash
 pnpm --filter @agentguard-ai/openclaw-plugin build
@@ -156,4 +159,6 @@ pnpm --filter @agentguard-ai/openclaw-plugin test
 pnpm openclaw:plugin:verify
 ```
 
-R05 的宿主能力限制不会因 24 hooks 已注册而自动解除，详见[Productization Alpha Status](productization_alpha_status.md)。
+OC-02 的宿主能力限制不会因 24 个 hook 名/25 个 handler 已注册而解除：当前宿主仍缺少
+原子 replace-and-seal 与权威 invocation-start。详见
+[Productization Alpha Status](productization_alpha_status.md)。

@@ -14,7 +14,7 @@
 Provenance 目标拆成可直接实施的后端要求。Guard API 已按本文实现新事件的确定性物化；
 本文不改变冻结契约，也不表示生产数据已迁移或历史 Trace 已回填。
 
-运行时安全观测的视图职责、主演示链和非对称刷新边界见
+运行时安全观测的视图职责、代表性验收链和非对称刷新边界见
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)。
 该设计只引用本实施要求中的持久化事实，不允许 Dashboard 临时补图。
 
@@ -239,7 +239,7 @@ contract tests 保证最终状态一致。
 ### AgentGuard Core
 
 - 提供 GuardEvent、GuardDecision、rule hits 和规范资源事实。
-- 后续提供已冻结的 risk breakdown。
+- risk breakdown 尚未支持；消费者不得从已有摘要字段补造该结构。
 - 不负责持久化、审批终态、事件时策略快照或运行时回执。
 
 ### Guard API / Control Plane
@@ -284,13 +284,13 @@ contract tests 保证最终状态一致。
 | 查询                    | 排序稳定；未知 kind/relation 向前兼容                     |
 | 历史 Trace              | 保持原有稀疏图，不自动回填或读取时合成                    |
 
-## 13. 发布与回滚
+## 13. 启用与回滚边界
 
-推荐顺序：
+任何环境启用丰富节点写入时都必须保持以下顺序和边界；这不是发布承诺：
 
 1. 完成 AuditEvent 0.4、幂等、runtime outcome 和稳定 links。
 2. 以
-   [运行时安全主演示链 fixture](../../tests/fixtures/runtime_safety_trace_v04.json)
+   [运行时安全代表性验收链 fixture](../../tests/fixtures/runtime_safety_trace_v04.json)
    为第一条共享基线，补充 Memory/PostgreSQL contract tests。
 3. 先在测试环境启用 writer，比较 audit 数量、节点数、孤儿边和冲突数。
 4. Dashboard 使用真实 API fixture 验证节点、关系、时间线联动和长文本布局。

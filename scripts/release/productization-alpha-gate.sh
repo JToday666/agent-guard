@@ -13,7 +13,7 @@ fi
 cd "${repo_root}"
 export UV_CACHE_DIR="${UV_CACHE_DIR:-${repo_root}/.uv-cache}"
 
-echo "[alpha] checking whitespace and generated roadmap contracts"
+echo "[alpha] checking whitespace and Markdown targets"
 alpha_base_ref="${ALPHA_BASE_REF:-origin/dev}"
 if git rev-parse --verify --quiet "${alpha_base_ref}^{commit}" >/dev/null; then
   git diff --check "${alpha_base_ref}...HEAD"
@@ -24,7 +24,6 @@ else
   exit 2
 fi
 git diff --check
-uv run python scripts/roadmap-tools.py check
 uv run python scripts/release/check_markdown_links.py
 
 echo "[alpha] checking Python"

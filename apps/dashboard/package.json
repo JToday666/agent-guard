@@ -15,7 +15,6 @@
     "test:unit": "node --test",
     "test:e2e": "playwright test",
     "test:e2e:api": "playwright test --config=playwright.api.config.ts",
-    "test:e2e:roadmap": "playwright test --config=playwright.roadmap.config.ts",
     "test:e2e:s1-live": "playwright test --config=playwright.live.config.ts",
     "test:e2e:s2-live": "playwright test --config=playwright.s2-live.config.ts",
     "build": "vue-tsc --build --force && vite build",
