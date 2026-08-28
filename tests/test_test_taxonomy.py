@@ -45,7 +45,7 @@ def test_postgres_dependency_detection_uses_parameters_and_fixtures() -> None:
 @pytest.mark.parametrize(
     ("item", "expected"),
     [
-        (_item("tests/test_roadmap_tools.py::test_check"), "contract"),
+        (_item("tests/test_schema_contract.py::test_schema"), "contract"),
         (_item("tests/test_guard_api.py::test_health"), "integration"),
         (_item("tests/test_runtime_safety_e2e.py::test_flow"), "e2e"),
         (

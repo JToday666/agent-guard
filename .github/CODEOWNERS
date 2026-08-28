@@ -13,6 +13,6 @@
 /packages/agentguard-openclaw-plugin/ @JToday666 @zhuzhu0607
 /apps/dashboard/ @JToday666 @txzy404
 
-# Delivery and roadmap truth sources
-/docs/06_delivery/roadmap/ @JToday666
+# Delivery history and human-maintained capability roadmap
+/ROADMAP.md @JToday666
 /docs/archive/ @JToday666

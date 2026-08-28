@@ -1,6 +1,6 @@
 # 文档地图
 
-本目录是 AgentGuard 的完整文档入口。当前入口优先服务产品安装、开发、运维和可验证交付；命题、竞赛、答辩与演示证据只作为标明边界的历史资料保留。
+本目录是 AgentGuard 的完整文档入口。Productization Alpha 是已完成的产品基线；当前开发方向和能力依赖由根目录人工维护的 Roadmap 展示。文档入口优先服务产品安装、开发、运维和可验证交付；命题、竞赛、答辩与演示证据只作为标明边界的历史资料保留。
 
 ## 1. 目录结构
 
@@ -13,7 +13,7 @@ docs/
 ├── 03_adapters/          # LangGraph、OpenClaw 接入
 ├── 04_apps/              # Dashboard 与审批
 ├── 05_redteam/           # AttackBench、攻击样本与评测
-├── 06_delivery/          # 部署使用、实施路线、演示脚本
+├── 06_delivery/          # 部署使用、里程碑状态与历史演示文档
 ├── 07_auth/              # Capability Auth、前端与适配器鉴权
 ├── 08_api/               # 跨端 API 目标契约、联调结构与迁移清单
 ├── archive/              # 历史竞赛、答辩与演示材料；非产品入口
@@ -25,14 +25,15 @@ docs/
 
 ### 产品安装与维护
 
-1. [Productization Alpha Status](06_delivery/productization_alpha_status.md)
-2. [Dependabot critical/high 分诊与修复记录](06_delivery/dependabot_critical_high_triage.md)
+1. [能力与依赖路线图](../ROADMAP.md)
+2. [Productization Alpha Status](06_delivery/productization_alpha_status.md)
 3. [安装、升级和故障排查](06_delivery/install_upgrade_troubleshooting.md)
 4. [兼容矩阵](06_delivery/compatibility_matrix.md)
 5. [产品化架构与目录职责](01_overview/productization_architecture.md)
 6. [接口契约与事件模型](02_core/interface_contract.md)
 7. [安全策略](../SECURITY.md)
 8. [贡献指南](../CONTRIBUTING.md)
+9. [细粒度技术待办](TODO.md)
 
 ### P0 最小闭环
 
@@ -43,15 +44,14 @@ docs/
 5. [LangGraph 评测靶场](03_adapters/langgraph_adapter.md)
 6. [AttackBench 攻击样本与评测](05_redteam/attackbench.md)
 7. [Dashboard 与审批流](04_apps/dashboard_design.md)
-8. [实施路线与验收标准](06_delivery/implementation_plan.md)
-9. [全轨实施路线图与执行控制面](06_delivery/roadmap/README.md)
+8. [能力与依赖路线图](../ROADMAP.md)
 
 ### Core 开发
 
 1. [接口契约与事件模型](02_core/interface_contract.md)
 2. [`agentguard-core` 设计](02_core/core_design.md)
 3. [威胁模型](02_core/threat_model.md)
-4. [实施路线与验收标准](06_delivery/implementation_plan.md)
+4. [能力与依赖路线图](../ROADMAP.md)
 
 ### Adapter 开发
 
@@ -71,7 +71,7 @@ docs/
 6. [运行时监督控制台增强设计包](AgentGuard_Runtime_Supervision_Console_Design/00_README_设计包索引.md)
 7. [证据链与溯源 API 目标契约](08_api/evidence_trace_api_contract.md)
 8. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
-9. [实施路线与验收标准](06_delivery/implementation_plan.md)
+9. [能力与依赖路线图](../ROADMAP.md)
 
 ### API 联调与契约评审
 
@@ -99,7 +99,7 @@ docs/
 5. [Demo 复现指南（旧路径兼容）](06_delivery/demo_reproduction_guide.md)
 6. [OpenClaw E2E 演示设计（旧路径兼容）](06_delivery/openclaw_e2e_demo_design.md)
 
-归档材料可能记录 ignored staging、临时路径或当时的演示口径，不能作为干净 clone 安装说明、当前产品能力或正式效果结论。上述四份演示文档暂留 `06_delivery/` 仅为一个里程碑周期的链接兼容，已降级为 historical/unsupported；后续物理迁移不得破坏 roadmap 证据引用。
+归档材料可能记录 ignored staging、临时路径或当时的演示口径，不能作为干净 clone 安装说明、当前产品能力或正式效果结论。上述四份演示文档暂留 `06_delivery/`，已降级为 historical/unsupported；后续文档清理会单独处理其物理归档和普通文档链接。
 
 ## 3. 文档职责
 
@@ -126,22 +126,22 @@ docs/
 | [deployment_install_usage.md](06_delivery/deployment_install_usage.md)                   | Core、Guard API、CLI、Dashboard、OpenClaw 插件和评测 runner 的安装、部署与使用 |
 | [install_upgrade_troubleshooting.md](06_delivery/install_upgrade_troubleshooting.md)     | 干净 clone、升级、测试和故障排查入口                                           |
 | [compatibility_matrix.md](06_delivery/compatibility_matrix.md)                           | 运行环境、组件、浏览器和模式兼容范围                                           |
-| [productization_alpha_status.md](06_delivery/productization_alpha_status.md)             | 当前产品化状态、未完成项、最终 SHA 与门禁结果                                  |
-| [implementation_plan.md](06_delivery/implementation_plan.md)                             | P0/P1/P2 开发顺序、任务边界和验收标准                                          |
-| [roadmap/](06_delivery/roadmap/README.md)                                                 | CORE/CT/RTE/Console 全轨任务、Gate、Stage、证据状态和并行 worktree 控制面        |
+| [productization_alpha_status.md](06_delivery/productization_alpha_status.md)             | Productization Alpha 里程碑能力、限制、最终 SHA 与门禁快照                     |
+| [ROADMAP.md](../ROADMAP.md)                                                              | 人工维护的能力节点、硬依赖、当前路线和后续候选                                 |
+| [TODO.md](TODO.md)                                                                       | 不决定方向和阶段状态的细粒度技术 backlog                                       |
 | [demo_script.md](06_delivery/demo_script.md)                                             | 防御前后对比演示和答辩叙事                                                     |
 | [鉴权总体方案.md](07_auth/鉴权总体方案.md)                                               | Capability Auth、control token、adapter token、browser session 与接口鉴权      |
 | [适配器鉴权建议.md](07_auth/适配器鉴权建议.md)                                           | Adapter / Plugin token 使用边界和 scope                                        |
 | [前端鉴权建议.md](07_auth/前端鉴权建议.md)                                               | Dashboard browser session、CSRF 和 launch code 边界                            |
 | [evidence_trace_api_contract.md](08_api/evidence_trace_api_contract.md)                  | 已冻结的证据链与溯源结构、示例、写入归属和验收清单                            |
 | [dashboard_metrics_api_contract.md](08_api/dashboard_metrics_api_contract.md)            | Dashboard 指标作用域、原子审计窗口、历史 cohort 与验收契约                    |
-| [AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md](AgentGuard_V2.1_Master_Roadmap_Final_Freeze_v2.md) | CORE / CT / RTE 三轨实施总路线图候选稿（Implementation Freeze Candidate；效力低于三套正式冻结分册，冲突时以分册为准） |
 | [AgentGuard_Runtime_Enforcement_Contract_v1_Final/](AgentGuard_Runtime_Enforcement_Contract_v1_Final/00_README_设计包索引.md) | Runtime Enforcement 契约冻结、字段/Schema/指标口径与 PR-RTE 实施计划 |
 | [AgentGuard_Runtime_Supervision_Console_Design/](AgentGuard_Runtime_Supervision_Console_Design/00_README_设计包索引.md) | 基于现有 Trace 控制台的任务监督图、CT 内容流、审批依据、字段/API 冻结与 S0-S6 实施验收候选方案 |
 
 ## 4. 维护规则
 
 - 根目录 `README.md` 只保留项目门面和关键入口，完整文档地图只维护在本文件。
+- 根目录 `ROADMAP.md` 是唯一当前能力与依赖路线入口，并由开发者直接维护；`TODO.md` 只保存可执行技术 backlog，二者不重复维护路线状态。
 - 根目录 `DEPLOYMENT_LOCAL.md` 只保留最小启动入口；产品安装、升级和故障排查从 [install_upgrade_troubleshooting.md](06_delivery/install_upgrade_troubleshooting.md) 进入，完整配置细节维护在 [deployment_install_usage.md](06_delivery/deployment_install_usage.md)。
 - `08_api/` 保存目标契约及迁移状态；目标冻结后，先在 [interface_contract.md](02_core/interface_contract.md) 区分当前实现与冻结目标，再同步 schemas、类型、存储和实现。目标契约不得被描述为当前能力。
 - Core 不依赖 Adapter，不暴露 HTTP API，不读写数据库；Adapter 不写核心规则；Dashboard 不直连运行时。

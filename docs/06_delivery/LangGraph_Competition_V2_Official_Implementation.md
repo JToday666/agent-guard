@@ -1,6 +1,6 @@
 # LangGraph-only V2 Official 竞赛闭环实施决议
 
-> 本文是受限 competition profile 的专项实现与评测契约，不是产品安装入口或生产就绪声明。当前产品状态见 [`productization_alpha_status.md`](productization_alpha_status.md)，历史竞赛/答辩证据见 [`docs/archive/competition-2026/`](../archive/competition-2026/README.md)。真实外部 Provider 的 `70×5=350` qualifying matrix 尚未完成。
+> 本文是受限 competition profile 的历史专项实现与评测记录，不是产品安装入口、当前任务计划或生产就绪声明。文中的 LGV2 节点 ID、claim 和依赖描述只记录当时的实施划分，旧机器路线图退役后不再约束开发。当前开发方向见根目录 [`ROADMAP.md`](../../ROADMAP.md)，历史竞赛/答辩证据见 [`docs/archive/competition-2026/`](../archive/competition-2026/README.md)。真实外部 Provider 的 `70×5=350` qualifying matrix 尚未完成，且不再作为产品交付承诺。
 
 ## 1. 目标与完成口径
 
@@ -18,21 +18,21 @@ V2 official decision，并记录 `legacy_floor_applied=true`。
 这是 LangGraph 竞赛专项契约扩展，不宣称正式 C11、I02B、I04、
 ROL1、R05、Gate B、S5-O 或跨 runtime 完成。不包含 OpenClaw、
 PostgreSQL、Semantic Judge、长期可靠性、动态 rollout catalog/CAS 和产品级
-CI 建设；仓库必须的 claim、evidence 与校验流程仍然适用。
+CI 建设。当时使用的 claim、evidence 与节点校验流程现已退役。
 
 ## 2. 项目级裁决 D-COMPETITION-LANGGRAPH-V2-ACTIVE
 
 接受 `D-COMPETITION-LANGGRAPH-V2-ACTIVE`：允许在新的、server-owned 且启动时
 冻结的 activation manifest 限定范围内，将 V2 设为 LangGraph 竞赛 profile
 的 profile-wide official authority，并应用 current 安全下界。该裁决只释放
-已从 R05 中验证并解耦的 LangGraph 产品表面；R05 的 active claim 仍只保留
-OpenClaw host capability，其对 Gate B 和正式 S4 的出口阻断不变。
+已从 R05 中验证并解耦的 LangGraph 产品表面；R05 仍受 OpenClaw host
+capability 缺口阻塞，但不再通过旧任务分配状态表达该状态。
 
-本裁决不更改 C11/I02B/I04/ROL1 的 lifecycle、依赖或完成口径；
+本裁决不表示 C11/I02B/I04/ROL1 已经完成，也不扩大其产品契约；
 竞赛 Dashboard 必须显式标注“Competition profile official”，不得映射为
 正式 S5-O。
 
-## 3. 四个独立实施任务
+## 3. 四个历史实施任务
 
 ### LGV2-C — Core selector、三态与 official evidence
 
@@ -80,17 +80,16 @@ OpenClaw host capability，其对 Gate B 和正式 S4 的出口阻断不变。
   success、V2 选择率和 floor 触发率。
 - 不增加网页开关或 rollout mutation；与正式 rollout mapper 分离。
 
-## 4. 实施依赖与资源边界
+## 4. 历史实施依赖与资源边界
 
-- `LGV2-C` 和 `LGV2-B` 可以独立 claim；B 的开发只占用竞赛 bench/
+- `LGV2-C` 和 `LGV2-B` 当时可以独立推进；B 的开发只占用竞赛 bench/
   LangGraph orchestrator 表面，不修改 Guard API 或 adapter 权威接线。
-- `LGV2-I` 的 start 依赖 `LGV2-C` 完成。
+- `LGV2-I` 的实现前置是 `LGV2-C`。
 - `LGV2-B` 的产品激活依赖 `LGV2-C`，其出口依赖 `LGV2-I`；
   这不阻止先行开发 runner、预检和制品合同。
-- `LGV2-FE` 的 start 依赖 `LGV2-I`，其出口依赖 `LGV2-B`。
-- 每个节点单独 claim、worktree、evidence 和 close。竞赛 bench 表面与
-  Guard API/RTE 表面分开；Core、Guard API/RTE 和 Dashboard 仍由原有独占
-  surface 串行化。
+- `LGV2-FE` 的实现前置是 `LGV2-I`，其完整验收依赖 `LGV2-B`。
+- 上述关系仅解释历史实现拆分。当前是否继续相关工作以根 `ROADMAP.md` 和
+  `docs/TODO.md` 为准，不再使用节点 claim、独占 surface 或 close 流程。
 
 ## 5. 验收边界
 

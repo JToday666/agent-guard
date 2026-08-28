@@ -8,7 +8,7 @@ Core 是 AgentGuard 的无状态安全判定内核。本文定义 Core 的职责
 
 - [接口契约与事件模型](interface_contract.md)
 - [威胁模型](threat_model.md)
-- [实施路线与验收标准](../06_delivery/implementation_plan.md)
+- [能力与依赖路线图](../../ROADMAP.md)
 
 ## 2. 职责边界
 

@@ -14,6 +14,7 @@
 
 - 产品入口改为运行时安全与控制面，不再以竞赛或答辩演示为默认叙事。
 - 历史竞赛证据移至 `docs/archive/competition-2026/`，并明确其不可复现依赖和证据边界。
+- 开发路线收敛为根目录 `ROADMAP.md` 中人工维护的能力节点与依赖关系；细粒度 backlog 继续由 `docs/TODO.md` 承载。
 - 当前未发布源码的 OpenClaw hook 契约统一为 24；公开 Beta 1 制品仍是历史 22-hook 构建，两者不混称。
 
 ### Fixed
@@ -24,7 +25,7 @@
 
 ### Known limitations
 
-- Productization Alpha 状态仍为 `in progress`；最终集成 SHA 和门禁结果尚待填写。
+- Productization Alpha 是已完成的内部基线，不代表生产就绪；当前贡献与发布限制以 `CONTRIBUTING.md` 为准。
 - 真实外部 Provider 的 LangGraph V2 `70×5=350` 正式测评尚未完成。
 - OpenClaw R05 仍受宿主 atomic replace-and-seal / authoritative invocation-start 能力阻塞。
 - Memory Guard 的 commit/rollback 仍只改变控制面记录状态，尚未执行真实 runtime memory 回滚。

@@ -9,7 +9,7 @@
 
 关联入口：
 
-- [实施路线与验收标准](implementation_plan.md)
+- [当前开发路线图](../../ROADMAP.md)
 - [AttackBench 攻击样本与评测](../05_redteam/attackbench.md)
 - [Dashboard 与审批流](../04_apps/dashboard_design.md)
 - [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)

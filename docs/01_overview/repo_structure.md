@@ -9,7 +9,7 @@
 - [产品化架构与目录职责](productization_architecture.md)
 - [系统总体架构](architecture.md)
 - [接口契约与事件模型](../02_core/interface_contract.md)
-- [实施路线与验收标准](../06_delivery/implementation_plan.md)
+- [能力与依赖路线图](../../ROADMAP.md)
 
 ## 2. 当前结构
 
@@ -18,6 +18,7 @@
 ```text
 agent-guard/
 ├── README.md
+├── ROADMAP.md          # 人工维护的能力节点、硬依赖和开发路线
 ├── DEPLOYMENT_LOCAL.md  # 根目录最小启动入口
 ├── apps/
 │   ├── cli/

@@ -1,91 +1,76 @@
-# 项目状态与后续边界
+# AgentGuard 技术待办
 
 ## 文档用途
 
-本文只记录当前已落地边界、明确冻结项和仍需单独决策的真实后续工作。Productization Alpha 当前为 **in progress**；最终 SHA 与门禁结果见
-[状态页](06_delivery/productization_alpha_status.md)。已经完成的
-迁移过程、旧接口和阶段性兼容方案不再作为待办长期保留。详细契约以
-[文档地图](README.md) 中列出的稳定文档为准。
+本文只保存细粒度、可执行的技术 backlog。开发路径和能力节点以根目录 [`ROADMAP.md`](../ROADMAP.md) 为准；面向使用者的版本变化以 [`CHANGELOG.md`](../CHANGELOG.md) 为准；已验证能力和限制由对应状态页、契约与测试说明。
 
-## 当前已落地
+维护约定：
 
-- `agentguard-core` 是无状态安全核心：接收 `GuardEvent`，执行现有检测器、规则匹配、
-  风险评分和三态判定，返回 `GuardDecision`；不访问数据库、网络或审批状态。
-- Guard API 是唯一 Control Plane：负责运行时身份鉴权、策略快照、原子审批状态机、
-  审计哈希链、证据与 provenance、指标和 Dashboard 查询。
-- 审计读取只保留 `GET /v1/audit/window`；响应以固定 sequence 快照原子返回 scope、
-  events 和 policy metrics，cursor 自包含过滤条件、页大小、位置和统计时点。
-- 历史策略指标只保留有明确时间范围的
-  `GET /v1/metrics/policy-evaluations`；按发生时间建立 cohort，按入链时间执行
-  `outcomes_as_of` 截止，并通过 keyset 分页完整聚合。
-- PostgreSQL 中完整 AuditEvent JSON 与哈希链是权威证据；typed 时间和高频查询列只是
-  可重建投影。Memory/PostgreSQL 使用同一存储契约测试。
-- AuditEvent 与策略摘要统一使用 RFC 8785 JCS 规范化；生产部署必须把 HMAC 签名审计检查点写入 PostgreSQL 之外的受保护追加日志，Dashboard 分别显示链有效性和锚定覆盖。
-- Dashboard API 模式直接消费原子审计窗口，不从旧 500 条事件数组重算后端指标；
-  Mock 与 API 共用领域类型，但 API 失败不回退到 Mock。
-- 审批只允许未过期 pending 状态原子转换一次；runtime credential 与
-  `runtime + agent_id` 绑定，浏览器只持有 session、CSRF token 和 approval nonce。
-- OpenClaw 插件使用一套配置解析与 24 个受支持 hook；关键安全 gate 缺失、Guard API
-  不可达或响应无效时按配置的强制 fail-closed 路径处理。
-- Python 发布入口收敛为 `aegis-agentguard-core`、`aegis-agentguard-api` 和
-  `aegis-agentguard-cli`；Core 只维护 `agentguard_core` 公共导入面。
+- 每项应描述可验证的结果，必要时链接 Issue、PR、契约或测试；Issue/PR 不是必填项。
+- 本文不声明项目阶段、发布日期、里程碑完成情况、能力优先级或人员分工。
+- 完成项在结果进入 `dev` 并通过相应测试与检查后移除；Git 历史保留变更过程。
+- 涉及公共契约、安全语义、数据库迁移或发布边界时，必须在对应设计或 ADR 中记录决策，不能只修改本清单。
 
-## 评测门禁基线（PR-1）
+## 不进入能力 DAG 的仓库维护
 
-- 门禁脚本为 `scripts/core-metrics-gate.py`，评估保留集
-  `tests/fixtures/eval_gate/`（保留集不参与任何词表调优）；口径与
-  `scripts/core-rule-matrix.py` 对齐：`deny`/`ask` 视为拦截，攻击用例被拦截计为
-  拦截成功，benign 用例被拦截计为误报。
-- 基线（2026-08-13，dev @ 9883771 派生分支 feat/eval-regression-gate）：
-  攻击变形 30 例、benign 13 例；Recall=0.9667（29/30），FNR=0.0333，FPR=0.0（0/13）。
-- 复跑（2026-08-13，PR-10 检测器失败语义契约化，基于 dev @ b5609af）：攻击变形 30 例、benign 13 例；Recall=0.9667（29/30），FNR=0.0333，FPR=0.0（0/13），门禁通过。
-- 已知漏拦：EG-AA-004（defamation 语义变形邮件未被拦截）。
-- 门禁默认阈值：`--min-recall 0.90`、`--max-fpr 0.05`，相对当前基线留有余量。
+- [ ] 为所有未证明合并的历史分支记录精确 SHA、PR、worktree 和处置结论。
+- [ ] 为脏 worktree 导出 binary-safe patch，计算摘要并在临时 clone 中验证可恢复。
+- [ ] 为需要保留的 clean 历史 refs 创建并验证仓库外 Git bundle；归档时排除 `.env`、token、会话和未脱敏日志。
+- [ ] 在恢复验证完成后分批清理 worktree、本地分支和远端已合并分支，并回读远端 refs。
+- [ ] 完成历史 demo、竞赛要求、阶段验收和重复设计快照的文档归档或移除。
+- [ ] 统一当前状态入口，消除 README、状态页、Changelog 和历史设计中的事实口径冲突。
+- [ ] 按 Audit、Policy、Identity、Evaluation、Security State、Approval/Lease 拆分 Control Plane store facade，同时保留现有事务边界。
+- [ ] 渐进拆分 Core fusion、Adapter context guard、benchmark runner/config/tools 和 Dashboard 巨型组件；文件移动与行为变化分开提交。
+- [ ] 将根 `scripts/` 收敛为薄 CLI，核心逻辑回到所属 package；旧命令只在明确兼容期内保留包装。
 
-## 本轮明确冻结
+## CON-01 · 跨语言契约对齐
 
-以下内容不在当前优化范围内，不应通过邻接重构间接改变：
+- [ ] 清点 Pydantic、OpenAPI、JSON Schema 和 TypeScript transport DTO 的权威来源、生成方向及当前差异。
+- [ ] 从权威 Pydantic 模型生成或校验 OpenAPI/JSON Schema 与 TypeScript transport DTO，消除手工维护的重复字段定义。
+- [ ] 为跨语言序列化、可选字段、枚举、未知字段拒绝和兼容失败增加 golden vectors 与契约测试。
+- [ ] 明确区分安全摘要使用的受限 canonical JSON 与审计链使用的 RFC 8785 JCS，并为生产者和消费者增加防混用测试。
+- [ ] 为现有调用方制定兼容迁移顺序，确保 Schema、writer、reader 和 Dashboard mapper 在同一契约变更中同步。
 
-- 正式 LangGraph SDK 及靶场中的答案生成、兼容和评测逻辑；
-- LLM 审批、LLM 检测器或 LLM 作为最终违规裁决者的职责设计；
-- 记忆生命周期与长期污染恢复机制；
-- 新增 `ActionContext` 持久化模型或 Core 公共模型。Core 继续以 `GuardEvent` 为中心。
+## ADP-01 · Adapter 生命周期扩展契约
 
-## 需要另行决策的后续工作
+- [ ] 清点现有 SDK 和 Adapter 的安全执行入口，固定唯一 evaluate、approval/lease、invoke、receipt 模板及其顺序不变量。
+- [ ] 定义公开 lifecycle 扩展协议，明确各阶段输入输出、幂等边界、异常传播和 fail-closed 语义。
+- [ ] 定义 compatibility 协商、side-effect 报告及 scoring 输入输出契约，避免扩展方依赖 SDK 私有函数。
+- [ ] 在契约中划清产品执行职责与 evaluation 扩展职责，并为 PoisonedRAG、memory case、competition profile 和特定 QA 逻辑标出对应扩展面。
+- [ ] 为公开扩展点增加契约测试和最小参考实现，覆盖 allow、deny、ask、超时、漂移及 receipt 失败路径。
+- [ ] 验证未注册扩展时产品默认行为不变，扩展异常不会绕过执行前控制或改变正式判定来源。
 
-### Productization Alpha 收口
+## WS-01 · 产品/评测依赖隔离
 
-- 真实外部 Provider 的 LangGraph V2 固定 A0–A4、70 例、`70×5=350` qualifying matrix 尚未完成；contracts/demo/stub 结果不得作为正式效果结论。
-- R05 仍被 OpenClaw 宿主的 atomic replace-and-seal 与 authoritative invocation-start 能力缺口阻塞；24 hooks 已注册不等于 R05、Gate B 或正式 S4 已完成。
-- Memory Guard 的 commit/rollback 仍只更新控制面记录状态，尚未执行真实 runtime memory 回滚或恢复。
-- Productization Alpha 新增 CI 定义需在最终集成 SHA 的托管 GitHub Actions 实际通过后才能登记为验收证据；状态页填写前不得追溯宣称已经覆盖。
+- [ ] 建立明确的 uv workspace 成员和依赖组，使产品环境不默认安装完整 evaluation 依赖。
+- [ ] 将产品 package 与 evaluation package 声明为边界清晰的 workspace 成员，禁止 evaluation 依赖反向进入产品依赖链。
+- [ ] 区分产品、开发、evaluation、浏览器和 live Provider 安装集合，并为每个受支持集合保留锁定安装命令。
+- [ ] 决定 Guard API 独立 lock 是否属于正式支持的独立部署模式；为保留的安装模式建立 CI，为不支持的模式移除重复真值。
+- [ ] 调整托管 CI，使产品检查使用最小产品依赖，evaluation 检查通过独立、显式的安装路径运行。
+- [ ] 检查 workspace 和制品边界，确保 benchmark 数据、测试 fixture、浏览器产物和本地报告不会进入产品包。
 
-### 动作终态与执行覆盖指标
+## QA-01 · 测试与支持面基线
 
-只有稳定 `action_id`、审批终态和 runtime receipt 覆盖达到可解释门槛后，才在现有
-`/v1/audit/window` 与 `/v1/metrics/policy-evaluations` 响应中增加同快照的
-`action_metrics`。`deny` 或审批拒绝本身不能冒充“工具确认未调用”；必须同时展示
-执行回执覆盖率。定义见
-[Dashboard 指标作用域与审计窗口 API 契约](08_api/dashboard_metrics_api_contract.md)。
+- [ ] 为现有测试显式补齐 `unit`、`contract`、`integration`、`postgres`、`e2e`、`benchmark`、`live` 分类，逐步移除文件名启发式分类。
+- [ ] 确定受支持的 benchmark contract/runtime 最小集合，并为其建立独立、可准确陈述范围的 PR 检查。
+- [ ] 记录各测试集合的收集范围、依赖条件和基线数量，禁止用默认 pytest 结果代替全仓 benchmark 覆盖声明。
+- [ ] 修复或移除缺失 fixture、仓库外硬编码路径、过期预期和未定义变量对应的 legacy benchmark 测试。
+- [ ] 将完整、慢速或依赖浏览器/外部 Provider 的 benchmark 放入 nightly 或显式 opt-in 流程。
+- [ ] 测量各 package 的 branch coverage 基线并采用不下降策略；对 auth、approval、lease、enforcement、receipt 和 audit integrity 设置更强覆盖要求。
+- [ ] 拆分巨型测试文件，使测试目录按组件和能力镜像源码边界。
 
-### 风险分解
+## PKG-01 · 统一版本与制品身份
 
-是否在 `GuardDecision` 与 `AuditEvent` 增加同构 `risk_breakdown` 会改变 Core 输出契约，
-必须在明确评分解释模型、聚合不变量和迁移边界后单独确认，不能仅为 Dashboard 展示
-临时拼装。
+- [ ] 清点 Python packages、Node packages、Dashboard 和 Docker 的版本来源、发布属性与当前映射差异。
+- [ ] 建立统一版本来源，并让所有候选制品的 metadata、文件名、镜像标签和运行时自报版本由其确定或接受一致性校验。
+- [ ] 扩展版本检查，覆盖 LangGraph Adapter、evaluation package、Dashboard 和其他进入候选集合的制品，而不只覆盖 Core、API、CLI 与 OpenClaw。
+- [ ] 为每个候选制品记录完整源码 SHA、内容 digest 和构建身份，禁止不同源码复用同一版本身份。
+- [ ] 扩展 artifact manifest 校验，使缺失、额外、重名、摘要变化、源码 revision 不一致或产品包混入 evaluation 内容时明确失败。
+- [ ] 记录哪些组件是可发布制品、内部构建物或仅源码工作区，避免版本存在被误解为已经发布。
 
-### 结构化上下文来源
+## 尚未立项的候选设计注记
 
-`context_sources` 若从摘要升级为结构化来源对象，需要先冻结生产者字段、信任语义、
-脱敏规则和跨 runtime 映射，再同步 Core schema、writers、Dashboard 与证据测试。
+以下内容不是可认领待办或实现承诺。只有经过独立契约评审并正式立项后，才应转换为带能力 ID 的可执行清单：
 
-### 发布与供应链
-
-Productization Alpha 分支定义了 Python 分层、PostgreSQL 16 migration/tests、Dashboard build、Playwright Chromium E2E、OpenClaw 插件和本地工具 job；只有最终集成 SHA 的托管 CI 实际通过后，才可登记为已验证覆盖。容器公开发布、SBOM、制品签名、构建 provenance、可信发布和部署自动化仍需作为独立交付任务实施和验收，不能从基础 CI 配置或通过反推为已具备。
-
-## 维护原则
-
-- 不恢复已删除的旧审计读取接口、feature flag、客户端聚合回退或平行 Python 门面。
-- 新查询投影必须可从审计链重建，不成为第二个裁决或证据事实源。
-- 任何会改变检测器、规则、评分、阈值、决策或 Core 公共模型的工作必须单独确认。
-- 完成一项后更新稳定契约和验收证据，不再在本文保留已失效的迁移步骤。
+- 若考虑在公共模型中增加 `risk_breakdown`，必须先冻结评分解释、字段、聚合不变量、脱敏规则和迁移边界。
+- 若考虑把 `context_sources` 升级为结构化公共模型，必须先冻结生产者字段、信任语义、脱敏规则和跨 runtime 映射。

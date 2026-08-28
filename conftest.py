@@ -13,7 +13,6 @@ _CONTRACT_TOKENS = (
     "schema",
     "release_artifact",
     "release_version",
-    "roadmap",
     "audit_event_v04",
 )
 _E2E_TOKENS = (
