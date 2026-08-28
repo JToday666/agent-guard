@@ -16,7 +16,7 @@ Dashboard 不做用户登录，不保存长期 token，不生成 launch code，�
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [Dashboard 指标作用域与审计窗口 API 协作契约](../08_api/dashboard_metrics_api_contract.md)
 - [系统总体架构](../01_overview/architecture.md)
-- [演示脚本](../06_delivery/demo_script.md)
+- [能力与依赖路线图](../../ROADMAP.md)
 
 ## 2. 模块职责
 
@@ -88,11 +88,11 @@ Authorization Bearer token
 
 ## 7. 已交付边界
 
-P0、P1 关键路径和部分 P2 功能均已交付：
+- 监督与审批：事件调查、策略拒绝与回执确认的执行事实、总览、Dashboard 审批和审计完整性。
+- 证据与评测：证据链时间线、溯源图、独立评测结果、策略指标和混淆矩阵。
+- 系统诊断：OpenClaw 验证、Hook 覆盖、心跳状态、配置审计发现项、规则命中 TopN 和运行时延迟对比。
 
-- P0：事件调查列表、策略拒绝与执行事实、基础总览、Dashboard 审批、审计完整性
-- P1：证据链时间线、溯源图、指标评测、混淆矩阵
-- P2（已完成）：OpenClaw 验证、Hook 覆盖与心跳状态展示，配置审计发现项明细，审计完整性完整展示，规则命中 TopN，运行时延迟对比
+这些展示面只投影 Guard API 已提供的事实；它们不证明未收到回执的动作被阻止，也不扩大 Adapter 或 runtime 的支持范围。
 
 ## 8. 验收证据
 

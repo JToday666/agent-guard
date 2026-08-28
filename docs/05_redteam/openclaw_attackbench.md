@@ -272,7 +272,7 @@ uv run agentguardctl eval run \
 | `--timeout 600`                               | 整体评测超时时间，单位秒。                                                                                                                                        |
 
 `guard-api-v0.3` 是 SDK 与 Bench 的默认协议。旧 Core 兼容调用必须显式传入
-`--core-api-mode legacy`；legacy 仅支持旧的工具评估和单事件审计路由，不支持当前 P1
+`--core-api-mode legacy`；legacy 仅支持旧的工具评估和单事件审计路由，不支持当前非工具
 运行时事件与 Guard API 审批等待接口。legacy 将在后续发布周期继续保留，但已进入弃用窗口。
 
 ## 8. 执行全量数据集自动遍历

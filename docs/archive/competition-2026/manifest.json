@@ -1,17 +1,43 @@
 {
-  "archive_version": 1,
-  "source_branch": "demo/v2-rollback-baseline",
-  "source_commit": "9cfe2f09450d0434dd1bb6da2fac5fad42184ebe",
-  "archived_at": "2026-08-24",
-  "reproducibility": "historical-ephemeral-environment",
-  "files": [
+  "archive_version": 2,
+  "updated_at": "2026-08-28",
+  "collections": [
     {
-      "path": "DEMO-LONGCHAIN-001-e2e-report.md",
-      "sha256": "b75e0786246147bc6152f911de7fb31b40f3d0f9c0639923be3d7995c55624df"
+      "name": "competition-requirements",
+      "archived_from_commit": "892b4a485211092dfe9f88cfb1594aa21e6f5f53",
+      "archived_at": "2026-08-28",
+      "status": "historical-requirements",
+      "files": [
+        {
+          "path": "requirements/命题.pdf",
+          "sha256": "34eec76923e101fe65bf404e4f8bcf0fbe71a832a93bcf80e5994e1c1f4a5e6c"
+        },
+        {
+          "path": "requirements/命题一_题目解读总结.md",
+          "sha256": "c747fb0b4f0bcfd286b78ff0aa0831c088430d135dd4d92c0028378e8827599b"
+        },
+        {
+          "path": "requirements/requirement_traceability_matrix.md",
+          "sha256": "dfc86c6889d4270173eae3641b3dfd6eb0c98792ac7169d2ae3a3c35738434b1"
+        }
+      ]
     },
     {
-      "path": "assets/demo_longchain_attack.jsonl",
-      "sha256": "8c81677005cd6f8daae887933caca647b68a88a31d0e7c155e5db773bc908b9e"
+      "name": "demo-evidence",
+      "source_branch": "demo/v2-rollback-baseline",
+      "source_commit": "9cfe2f09450d0434dd1bb6da2fac5fad42184ebe",
+      "archived_at": "2026-08-24",
+      "reproducibility": "historical-ephemeral-environment",
+      "files": [
+        {
+          "path": "DEMO-LONGCHAIN-001-e2e-report.md",
+          "sha256": "b75e0786246147bc6152f911de7fb31b40f3d0f9c0639923be3d7995c55624df"
+        },
+        {
+          "path": "assets/demo_longchain_attack.jsonl",
+          "sha256": "8c81677005cd6f8daae887933caca647b68a88a31d0e7c155e5db773bc908b9e"
+        }
+      ]
     }
   ]
 }

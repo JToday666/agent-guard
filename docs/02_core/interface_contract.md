@@ -33,44 +33,50 @@ Runtime Native Event
 - Guard API / Control Plane 负责鉴权、策略快照加载、调用 core、审计入库、告警生成、审批状态、指标聚合和 Dashboard 查询。
 - Core 返回 `deny` 时，Adapter 必须阻断工具执行。
 - Core 返回 `ask` 时，Adapter 必须暂停动作并通过 Guard API 等待审批结果。
-- AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源；AuditEvent 的写入、查询和聚合由 Guard API / Control Plane 负责。
+- `deny` 是权威的策略拒绝；policy AuditEvent 的 `deny`/`blocked` 不单独证明工具实际未调用。
+  `not_invoked`、`executed`、`failed` 只能来自关联的 runtime outcome 或等价宿主执行证据；
+  缺少回执时执行状态保持未知。
+- AuditEvent 是 Dashboard、指标和运行时证据的共同数据来源；AuditEvent 的写入、查询和聚合由 Guard API / Control Plane 负责。
 
 ## 3. Guard API / Control Plane API
 
-| API | 阶段 | 用途 |
-| --- | ---- | ---- |
-| `GET /health` | P0 | `guard-api` 进程健康检查 |
-| `GET /health?check_db=true` | P0 | Control Plane 数据库连接健康检查 |
-| `POST /v1/guard/evaluate` | P0 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
-| `POST /v1/audit/events` | P0 | Adapter 上报 after-event 或 audit-only 事件 |
-| `GET /v1/audit/window` | P0 | Dashboard/CLI 原子审计窗口，同时返回 scope、事件和策略指标 |
-| `GET /v1/audit/integrity` | P0 | Dashboard/CLI 数据库审计链状态与数据库外签名锚点状态 |
-| `GET /v1/metrics/policy-evaluations` | P0 | 按明确时间 cohort 聚合历史策略指标 |
-| `GET /v1/metrics/runtime` | P1 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
-| `POST /v1/evaluations` | P1 | 导入并保存 AttackBench/Core matrix 等评测 run |
-| `GET /v1/evaluations` | P1 | 查询已保存评测 run，可按 dataset 过滤 |
-| `GET /v1/evaluations/datasets` | P1 | 从已保存评测 run 汇总 dataset registry、版本锁定、case provenance 覆盖和 regression gate 摘要 |
-| `GET /v1/evaluations/latest` | P1 | 查询最近一次评测 run |
-| `GET /v1/evaluations/{run_id}` | P1 | 按 run_id 查询评测 run |
-| `POST /v1/auth/browser/launch` | P0 | 创建 Dashboard launch code |
-| `POST /v1/auth/browser/exchange` | P0 | launch code 换 browser session |
-| `GET /v1/auth/browser/me` | P0 | Dashboard 会话恢复 |
-| `POST /v1/auth/browser/logout` | P0 | Dashboard 会话退出 |
-| `GET /v1/approvals/pending` | P0 | Dashboard 查询待审批动作 |
-| `POST /v1/approvals/{approval_id}/resolve` | P0 | Dashboard 审批处理 |
-| `GET /v1/approvals/{approval_id}/wait` | P0 | Adapter 等待审批结果 |
-| `GET /v1/traces/{trace_id}` | P1 | 攻击链路详情 |
-| `GET /v1/traces/{trace_id}/provenance` | P1 | 攻击链路 provenance |
-| `GET /v1/policies/current` | P0 | 当前策略快照查询 |
-| `PUT /v1/policies/current` | P0 | 替换当前策略快照 |
-| `GET /v1/policies/history` | P0 | 策略快照历史 |
-| `GET /v1/config-audit/findings` | P2 | 查询 Config Audit findings |
-| `POST /v1/config-audit/evaluate` | P2 | Adapter/Plugin 上报配置审计事件并得到阻断结果 |
-| `PUT /v1/adapters/{runtime}/status` | P2 | 写入 adapter 最近一次 verify/status 结果 |
-| `POST /v1/adapters/{runtime}/heartbeat` | P2 | Adapter/Plugin 上报 heartbeat 和能力信息 |
-| `GET /v1/adapters/{runtime}/status` | P2 | 查询 adapter 最近状态 |
+| API | 当前状态 | 用途 |
+| --- | -------- | ---- |
+| `GET /health` | 已支持 | `guard-api` 进程健康检查 |
+| `GET /health?check_db=true` | 已支持 | Control Plane 数据库连接健康检查 |
+| `POST /v1/guard/evaluate` | 已支持 | Adapter 统一判定入口；Guard API 鉴权、加载策略快照、调用 core 并处理审计/审批/告警副作用 |
+| `POST /v1/audit/events` | 已支持 | Adapter 上报 runtime outcome、observation 或 config audit 事件 |
+| `GET /v1/audit/window` | 已支持 | Dashboard/CLI 原子审计窗口，同时返回 scope、事件和策略指标 |
+| `GET /v1/audit/integrity` | 已支持 | Dashboard/CLI 数据库审计链状态与数据库外签名锚点状态 |
+| `GET /v1/metrics/policy-evaluations` | 已支持 | 按明确时间 cohort 聚合历史策略指标 |
+| `GET /v1/metrics/runtime` | 已支持 | 运行时监控指标，聚合审计事件、hook 活跃度和 adapter status |
+| `POST /v1/evaluations` | 已支持 | 导入并保存 AttackBench/Core matrix 等评测 run |
+| `GET /v1/evaluations` | 已支持 | 查询已保存评测 run，可按 dataset 过滤 |
+| `GET /v1/evaluations/datasets` | 已支持 | 从已保存评测 run 汇总 dataset registry、版本锁定、case provenance 覆盖和 regression gate 摘要 |
+| `GET /v1/evaluations/latest` | 已支持 | 查询最近一次评测 run |
+| `GET /v1/evaluations/{run_id}` | 已支持 | 按 run_id 查询评测 run |
+| `POST /v1/auth/browser/launch` | 已支持 | 创建 Dashboard launch code |
+| `POST /v1/auth/browser/exchange` | 已支持 | launch code 换 browser session |
+| `GET /v1/auth/browser/me` | 已支持 | Dashboard 会话恢复 |
+| `POST /v1/auth/browser/logout` | 已支持 | Dashboard 会话退出 |
+| `GET /v1/approvals/pending` | 已支持 | Dashboard 查询待审批动作 |
+| `POST /v1/approvals/{approval_id}/resolve` | 已支持 | Dashboard 审批处理 |
+| `GET /v1/approvals/{approval_id}/wait` | 已支持 | Adapter 等待审批结果 |
+| `POST /v1/approvals/{approval_id}/execution-leases/consume` | 受限 | 强绑定 Adapter 原子消费单次 execution lease；仅在 `rte05_strong_binding_enabled` 启用时可用 |
+| `GET /v1/traces/{trace_id}` | 已支持 | 攻击链路详情 |
+| `GET /v1/traces/{trace_id}/provenance` | 已支持 | 攻击链路 provenance |
+| `GET /v1/policies/current` | 已支持 | 当前策略快照查询 |
+| `PUT /v1/policies/current` | 已支持 | 替换当前策略快照 |
+| `GET /v1/policies/history` | 已支持 | 策略快照历史 |
+| `GET /v1/config-audit/findings` | 已支持 | 查询 Config Audit findings |
+| `POST /v1/config-audit/evaluate` | 已支持 | Adapter/Plugin 上报配置审计事件并得到阻断结果 |
+| `PUT /v1/adapters/{runtime}/status` | 已支持 | 写入 adapter 最近一次 verify/status 结果 |
+| `POST /v1/adapters/{runtime}/heartbeat` | 已支持 | Adapter/Plugin 上报 heartbeat 和能力信息 |
+| `GET /v1/adapters/{runtime}/status` | 已支持 | 查询 adapter 最近状态 |
 
-目标态 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait 接口。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type` 和 payload 承载。
+普通 Adapter 只依赖 `POST /v1/guard/evaluate` 和审批 wait；启用强绑定的 Adapter 还依赖
+execution lease consume。事件类型扩展不新增多个判定入口，而是通过 `GuardEvent.event_type`
+和 payload 承载。
 历史文档中的 `POST /v1/eval/runs` 已统一为当前实现的 `/v1/evaluations` 系列接口。
 `GET /v1/metrics/policy-evaluations` 面向历史策略统计；`GET /v1/metrics/runtime`
 面向运行时健康和 hook 活跃度，两者不共用分母或状态。
@@ -86,7 +92,7 @@ Runtime Native Event
 }
 ```
 
-P0 采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。Core 不参与鉴权，不读取 token，不管理 session。
+当前实现采用本地 Capability Auth。Guard API 将不同凭证统一转换为 `AuthContext`，业务接口只依赖 scope 校验。Core 不参与鉴权，不读取 token，不管理 session。
 
 | 调用方           | 凭证            | 要求                                                                                 |
 | ---------------- | --------------- | ------------------------------------------------------------------------------------ |
@@ -177,7 +183,8 @@ RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`；记录还必须在
 
 ## 5. GuardEvent
 
-`GuardEvent` 是 Adapter 发送给 Guard API 的统一事件封装。P0 首个稳定 payload 是 `ToolCallEvent`，P1 扩展上下文、模型、工具结果、消息外发和记忆写入。
+`GuardEvent` 是 Adapter 发送给 Guard API 的统一事件封装。当前 schema `0.3` 同时覆盖工具调用、
+上下文、模型输入/输出、工具结果、消息外发和记忆写入。
 
 ```json
 {
@@ -218,12 +225,13 @@ RFC 3339，范围语义为 `[evaluated_from, evaluated_to)`；记录还必须在
 ```
 
 Guard API 可以直接把该事件和已加载的 `PolicyBundle` 传入 `agentguard-core.evaluate(event, policies)`。Core 不负责从数据库加载策略。
-`schema_version` 固定为 `"0.3"`。P1 `event_type` 与 payload shape 绑定；
+`schema_version` 固定为 `"0.3"`。`event_type` 与 payload shape 绑定；
 缺少该事件最小必需字段的请求必须在 Pydantic / FastAPI 层拒绝，例如
 `context_assembled` 不能使用空 payload，`message_send_proposed` 必须包含 `recipient`，
 `model_input_prepared` 必须包含 `phase` 和 `content_preview`。
 
-P1 继续复用 `POST /v1/guard/evaluate` 和 `GuardEvent.payload`，不新增判定入口。Core 当前稳定支持的 P1 `event_type`：
+所有事件继续复用 `POST /v1/guard/evaluate` 和 `GuardEvent.payload`，不新增判定入口。
+Core 当前稳定支持的非工具 `event_type`：
 
 | `event_type` | payload | 用途 |
 | ------------ | ------- | ---- |
@@ -285,7 +293,7 @@ LangGraph Adapter 会忽略这类伪造。生产者无法证明时必须省略�
 
 ## 7. ToolCallEvent Payload
 
-P0 首个稳定事件 payload。Adapter 必须把运行时工具调用映射成该结构，并放入 `GuardEvent.payload`。
+工具调用的稳定事件 payload。Adapter 必须把运行时工具调用映射成该结构，并放入 `GuardEvent.payload`。
 
 ```json
 {
@@ -313,9 +321,9 @@ P0 首个稳定事件 payload。Adapter 必须把运行时工具调用映射成�
 
 ## 8. GuardDecision
 
-Core 对每个评估请求返回一个 `GuardDecision`。P0 必须支持 `allow`、`deny`、`ask`。
+Core 对每个评估请求返回一个 `GuardDecision`。当前决策集合固定为 `allow`、`deny`、`ask`。
 
-P0 内置规则 ID：
+当前内置规则 ID：
 
 | 规则 ID | 含义 |
 | ------- | ---- |
@@ -366,7 +374,9 @@ P0 内置规则 ID：
 ```
 
 Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `approval_id` 返回给 Adapter。
-审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期。P0 工具事件的 `subject_id` 是 tool call id；P1 非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve 只允许从未过期的 pending 状态原子转换一次。
+审批记录使用 `subject_id` 绑定受控主体，并使用 `action_id` 关联动作生命周期。工具事件的
+`subject_id` 是 tool call id；非工具事件的 `subject_id` 是 `GuardEvent.event_id`。resolve
+只允许从未过期的 pending 状态原子转换一次。
 审批响应只使用 `subject_id`、`subject_type`、`action_id` 和 `action_name` 表达主体与动作；不接受或返回工具专用别名。
 
 ### 8.1 检测器失败语义
@@ -379,7 +389,7 @@ Guard API / Control Plane 根据 `approval_intent` 创建审批记录，并把 `
 
 ## 9. AuditEvent
 
-AuditEvent 是 Dashboard、指标和答辩证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
+AuditEvent 是 Dashboard、指标和运行时证据的共同数据来源。Core 可以提供 schema 或 builder；写入、查询和聚合由 Guard API / Control Plane 负责。
 AuditEvent 默认保持 `schema_version="0.3"` 以兼容现有生产者，并允许未知扩展字段用于前向兼容。
 
 ### 9.1 当前版本与剩余边界
@@ -390,9 +400,9 @@ AuditEvent `0.3 | 0.4`。Guard API 规范 writer 已写 `0.4` 的策略审计、
 幂等/冲突语义以及 Memory/PostgreSQL 共享契约已经落地。冻结生产者的 `0.3` 输入仍只在
 服务端边界兼容分类，不能据此要求新 writer 继续生成旧形态。
 
-剩余边界是 OpenClaw allow 后的完整执行确证、动作 cohort 覆盖率、结构化风险分解和部分
-跨 Runtime/宿主能力；缺失事实仍必须保持未知。已有 writer/links/幂等和存储路径也不能
-扩大为 R05、正式 S4 或全量生产验收已完成。
+剩余边界包括 OpenClaw 的原子 replace-and-seal、权威 invocation-start、动作 cohort
+覆盖率、结构化风险分解和部分跨 Runtime/宿主能力；缺失事实仍必须保持未知。当前
+OpenClaw outcome writer 和 hook 注册不能扩大为 OC-02 strong binding 已完成。
 
 2026-08-05 冻结了 AuditEvent `0.4` 目标契约；2026-08-07 进一步冻结了
 [Agent 运行时安全可观测与动态治理设计](../04_apps/runtime_safety_observability_design.md)，
@@ -444,7 +454,7 @@ JSON Schema、Core/Guard API/OpenClaw 类型、存储、共享 fixtures 和 cont
 
 ## 10. ContextBuildEvent Payload
 
-P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上下文隔离和环境污染检测。
+已支持审计外部内容进入模型上下文前的拼接过程，支撑上下文隔离和环境污染检测。
 
 ```json
 {
@@ -465,7 +475,7 @@ P1 用于审计外部内容进入模型上下文前的拼接过程，支撑上�
 
 ## 11. ModelCallEvent Payload
 
-P1 用于审计模型输入和输出。`phase=input` 对应 `model_input_prepared`，`phase=output` 对应 `model_output_produced`。
+已支持审计模型输入和输出。`phase=input` 对应 `model_input_prepared`，`phase=output` 对应 `model_output_produced`。
 
 ```json
 {
@@ -482,7 +492,7 @@ P1 用于审计模型输入和输出。`phase=input` 对应 `model_input_prepare
 
 ## 12. ToolResultEvent Payload
 
-P1 用于审计工具结果是否会回流到模型上下文或持久化存储，防止工具结果污染后续推理。
+已支持审计工具结果是否会回流到模型上下文或持久化存储，防止工具结果污染后续推理。
 
 ```json
 {
@@ -507,7 +517,8 @@ P1 用于审计工具结果是否会回流到模型上下文或持久化存储�
 
 ## 13. MemoryEvent Payload
 
-P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
+已支持长期记忆写入审计和控制面 Memory Guard 生命周期；真实 runtime memory transaction、
+跨会话恢复和回滚仍未支持。
 
 ```json
 {
@@ -525,7 +536,7 @@ P1 用于审计长期记忆写入，P2 扩展为 Memory Guard 和回滚能力。
 
 ## 14. MessageSendEvent Payload
 
-P1 用于审计出站消息发送前的目标和内容摘要。
+已支持审计出站消息发送前的目标和内容摘要。
 Core 会同时读取 `contains_sensitive_data` 和 `content_preview` 中的敏感文本标记；外部收件人且内容敏感时返回 `deny`，普通外部消息仍返回 `ask`。
 
 ```json
@@ -539,17 +550,17 @@ Core 会同时读取 `contains_sensitive_data` 和 `content_preview` 中的敏�
 }
 ```
 
-## 15. P0/P1/P2 开发边界
+## 15. 当前能力边界
 
-| 阶段 | 契约范围 |
+| 状态 | 契约范围 |
 | ---- | -------- |
-| P0 | `GuardEvent`、`ToolCallEvent` payload、`GuardDecision`、`AuditEvent`、统一判定入口、基础审计列表、评测指标和最小 Dashboard 审批 |
-| P1 | 上下文、模型调用、工具结果、消息外发、记忆写入、trace 查询、策略快照、CLI 审批和复杂审批体验 |
-| P2 | `modify`、`audit_only`、`shadow_deny`、审计完整性、provenance 扩展 |
+| 已支持 | `GuardEvent` 七类事件、`GuardDecision`、AuditEvent `0.3 / 0.4`、统一判定入口、审批、审计窗口/完整性、Trace、Provenance、指标和 Adapter 状态 |
+| 受限 | LangGraph strong binding 已覆盖 CF-13 至 CF-16，CF-17 active-call-cache 语义未支持；OpenClaw strong binding 受宿主能力阻塞；Memory 仅有控制面生命周期 |
+| 未支持 | 把 `modify`、`audit_only` 或 `shadow_deny` 作为新的 `GuardDecision.decision` 值；真实 runtime memory transaction/rollback；缺少宿主原子能力时的 OpenClaw OC-02 |
 
-## 16. 冻结规则
+## 16. 兼容规则
 
-- P0 后不删除 `GuardEvent`、`GuardDecision`、`AuditEvent` 字段。
+- 不删除 `GuardEvent`、`GuardDecision`、`AuditEvent` 的既有字段。
 - 新字段只能 optional 添加。
 - Dashboard 只通过 Guard API 获取数据和提交审批。
 - Adapter 不写核心规则，不访问数据库。
@@ -558,9 +569,9 @@ Core 会同时读取 `contains_sensitive_data` 和 `content_preview` 中的敏�
 
 ## 17. 验收证据
 
-1. P0 三个核心模型有 JSON Schema。
+1. `GuardEvent`、`GuardDecision` 和 `AuditEvent` 有 JSON Schema，并由 schema contract tests 验证。
 2. `POST /v1/guard/evaluate` 能返回 `allow`、`deny`、`ask`。
-3. Adapter 能依据 `GuardDecision` 控制工具是否执行。
+3. Adapter 能依据 `GuardDecision` 控制工具是否调用；对“未调用”的断言另有 runtime outcome 或调用计数证据。
 4. Core 返回 `ask` 时只包含审批意图，approval row 与终态转换由 Guard API / Control Plane 管理。
-5. Dashboard 能基于 AuditEvent 展示阻断原因。
+5. Dashboard 能基于 AuditEvent 分别展示策略拒绝、审批终态和运行时结果，不从 `deny` 推导 `not_invoked`。
 6. AttackBench runner 能用 `case_id`、`trace_id` 汇总指标。

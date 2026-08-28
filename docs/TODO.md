@@ -11,14 +11,8 @@
 - 完成项在结果进入 `dev` 并通过相应测试与检查后移除；Git 历史保留变更过程。
 - 涉及公共契约、安全语义、数据库迁移或发布边界时，必须在对应设计或 ADR 中记录决策，不能只修改本清单。
 
-## 不进入能力 DAG 的仓库维护
+## 长期结构债务（不进入能力 DAG）
 
-- [ ] 为所有未证明合并的历史分支记录精确 SHA、PR、worktree 和处置结论。
-- [ ] 为脏 worktree 导出 binary-safe patch，计算摘要并在临时 clone 中验证可恢复。
-- [ ] 为需要保留的 clean 历史 refs 创建并验证仓库外 Git bundle；归档时排除 `.env`、token、会话和未脱敏日志。
-- [ ] 在恢复验证完成后分批清理 worktree、本地分支和远端已合并分支，并回读远端 refs。
-- [ ] 完成历史 demo、竞赛要求、阶段验收和重复设计快照的文档归档或移除。
-- [ ] 统一当前状态入口，消除 README、状态页、Changelog 和历史设计中的事实口径冲突。
 - [ ] 按 Audit、Policy、Identity、Evaluation、Security State、Approval/Lease 拆分 Control Plane store facade，同时保留现有事务边界。
 - [ ] 渐进拆分 Core fusion、Adapter context guard、benchmark runner/config/tools 和 Dashboard 巨型组件；文件移动与行为变化分开提交。
 - [ ] 将根 `scripts/` 收敛为薄 CLI，核心逻辑回到所属 package；旧命令只在明确兼容期内保留包装。

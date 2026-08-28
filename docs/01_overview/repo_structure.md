@@ -47,7 +47,6 @@ agent-guard/
 
 ```text
 docs/
-├── 00_requirements/
 ├── 01_overview/
 ├── 02_core/
 ├── 03_adapters/
@@ -56,10 +55,13 @@ docs/
 ├── 06_delivery/
 ├── 07_auth/
 ├── 08_api/
+├── AgentGuard_Core_V2.1_Final_Contract_Freeze/
+├── AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/
+├── AgentGuard_Runtime_Enforcement_Contract_v1_Final/
 └── archive/
 ```
 
-文档目录按开发模块组织。命题材料放在 `00_requirements/`，但开发入口从 `01_overview/` 和 `02_core/` 开始。`08_api/` 保存跨端 API 目标契约和迁移清单；目标冻结后先同步稳定接口契约中的当前/目标边界，再同步 schemas 和实现。
+文档目录按开发模块组织，开发入口从 `01_overview/` 和 `02_core/` 开始。命题材料和要求追踪矩阵已移入 `archive/competition-2026/requirements/`，不是当前产品契约。`08_api/` 保存跨端 API 目标契约和迁移清单；目标冻结后先同步稳定接口契约中的当前/目标边界，再同步 schemas 和实现。
 
 ## 4. 目录职责
 
@@ -78,6 +80,7 @@ docs/
 | `tests/`                                   | unit、contract、integration、PostgreSQL、E2E 与手动 live 测试               |
 | `scripts/`                                 | 本地开发、插件安装验证和辅助命令                                            |
 | `docs/`                                    | 架构、稳定接口、API 目标契约、适配器、部署、鉴权和评测文档                  |
+| `docs/AgentGuard_*`                        | 已冻结的 Core、Context/Taint 与 Runtime Enforcement 专项契约包                 |
 | `docs/archive/`                            | 历史竞赛、答辩和演示材料；不作为安装、生产或正式效果证据入口                 |
 
 完整部署流程以 `docs/06_delivery/deployment_install_usage.md` 为唯一事实来源；
@@ -100,7 +103,7 @@ docs/
 
 仓库结构验收检查：
 
-1. P0 代码和样本能按目录职责放置，无跨目录职责混杂。
+1. 产品代码和评测样本能按目录职责放置，无跨目录职责混杂。
 2. `schemas/` 与 [接口契约](../02_core/interface_contract.md) 字段一致。
 3. `agentguard_langgraph_bench/bench/datasets/` 样本能被 runner 读取并生成指标。
 4. Dashboard 只通过 Guard API 获取数据和提交审批。

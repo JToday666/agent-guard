@@ -15,7 +15,7 @@ packages/agentguard-openclaw-plugin/
 - [接口契约与事件模型](../02_core/interface_contract.md)
 - [Dashboard 与审批流](../04_apps/dashboard_design.md)
 - [OpenClaw 插件部署、安装与配置](openclaw_plugin_deployment.md)
-- [演示脚本](../06_delivery/demo_script.md)
+- [OpenClaw AttackBench 轮转验证与检测启用](../05_redteam/openclaw_attackbench.md)
 
 ## 2. 当前实现
 
@@ -93,7 +93,7 @@ packages/agentguard-openclaw-plugin/
 
 `before_install` 构造 `ConfigAuditEvent(runtime="openclaw")`，当前会识别 `allowConversationAccess`、`allowPromptInjection` 和 exec-like 权限等高风险配置。`high`/`critical` findings 会返回 block。
 
-P2 observation hooks 构造 `AuditEvent(event_type="runtime_observation", runtime="openclaw")` 并写入 `/v1/audit/events`；metadata 会递归脱敏 token/secret/password/authorization/credential 字段。
+Observation-only hooks 构造 `AuditEvent(event_type="runtime_observation", runtime="openclaw")` 并写入 `/v1/audit/events`；metadata 会递归脱敏 token/secret/password/authorization/credential 字段。
 
 ## 6. 决策映射
 
@@ -104,7 +104,7 @@ P2 observation hooks 构造 `AuditEvent(event_type="runtime_observation", runtim
 | `ask` + `allow_once`                 | 插件轮询 Guard API approval wait 后放行                                                          |
 | `ask` + `deny` / `timeout` / `error` | 审批型工具/消息操作 fail closed；输入 gate 的 `ask` 直接 block；最终输出的 `ask` 请求 revise     |
 
-P1 审批真源是 AgentGuard Guard API / Dashboard。OpenClaw `requireApproval` 不作为 P1 审批权威源。
+审批真源是 AgentGuard Guard API / Dashboard。OpenClaw `requireApproval` 不作为审批权威源。
 
 固定 fail-closed 的有效阶段不是用户可调白名单：`before_tool_call`、`before_install`、`before_agent_run`、`before_agent_finalize`、`tool_result_persist` 和 `before_message_write`。前三个返回 SDK 正式阻断结果；`before_agent_finalize` 请求安全重写；两个同步持久化 hook 只对本地处理错误 fail closed，远端可用性由下一次 `before_agent_run` gate 承担。`message_sending` 会把插件内 Guard API 错误映射为 `cancel`，但 OpenClaw 对未被插件捕获的 handler 异常或宿主 timeout 仍可能 fail open，因此不列入宿主级固定清单。`approvalTimeoutMs` 是唯一审批等待上限，hook timeout 会覆盖初始评估、审批等待、轮询间隔和安全余量。
 

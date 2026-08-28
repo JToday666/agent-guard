@@ -13,7 +13,7 @@
 - 已验证的 Alpha 能力与限制见 [Productization Alpha Status](docs/06_delivery/productization_alpha_status.md)。
 - 稳定边界见[产品化架构与目录职责](docs/01_overview/productization_architecture.md)。
 
-当前正在进行的仓库整理、分支/worktree 处置和文档治理属于维护活动，继续由 TODO 与贡献规范承载，不进入能力阶段或能力 DAG。
+仓库整理、分支/worktree 处置和文档治理已于 2026-08-28 收口，记录见[仓库治理收口记录](docs/06_delivery/repository_governance_closeout.md)。此类维护活动不进入能力阶段或能力 DAG。
 
 ## 能力阶段
 

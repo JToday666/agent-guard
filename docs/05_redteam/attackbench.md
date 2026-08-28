@@ -6,10 +6,9 @@ AttackBench 实现位于 `agentguard_langgraph_bench/`，负责攻击样本、�
 
 关联入口：
 
-- [命题要求追踪矩阵](../00_requirements/requirement_traceability_matrix.md)
 - [LangGraph 评测靶场](../03_adapters/langgraph_adapter.md)
 - [OpenClaw AttackBench 轮转验证与检测启用](openclaw_attackbench.md)
-- [演示脚本](../06_delivery/demo_script.md)
+- [历史竞赛要求与证据归档](../archive/competition-2026/README.md)
 
 ## 2. 模块职责
 
@@ -92,7 +91,53 @@ uv run --group bench python -m agentguard_langgraph_bench.bench.paired_runner \
 → 仅在 run_valid=true 时解释 ASR reduction / Block Rate / FPR / FNR
 ```
 
-## 6. 指标
+## 6. LangGraph V2 评测 Profile
+
+`competition-langgraph-v2` 是仓库中已实现的 LangGraph-only 受限评测
+profile。它在 server-owned、启动时冻结且已验证的 activation manifest
+范围内测试 Memory store、loopback Guard API，以及受控的真实
+Playwright/文件/Outbox 工具链路。其中 `allow < ask < deny`，official 决策
+不低于 current 安全下界。Guard API 全局默认仍为 `off`，reference
+profile 仍为 `shadow`；该 profile 不改变其他 runtime 的权威边界。
+
+该 profile 只证明 LangGraph 评测表面，不代表 OpenClaw Strong Approval
+Binding、跨 runtime conformance、生产 rollout 或产品发布完成。
+contracts、demo、replay、stub 或单 case 运行只可用于开发诊断，不能替代
+真实外部 Provider 效果测评。
+
+历史正式资格矩阵固定为 A0–A4 五个 arm、70 个 case、`repeats=1`，
+共 350 case-runs。取得 qualifying 结论必须同时满足：
+
+- 使用全新的制品目录，且数据集、fixture、provider/model、工具 schema
+  和运行环境的 identity/digest 在各 arm 一致。
+- Provider 为支持 Chat Completions 和 tool calling 的 HTTPS 非 loopback
+  OpenAI-compatible endpoint，凭据只从指定环境变量读取。
+- 精确完成 70×5，每次 guarded 工具执行都有完整 audit、lease、start/
+  terminal receipt 和 fixture 证据，且零 invalid row。
+- runner 退出码为 `0`。`1` 表示证据有效但安全契约失败；`2` 表示配置、
+  Provider、TaskFact、model invocation、receipt、数据集或制品不可信。
+
+重新执行该历史资格合同时，使用以下入口：
+
+```bash
+export COMPETITION_LLM_KEY='<provider key>'
+
+uv run --group bench python -m agentguard_langgraph_bench.bench.competition_runner run \
+  --profile competition-langgraph-v2 \
+  --suite product \
+  --full-corpus \
+  --artifacts <全新输出目录> \
+  --llm-provider-id <provider-id> \
+  --llm-model <model> \
+  --llm-base-url <https://provider.example/v1> \
+  --llm-api-key-env COMPETITION_LLM_KEY
+```
+
+真实外部 Provider 的 350-run 尚未完成，且它是历史竞赛资格口径，
+不再是当前产品交付承诺。当前是否继续评测能力建设以根目录
+[`ROADMAP.md`](../../ROADMAP.md) 为准。
+
+## 7. 指标
 
 | 指标       | 含义             |
 | ---------- | ---------------- |
@@ -111,17 +156,15 @@ uv run --group bench python -m agentguard_langgraph_bench.bench.paired_runner \
 阻断率、FPR、召回率及防御效果解释中排除。成对报告要求 defense-on 使用
 `core_mode=real_core`，且任一侧存在无效 case 都会令整对结果不可解释。
 
-## 7. P0/P1/P2 开发边界
+## 8. 当前支持边界
 
-| 阶段 | 交付                                                                      |
-| ---- | ------------------------------------------------------------------------- |
-| P0   | 3 类攻击样本、benign 样本、基础 runner、ASR before/after、Block Rate、FPR |
-| P1   | 越狱、代码执行、记忆中毒、环境污染样本，FNR、Precision、Recall、Latency   |
-| P2   | 消融实验、OpenClaw 对比、复杂多轮攻击                                     |
+- **支持**：冻结数据集身份与摘要、恶意和 benign 样本、成对 runner、Core 与证据有效性校验，以及 ASR、Block Rate、FPR、FNR、Precision、Recall 和 Latency 指标。
+- **受限**：真实外部 Provider、浏览器和宿主 runtime 依赖各自环境；历史 350-run 正式资格尚未完成，不能由单 case、demo、replay 或 stub 结果替代。
+- **候选方向**：消融实验、OpenClaw 对比和复杂多轮攻击只有在能力 Roadmap 立项后才进入实施，不构成当前交付承诺。
 
-## 8. 验收证据
+## 9. 验收证据
 
-1. 至少 3 类 P0 恶意样本和一组 benign 样本。
+1. 至少 3 类恶意样本和一组 benign 样本。
 2. 每个样本有 `expected_decision` 和 `success_condition`。
 3. 成对编排器能输出防御前后对比，且两侧数据摘要和 case 集合完全一致。
 4. 正常样本能用于计算 FPR。

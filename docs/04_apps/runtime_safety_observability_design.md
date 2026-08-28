@@ -1,19 +1,19 @@
 # Agent 运行时安全可观测与动态治理设计
 
-> 状态：设计与实施已完成；Memory/PostgreSQL 真实演示链和 Dashboard 读链验收通过
+> 状态：设计与实施已完成；Memory/PostgreSQL 代表性真实链和 Dashboard 读链验收通过
 >
 > 冻结日期：2026-08-07
 >
 > 实施更新：2026-08-08
 >
-> 主演示运行时：LangGraph / AttackBench
+> 代表性验收运行时：LangGraph / AttackBench
 >
 > 适用组件：Dashboard、Guard API / Control Plane、AgentGuard Core、LangGraph Adapter、OpenClaw Plugin
 
 ## 1. 文档定位
 
 本文冻结“执行轨迹、溯源关系、审计记录”三种视图的产品边界、事实来源、关联 ID、
-真实演示链和动态刷新原则，并记录当前实施与剩余验收边界。
+代表性真实验收链和动态刷新原则，并记录当前实施与剩余边界。
 
 截至 2026-08-08，以下代码能力已经交付：
 
@@ -23,7 +23,7 @@
 - Provenance writer 在写入时物化稳定节点与关系，并保护节点、边和审批状态冲突；
 - Dashboard 已提供三视图、全 Guard 阶段的确定性步骤投影、默认 10 秒的可配置条件轮询和按需溯源
   更新。
-- 真实 LangGraph / AttackBench 主演示链已通过实际 Uvicorn HTTP 服务分别连接 Memory 与
+- 真实 LangGraph / AttackBench 代表性验收链已通过实际 Uvicorn HTTP 服务分别连接 Memory 与
   PostgreSQL，完成审批释放、受控执行、Trace、ETag 和 Provenance 验收；Dashboard 又通过
   真实 PostgreSQL API 读取同一代表性场景并验证动作投影和溯源定位；全 GuardEvent
   覆盖由共享矩阵回归验证，不以该场景的两个动作定义产品范围。
@@ -50,11 +50,11 @@
 - 不新增一级导航或独立“执行监控”页面。
 - 不把执行轨迹另存成新的后端事实模型。
 
-## 3. 真实演示链选择
+## 3. 代表性真实验收链
 
 ### 3.1 冻结结论
 
-主演示链固定为：
+用于跨组件回归的代表性验收链为：
 
 ```text
 LangGraph / AttackBench
@@ -67,43 +67,43 @@ LangGraph / AttackBench
 → Dashboard
 ```
 
-演示必须连接真实 Guard API，不能使用 Dashboard Mock、Fake Core Client 或手工注入的页面
-状态代替链路事实。工具运行在受控本地演示环境，不访问真实秘密、生产数据或外部系统。
+验收必须连接真实 Guard API，不能使用 Dashboard Mock、Fake Core Client 或手工注入的页面
+状态代替链路事实。工具运行在受控本地环境，不访问真实秘密、生产数据或外部系统。
 AttackBench 固定使用 `defense=on`、`fake_core=false`、`approval_mode=wait`；代码动作只进入
 `MockToolRegistry.code_exec` 的 `safe_arithmetic` 分支。
 
-OpenClaw 保留为跨运行时增强链，不作为本轮主演示链。只有在后续阶段通过稳定
-`toolCallId` 关联、AuditEvent `0.4` 结果回执、审批释放和断线恢复验收后，才能升级为
-等价演示链。
+OpenClaw 保留为受限的跨运行时链。当前源码已有稳定 `toolCallId` 关联和 AuditEvent `0.4`
+terminal outcome，但宿主仍缺少原子 replace-and-seal 与权威 invocation-start；这些能力
+补齐并重新通过 conformance 前，不得把它描述为与 LangGraph strong binding 等价。
 
 ### 3.2 选择依据
 
-| 维度         | LangGraph / AttackBench                                           | OpenClaw                                                 |
-| ------------ | ----------------------------------------------------------------- | -------------------------------------------------------- |
-| 当前演示定位 | 已是 P0 主演示路径                                                | 当前演示脚本列为 P1                                      |
-| 动作事实     | 回归场景中的 `memory_read`、`code_exec` 有明确工具名和 `call_id`  | 工具 Hook 有 `toolCallId`                                |
-| 资源事实     | Adapter 已能规范化 memory/code 资源                               | 依赖 Hook payload 和缓存恢复                             |
-| 执行结果     | 已统一写入 0.4 outcome 与生命周期 observation，真实链已跨存储验收 | 已覆盖最小 0.4 outcome；allow 后执行确证仍非本期完整范围 |
-| 决赛风险     | 链路较短，行为和结果更容易确定性复现                              | Hook 版本和执行后语义带来额外联调面                      |
+| 维度 | LangGraph / AttackBench | OpenClaw |
+| ---- | ----------------------- | -------- |
+| 当前支持状态 | 已支持代表性跨存储验收链 | 受限；OC-02 strong binding 被宿主能力阻塞 |
+| 动作事实 | 回归场景中的 `memory_read`、`code_exec` 有明确工具名和 `call_id` | 工具 Hook 有 `toolCallId` |
+| 资源事实 | Adapter 已能规范化 memory/code 资源 | 依赖 Hook payload 和缓存恢复 |
+| 执行结果 | 已统一写入 0.4 outcome 与生命周期 observation，真实链已跨存储验收 | 当前源码写 terminal outcome；原子替换和权威 invocation-start 未支持 |
+| 工程风险 | 链路较短，行为和结果可确定性复现 | Hook 版本、宿主能力和强绑定语义增加联调面 |
 
 选择 LangGraph 不代表 OpenClaw 能力被弱化，而是先保证一条可重复、可审计、可现场恢复的
 真实闭环，再用 OpenClaw 证明跨运行时扩展性。
 
 ### 3.3 代表性真实闭环场景
 
-同一 `trace_id` 内使用两个真实动作演示最小完整治理闭环。它是稳定的答辩场景和跨存储
+同一 `trace_id` 内使用两个真实动作验证最小完整治理闭环。它是稳定的代表性跨存储
 回归 fixture，不是 Dashboard 动作白名单，也不改变 Adapter / Plugin 原有审计范围。真实
 Trace 中已持久化的其他工具、记忆、消息、模型输出和安全检查阶段必须按事实显示。
 
 1. `memory_read`
-   - 每次演示前重置隔离 sandbox，并在 Trace 外预置一条 trusted 报告偏好；
+   - 每次验收前重置隔离 sandbox，并在 Trace 外预置一条 trusted 报告偏好；
    - 读取脱敏的本地偏好；
    - Core 返回 `allow`；
    - Adapter 实际执行并回写 `execution.status=executed`。
 2. `code_exec`
    - 不可信上下文提出一个不属于原始任务的受控算术计算；该动作无网络和业务资源写入，
      只产生 sandbox 证据日志；
-   - 隔离的演示策略把 `P108_agent_abuse` 从默认拒绝显式调整为高风险审批，
+   - 隔离的验收策略把 `P108_agent_abuse` 从默认拒绝显式调整为高风险审批，
      `P004_task_mismatch` 继续要求审批；
    - Core 返回 `ask`、风险 72、严重性 high；
    - Dashboard 展示待审批；
@@ -121,8 +121,8 @@ ASK               原始策略决定
 
 审批放行不能把原始 `ask` 改写成绿色 `allow`。
 
-生产默认策略对未授权高影响代码动作保持 `deny`。演示策略是独立、版本化且带 digest 的
-真实 PolicyBundle，只为展示人机协同闭环；不得隐藏该 override、修改生产默认策略或在
+生产默认策略对未授权高影响代码动作保持 `deny`。验收策略是独立、版本化且带 digest 的
+真实 PolicyBundle，只为验证人机协同闭环；不得隐藏该 override、修改生产默认策略或在
 前端伪造 `ask`。
 
 Trace 外的环境预置只用于确定性准备 sandbox，不得出现在执行轨迹中冒充 Agent 动作；其
@@ -333,7 +333,7 @@ event_id=<raw audit id>
 
 ### 7.1 Trace
 
-Dashboard 已采用可配置的条件轮询作为第一阶段实时机制。`VITE_EVIDENCE_POLL_INTERVAL_MS`
+Dashboard 当前采用可配置的条件轮询。`VITE_EVIDENCE_POLL_INTERVAL_MS`
 默认 10,000 ms，下限 2,000 ms；低于下限的有效值按下限处理，缺失或无效值回退默认值：
 
 ```text
@@ -391,24 +391,24 @@ Provenance 使用独立条件请求和非对称刷新：
 指针：上述 LangGraph `runtime_outcome` 写入的 outcome 映射见 `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/02_字段与Schema契约冻结.md` §9；指标口径见 `docs/AgentGuard_Runtime_Enforcement_Contract_v1_Final/05_Cross_Runtime_Conformance与可靠性验证.md` §9（审计窗口/Dashboard 口径以 `docs/08_api/dashboard_metrics_api_contract.md` 为准）。
 
 Memory 与本机 PostgreSQL 已通过相同存储契约。`tests/test_runtime_safety_e2e.py` 使用实际
-Uvicorn 回环 HTTP 服务运行 LangGraph / AttackBench 代表性主演示场景，并分别验证两种
+Uvicorn 回环 HTTP 服务运行 LangGraph / AttackBench 代表性验收场景，并分别验证两种
 存储中的审批、运行回执、Trace、独立 ETag 和 Provenance；本机只读浏览器核验又确认
 Dashboard 可通过真实 PostgreSQL Guard API 显示代表性动作并定位代码动作的溯源节点。
 全 Guard 阶段另由前端矩阵回归验证，不能把两动作场景解释为产品白名单。测试完成后专用
-PostgreSQL 测试库恢复为空，不向开发库写入演示数据。
+PostgreSQL 测试库恢复为空，不向开发库写入验收数据。
 
 审批终态发生变化但 AuditEvent 未增加时，Trace ETag 也必须变化。禁止只使用最大
 `integrity.sequence` 计算 Trace ETag。
 
 ## 9. 安全、故障与可恢复性
 
-- 演示命令必须在受控工具中固定或严格 allowlist，不接触真实凭证、网络或持久化资源。
+- 验收命令必须在受控工具中固定或严格 allowlist，不接触真实凭证、网络或持久化资源。
 - 页面只展示服务端已脱敏、有界事实；不复制 token、CSRF 或完整工具参数。
 - `deny`、`ask`、断线或超时都不能单独证明 `not_invoked`。
 - 条件轮询断线重连后以服务端完整快照校准，不依赖丢失期间的增量事件。
 - 相同稳定 ID 内容冲突时进入受控错误，不采用 last-write-wins。
 - 一条步骤投影失败不能阻断审计记录查看；Provenance 失败不能清空已确认的执行轨迹。
-- 现场演示必须保留一条预先验证的真实 Trace 作为只读恢复入口，但不得把它冒充正在运行。
+- 人工验收可保留一条预先验证的真实 Trace 作为只读恢复入口，但不得把它冒充正在运行。
 
 ## 10. 共享契约 fixture
 
@@ -433,16 +433,16 @@ PostgreSQL 测试库恢复为空，不向开发库写入演示数据。
 - 未知未来 policy event 以 `event_id` 检查点回退，不因缺少 `action_id` 丢失；
 - 不存在未来动作、前端坐标、敏感值或根据 ID 拆分得到的事实。
 
-## 11. 阶段 0 完成定义
+## 11. 契约完成判据
 
-阶段 0 只有同时满足以下条件才算完成：
+本能力的设计与实现结论由以下已验证条件共同支撑：
 
-- 主演示运行时、动作顺序、安全决定和审批结果已唯一确定；
+- 代表性验收运行时、动作顺序、安全决定和审批结果已唯一确定；
 - 事实生产者、稳定 ID、未知值和状态投影规则已冻结；
 - 页面位置、三视图职责和非对称刷新方案已冻结；
 - 后端后续边界、ETag 覆盖范围和禁止推断项已记录；
 - 共享 fixture 可通过 AuditEvent `0.4` Schema 和交叉引用检查；
-- TODO 清楚区分“设计完成”“代码已实施”“真实端到端验收通过”和后续增强项。
+- 当前状态记录清楚区分“设计完成”“代码已实施”“真实端到端验收通过”和受限能力。
 
-上述定义继续作为实施约束。当前代码和验收状态以第 1、8 节为准；fixture、Mock 与拦截式
+上述判据继续作为兼容与回归约束。当前代码和验收状态以第 1、8 节为准；fixture、Mock 与拦截式
 API E2E 仍不得单独描述为端到端交付证据。

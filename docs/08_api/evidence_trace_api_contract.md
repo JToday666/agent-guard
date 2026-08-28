@@ -1893,32 +1893,33 @@ Adapter / Plugin
 | 脱敏            | 敏感 key、凭证值和超长内容不会进入浏览器可读响应                    |
 | 跨端联调        | Dashboard 使用真实 Guard API fixture 完成五类干预展示               |
 
-## 25. 契约冻结清单
+## 25. 当前契约状态
 
-### 25.1 设计冻结已完成
+### 25.1 已确认的契约决策
 
 - [x] D-01 至 D-05 已按推荐方案确认。
-- [x] [接口契约与事件模型](../02_core/interface_contract.md) 已增加默认 `0.3`、基础双读与完整 `0.4` 目标的状态说明。
+- [x] [接口契约与事件模型](../02_core/interface_contract.md) 已记录 GuardEvent `0.3` 与 AuditEvent `0.3 | 0.4` 的当前边界。
 - [x] 已记录冻结日期 `2026-08-05`。
 - [x] 已确认运行时回执复用 `POST /v1/audit/events`，不新增独立 runtime outcome 端点。
-- [x] 已冻结运行时安全观测的事实投影、状态语义、真实演示链和刷新边界。
+- [x] 已冻结运行时安全观测的事实投影、状态语义、代表性真实验收链和刷新边界。
 
 ### 25.2 代码迁移状态
 
 - [x] `schemas/audit_event.schema.json` 和 Core `AuditEvent` 类型已支持 `0.3 | 0.4`。
 - [x] Guard API 已有 AuditEvent `0.4` 基础写入、读取和完整性测试。
-- [ ] 更新 `schemas/guard_decision.schema.json`。
+- [x] `schemas/guard_decision.schema.json` 与当前 `allow | deny | ask` 模型及兼容字段对齐，并由 schema tests 验证。
 - [x] 完成 Guard API evaluate writer 与跨存储语义的 `0.4` 迁移（policy_evaluation 写入、幂等与指标口径）。
 - [x] 完成 LangGraph `0.4` 运行时主链写入与 Dashboard `0.3 | 0.4` 双读主链迁移。
 - [x] 完成 OpenClaw Plugin 的 `0.4` 迁移：observation 输出 `runtime_observation` 0.4 形态（策略字段置空），
       新增 `runtime_outcome` 回执（执行前拒绝、审批拒绝/超时、审批放行、工具结果隔离/改写），
       回执经 `links.policy_audit_id` 关联策略审计并复用 `POST /v1/audit/events` 幂等提交。
 - [x] 增加
-      [运行时安全主演示链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
+      [运行时安全代表性验收链共享 JSON fixture](../../tests/fixtures/runtime_safety_trace_v04.json)。
 - [x] Memory 和 PostgreSQL store 运行相同幂等与指标 contract tests。
 - [x] Dashboard API 模式在四档桌面运行目标 AuditEvent fixtures，并通过真实 PostgreSQL
       Guard API 读链核验。
 - [x] CLI 审计导出使用原子窗口 cursor，历史指标使用显式时间 cohort，并有回归测试。
 - [x] 完成当前 LangGraph / Guard API / Dashboard 主链的跨组件实现评审与迁移验证；
-      GuardDecision risk breakdown、动作 cohort 指标、CLI 和 OpenClaw 完整执行确证继续按
-      各自未完成项推进。
+      GuardDecision risk breakdown 与动作 cohort 指标仍未支持；LangGraph strong binding
+      不支持 CF-17 active-call-cache，OpenClaw OC-02 仍受宿主原子 replace-and-seal 与权威
+      invocation-start 缺口阻塞。
