@@ -9,15 +9,17 @@ service 门面）：
 - ``store``：ControlPlaneStore 新方法薄封装 + per-scope 锁注册表；
 - ``projector``：commit → project → 幂等写入 → CAS 编排；
 - ``rebuild``：bounded rebuild（crash/replay 恢复 + 截断 fail-closed）；
-- ``snapshot_builder``：dirty/缺态先 rebuild 再出不可变快照；
+- ``snapshot_builder``：兼容路径 repair-capable snapshot + Product strict
+  ready-only snapshot；
 - ``service``：对外 API 门面（read_snapshot / project_committed /
-  ensure_ready）。
+  read_ready_snapshot_with_revoked / ensure_ready）。
 """
 
 from .models import (
     ProjectApplyOutcome,
     ProjectApplyResult,
     SecurityAlert,
+    SecurityStateNotReadyError,
     SecurityStateProjectError,
 )
 from .ordering import SequenceComparisonError, compare_sequence_ref_order
@@ -33,6 +35,7 @@ __all__ = [
     "ProjectApplyOutcome",
     "ProjectApplyResult",
     "SecurityAlert",
+    "SecurityStateNotReadyError",
     "SecurityStateProjectError",
     "SecurityStateProjector",
     "SecurityStateService",

@@ -2,13 +2,15 @@
 
 V21-08 T4 起由 ``main.py`` 注册进 ApiContext/EvaluationService 可达
 位置，供 shadow 旁路编排（``services/v21_shadow.py``）只读消费；
-不新增 HTTP 路由。对外三个入口：
+不新增 HTTP 路由。对外入口：
 
 - ``project_committed``：已 commit 权威记录的投影 + 应用编排；
 - ``read_snapshot``：判定输入快照（dirty/缺态自动 bounded rebuild，
   task 域直读权威 TaskFact head）；
 - ``read_snapshot_with_revoked``：snapshot + 同源 revoked 集（D3，
   V21-09 编排注入 assess 的权威撤销集读取入口）；
+- ``read_ready_snapshot_with_revoked``：Product 决策专用严格只读入口，
+  不初始化、不 rebuild、不修复、不置脏；
 - ``ensure_ready``：下一次 state-dependent 决策前的 rebuild 钩子。
 """
 
@@ -37,7 +39,11 @@ from guard_api.storage.base import (
 from .models import ProjectApplyResult
 from .projector import CommittedVerifier, SecurityStateProjector
 from .rebuild import DEFAULT_REBUILD_LIMIT, rebuild_locked, state_from_record
-from .snapshot_builder import get_snapshot, get_snapshot_with_revoked
+from .snapshot_builder import (
+    get_ready_snapshot_with_revoked,
+    get_snapshot,
+    get_snapshot_with_revoked,
+)
 from .store import SecurityStateStoreAccess, empty_online_state
 
 
@@ -120,6 +126,37 @@ class SecurityStateService:
         """
 
         return get_snapshot_with_revoked(
+            self._access,
+            scope_digest,
+            scope=scope,
+            task_fact_head=task_fact_head,
+            evaluation_clock=evaluation_clock,
+            policy_revision=policy_revision,
+            policy_digest=policy_digest,
+            plan=plan,
+            authoritative_head_revision=authoritative_head_revision,
+        )
+
+    def read_ready_snapshot_with_revoked(
+        self,
+        scope_digest: str,
+        *,
+        scope: SecurityStateScope,
+        task_fact_head: TaskFact | None,
+        evaluation_clock: EvaluationClock,
+        policy_revision: str,
+        policy_digest: str,
+        plan: RequiredCheckPlan,
+        authoritative_head_revision: int | None = None,
+    ) -> tuple[SecuritySnapshot, list[str], str]:
+        """Read one internally consistent ready state with zero writes.
+
+        Unlike the compatibility snapshot APIs, this method never initializes,
+        rebuilds, repairs, or dirties state.  The third result is the complete
+        state authority digest for later Phase-B revalidation.
+        """
+
+        return get_ready_snapshot_with_revoked(
             self._access,
             scope_digest,
             scope=scope,
