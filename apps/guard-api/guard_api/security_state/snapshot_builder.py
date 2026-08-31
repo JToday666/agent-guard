@@ -35,6 +35,7 @@ from agentguard_core.security_context.projection import (
     compile_task_to_grants,
 )
 from guard_api.storage.base import MAX_REBUILD_INPUT_LIMIT
+from guard_api.storage.base import ProjectionIdentityRecord
 
 from .models import SecurityStateNotReadyError
 from .rebuild import _committed_from_projection, rebuild_locked, state_from_record
@@ -49,6 +50,9 @@ def security_state_authority_digest(
     dirty: bool,
     dirty_domains: list[str],
     projector_version: str,
+    projection_history: (
+        list[ProjectionIdentityRecord] | tuple[ProjectionIdentityRecord, ...]
+    ) = (),
 ) -> str:
     """Digest every security-state authority field consumed by a decision.
 
@@ -56,6 +60,9 @@ def security_state_authority_digest(
     does not change the authority represented by the row.  The full canonical
     payload and both dirty representations are included so a same-version
     dirty/payload drift cannot be hidden behind the monotonic version scalar.
+    The complete bounded projection history is included as canonical bytes as
+    well.  This prevents a semantically equivalent alias/rewrite, an unapplied
+    envelope, or a history replacement from retaining the Phase-A anchor.
     """
 
     return canonical_sha256(
@@ -66,6 +73,29 @@ def security_state_authority_digest(
             "dirty": dirty,
             "dirty_domains": dirty_domains,
             "projector_version": projector_version,
+            "projection_history": [
+                {
+                    "scope_digest": row.scope_digest,
+                    "source_record_type": row.source_record_type,
+                    "source_record_id": row.source_record_id,
+                    "source_revision": row.source_revision,
+                    "projector_version": row.projector_version,
+                    "delta_digest": row.delta_digest,
+                    "delta_payload": row.delta_payload,
+                    "applied_state_version": row.applied_state_version,
+                }
+                for row in sorted(
+                    projection_history,
+                    key=lambda item: (
+                        item.scope_digest,
+                        item.source_record_type,
+                        item.source_record_id,
+                        item.source_revision,
+                        item.projector_version,
+                        item.applied_state_version,
+                    ),
+                )
+            ],
         }
     )
 
@@ -145,7 +175,7 @@ def _require_projection_reflection(
     *,
     scope_digest: str,
     state: OnlineSecurityState,
-) -> None:
+) -> tuple[ProjectionIdentityRecord, ...]:
     """Prove every bounded projection envelope is reflected in this state.
 
     ``record_projection`` intentionally precedes the state CAS.  A hard crash
@@ -249,6 +279,7 @@ def _require_projection_reflection(
         }
         if applied_digest not in acceptable_digests:
             raise SecurityStateNotReadyError("projection_digest_mismatch")
+    return tuple(rows)
 
 
 def get_snapshot_with_revoked(
@@ -362,7 +393,7 @@ def get_ready_snapshot_with_revoked(
             raise SecurityStateNotReadyError("state_version_mismatch")
         if state.dirty_domains:
             raise SecurityStateNotReadyError("payload_dirty")
-        _require_projection_reflection(
+        projection_history = _require_projection_reflection(
             store,
             scope_digest=scope_digest,
             state=state,
@@ -386,6 +417,7 @@ def get_ready_snapshot_with_revoked(
             dirty=record.dirty,
             dirty_domains=list(record.dirty_domains),
             projector_version=record.projector_version,
+            projection_history=projection_history,
         )
     return snapshot, revoked, authority_digest
 

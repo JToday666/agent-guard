@@ -68,6 +68,7 @@ from guard_api.storage.base import (
     MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
+    ProductAuthorityCredentialUnavailableError,
     ProjectionDigestConflictError,
     ProjectionIdentityRecord,
     ProvenanceEndpointMissingError,
@@ -206,9 +207,12 @@ class MemoryControlPlaneStore:
     product_runtime_status_lock: Any = field(
         default_factory=RLock, init=False, repr=False
     )
-    policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    task_fact_lock: Any = field(default_factory=Lock, init=False, repr=False)
-    security_state_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    # Product evaluation holds these authority locks while re-entering the
+    # public typed getters for its two exact validations.  They therefore must
+    # be re-entrant; compatibility callers retain the same mutual exclusion.
+    policy_snapshot_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    task_fact_lock: Any = field(default_factory=RLock, init=False, repr=False)
+    security_state_lock: Any = field(default_factory=RLock, init=False, repr=False)
     approval_lease_lock: Any = field(default_factory=RLock, init=False, repr=False)
     memory_change_lock: Any = field(default_factory=RLock, init=False, repr=False)
     action_critic_lock: Any = field(default_factory=RLock, init=False, repr=False)
@@ -342,6 +346,143 @@ class MemoryControlPlaneStore:
                 self.memory_changes.update(snapshot["memory_changes"])
                 self.action_critic_reviews.clear()
                 self.action_critic_reviews.update(snapshot["action_critic_reviews"])
+                raise
+
+    @contextmanager
+    def product_evaluation_transaction(
+        self,
+        event_id: str,
+        *,
+        task_id: str,
+        scope_digest: str,
+        runtime_ids: tuple[ProductRuntime, ProductRuntime],
+        credential_id: str,
+        credential_token_hash: str,
+    ) -> Iterator[None]:
+        """Freeze Product authority and atomically stage its evaluation.
+
+        The in-memory backend is the executable reference for the PostgreSQL
+        lock contract.  Authority containers are included in the rollback
+        image as a defence against a future in-transaction writer; the normal
+        Product path only reads them, except for its projection reservation.
+        """
+
+        if runtime_ids != ("langgraph", "openclaw"):
+            raise ValueError("Product authority requires both runtimes in order")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                event_id,
+                task_id,
+                scope_digest,
+                credential_id,
+                credential_token_hash,
+            )
+        ):
+            raise ValueError("Product authority fence identities must be non-empty")
+
+        with (
+            self.policy_evaluation_lock,
+            self.product_runtime_status_lock,
+            self.policy_snapshot_lock,
+            self.task_fact_lock,
+            self.security_state_lock,
+            self.audit_integrity_lock,
+            self.provenance_lock,
+            self.approval_lease_lock,
+            self.memory_change_lock,
+            self.action_critic_lock,
+        ):
+            credential = self.credentials.get(credential_id)
+            if (
+                credential is None
+                or credential.token_hash != credential_token_hash
+                or credential.revoked_at is not None
+            ):
+                raise ProductAuthorityCredentialUnavailableError(
+                    "Product credential is missing, changed, or revoked"
+                )
+            snapshot = {
+                "audit_events": deepcopy(self.audit_events),
+                "audit_events_by_id": deepcopy(self.audit_events_by_id),
+                "audit_ingested_at_by_id": deepcopy(self.audit_ingested_at_by_id),
+                "provenance_nodes": deepcopy(self.provenance_nodes),
+                "provenance_edges": deepcopy(self.provenance_edges),
+                "approvals": deepcopy(self.approvals),
+                "enforcement_bindings": deepcopy(self.enforcement_bindings),
+                "memory_changes": deepcopy(self.memory_changes),
+                "action_critic_reviews": deepcopy(self.action_critic_reviews),
+                "policy_snapshot": deepcopy(self.policy_snapshot),
+                "policy_snapshot_history": deepcopy(self.policy_snapshot_history),
+                "task_facts": deepcopy(self.task_facts),
+                "security_states": deepcopy(self.security_states),
+                "projection_records": deepcopy(self.projection_records),
+                "product_runtime_statuses_v2": deepcopy(
+                    self.product_runtime_statuses_v2
+                ),
+                "product_runtime_status_write_sequence": (
+                    self.product_runtime_status_write_sequence
+                ),
+                "adapter_statuses": deepcopy(self.adapter_statuses),
+                "credentials": deepcopy(self.credentials),
+            }
+            try:
+                yield
+            except BaseException:
+                self.audit_events[:] = snapshot["audit_events"]
+                self.audit_events_by_id.clear()
+                self.audit_events_by_id.update(snapshot["audit_events_by_id"])
+                self.audit_ingested_at_by_id.clear()
+                self.audit_ingested_at_by_id.update(snapshot["audit_ingested_at_by_id"])
+                self.provenance_nodes.clear()
+                self.provenance_nodes.update(snapshot["provenance_nodes"])
+                self.provenance_edges.clear()
+                self.provenance_edges.update(snapshot["provenance_edges"])
+                self.approvals.clear()
+                self.approvals.update(snapshot["approvals"])
+                self.enforcement_bindings.clear()
+                self.enforcement_bindings.update(snapshot["enforcement_bindings"])
+                self.memory_changes.clear()
+                self.memory_changes.update(snapshot["memory_changes"])
+                self.action_critic_reviews.clear()
+                self.action_critic_reviews.update(snapshot["action_critic_reviews"])
+                self.policy_snapshot = snapshot["policy_snapshot"]
+                self.policy_snapshot_history[:] = snapshot["policy_snapshot_history"]
+                self.task_facts.clear()
+                self.task_facts.update(snapshot["task_facts"])
+                self.security_states.clear()
+                self.security_states.update(snapshot["security_states"])
+                self.projection_records.clear()
+                self.projection_records.update(snapshot["projection_records"])
+                self.product_runtime_statuses_v2.clear()
+                self.product_runtime_statuses_v2.update(
+                    snapshot["product_runtime_statuses_v2"]
+                )
+                self.product_runtime_status_write_sequence = snapshot[
+                    "product_runtime_status_write_sequence"
+                ]
+                self.adapter_statuses.clear()
+                self.adapter_statuses.update(snapshot["adapter_statuses"])
+                self.credentials.clear()
+                self.credentials.update(snapshot["credentials"])
+                raise
+
+    @contextmanager
+    def security_state_transaction(self, scope_digest: str) -> Iterator[None]:
+        """Atomically reconcile one in-memory state/projection scope."""
+
+        if not isinstance(scope_digest, str) or not scope_digest:
+            raise ValueError("scope_digest must be non-empty")
+        with self.security_state_lock:
+            states_snapshot = deepcopy(self.security_states)
+            projections_snapshot = deepcopy(self.projection_records)
+            try:
+                yield
+            except BaseException:
+                self.security_states.clear()
+                self.security_states.update(states_snapshot)
+                self.projection_records.clear()
+                self.projection_records.update(projections_snapshot)
                 raise
 
     @contextmanager
@@ -1432,14 +1573,12 @@ class MemoryControlPlaneStore:
                 if lease.status == "expired":
                     raise LeaseExpiredError(
                         "v21-06:execution_lease_expired",
-                        "same-key retry after lease expiry must not issue "
-                        "a new lease",
+                        "same-key retry after lease expiry must not issue a new lease",
                     )
                 if parse_audit_timestamp(lease.expires_at) <= _system_utc_now():
                     raise LeaseExpiredError(
                         "v21-06:execution_lease_expired",
-                        "same-key retry after lease expiry must not issue "
-                        "a new lease",
+                        "same-key retry after lease expiry must not issue a new lease",
                     )
                 # F3：重放返回前恒定时间校验调用方 token 与存储
                 # token_digest 一致，伪造 token 的重放拒绝。

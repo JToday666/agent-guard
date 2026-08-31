@@ -120,6 +120,7 @@ def build_test_product_activation(
     signer_key_id: str = TEST_PRODUCT_ACTIVATION_SIGNER,
     admission_signer_key_id: str | None = None,
     risk_signer_key_id: str | None = None,
+    policy_digest: str | None = None,
 ) -> ProductActivationFixture:
     """Build a bundle valid from one minute ago through the next day."""
 
@@ -132,6 +133,7 @@ def build_test_product_activation(
     expires_at = expires.isoformat()
     admission_signer = admission_signer_key_id or signer_key_id
     risk_signer = risk_signer_key_id or signer_key_id
+    admitted_policy_digest = policy_digest or _DIGESTS["5"]
 
     risk = build_residual_risk_acceptance(
         server_secret=server_secret,
@@ -158,7 +160,7 @@ def build_test_product_activation(
         server_secret=server_secret,
         candidate_artifact_manifest_digest=_DIGESTS["1"],
         source_revision="1234567890abcdef",
-        policy_digest=_DIGESTS["5"],
+        policy_digest=admitted_policy_digest,
         dataset_digest=_DIGESTS["6"],
         contract_digest=_DIGESTS["7"],
         langgraph_conformance_digest=_DIGESTS["8"],
@@ -220,7 +222,7 @@ def build_test_product_activation(
         residual_risk_acceptance=risk,
         candidate_artifact_manifest_digest=_DIGESTS["1"],
         rollout_admission_digest=admission.admission_ref_digest,
-        policy_digest=_DIGESTS["5"],
+        policy_digest=admitted_policy_digest,
         dataset_digest=_DIGESTS["6"],
         contract_digest=_DIGESTS["7"],
         runtimes=runtimes,

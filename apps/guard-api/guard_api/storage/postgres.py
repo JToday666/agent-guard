@@ -88,6 +88,7 @@ from guard_api.storage.base import (
     MemoryTransitionResult,
     PolicyRevisionConflictError,
     PolicySnapshotRecord,
+    ProductAuthorityCredentialUnavailableError,
     ProjectionDigestConflictError,
     ProjectionIdentityRecord,
     ProvenanceEndpointMissingError,
@@ -154,6 +155,77 @@ _AUDIT_INTEGRITY_ADVISORY_LOCK_ID = 427001030002
 _AUDIT_CHAIN_ID = "default"
 
 
+def _acquire_advisory_xact_lock(
+    session: Session,
+    lock_id: int,
+    *,
+    shared: bool = False,
+) -> None:
+    """Acquire one transaction lock using a fixed, non-interpolated function."""
+
+    statement = (
+        "SELECT pg_advisory_xact_lock_shared(:lock_id)"
+        if shared
+        else "SELECT pg_advisory_xact_lock(:lock_id)"
+    )
+    session.execute(text(statement), {"lock_id": lock_id})
+
+
+def _lock_policy_snapshot(session: Session, *, shared: bool = False) -> None:
+    _acquire_advisory_xact_lock(
+        session,
+        _POLICY_SNAPSHOT_ADVISORY_LOCK_ID,
+        shared=shared,
+    )
+
+
+def _evaluation_lock_id(event_id: str) -> int:
+    return int.from_bytes(
+        hashlib.sha256(f"evaluation:{event_id}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+
+
+def _credential_lock_id(kind: str, value: str) -> int:
+    return int.from_bytes(
+        hashlib.sha256(f"credential:{kind}:{value}".encode("utf-8")).digest()[:8],
+        byteorder="big",
+        signed=True,
+    )
+
+
+def _lock_credential_identity(
+    session: Session,
+    credential_id: str,
+    token_hash: str,
+    *,
+    shared: bool = False,
+) -> None:
+    """Serialize the exact credential row and token-hash namespace."""
+
+    # All credential participants use this fixed order.  The token lock also
+    # prevents a different credential ID from introducing an ambiguous hash
+    # after Product's row-level FOR SHARE read.
+    _acquire_advisory_xact_lock(
+        session,
+        _credential_lock_id("id", credential_id),
+        shared=shared,
+    )
+    _acquire_advisory_xact_lock(
+        session,
+        _credential_lock_id("token", token_hash),
+        shared=shared,
+    )
+
+
+def _lock_credential_id(session: Session, credential_id: str) -> None:
+    _acquire_advisory_xact_lock(
+        session,
+        _credential_lock_id("id", credential_id),
+    )
+
+
 def _compat_strip_legacy_policy_bundle_fields(payload: Any) -> Any:
     """存量策略快照的遗留字段兼容处理。
 
@@ -181,7 +253,9 @@ def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> No
     )
 
 
-def _lock_product_runtime_status(session: Session, runtime: str) -> None:
+def _lock_product_runtime_status(
+    session: Session, runtime: str, *, shared: bool = False
+) -> None:
     """Serialize V2 and compatibility-projection writes for one runtime."""
 
     lock_id = int.from_bytes(
@@ -191,9 +265,7 @@ def _lock_product_runtime_status(session: Session, runtime: str) -> None:
         byteorder="big",
         signed=True,
     )
-    session.execute(
-        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
-    )
+    _acquire_advisory_xact_lock(session, lock_id, shared=shared)
 
 
 def _adapter_status_upsert(
@@ -244,7 +316,9 @@ def _ct_flow_id(edge: ProvenanceEdge) -> str | None:
     return flow_id if isinstance(flow_id, str) and flow_id else None
 
 
-def _lock_task_identity(session: Session, task_id: str) -> None:
+def _lock_task_identity(
+    session: Session, task_id: str, *, shared: bool = False
+) -> None:
     """按 task_id 加事务级 advisory lock，串行化同一任务的 revision CAS。"""
 
     lock_id = int.from_bytes(
@@ -252,12 +326,12 @@ def _lock_task_identity(session: Session, task_id: str) -> None:
         byteorder="big",
         signed=True,
     )
-    session.execute(
-        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
-    )
+    _acquire_advisory_xact_lock(session, lock_id, shared=shared)
 
 
-def _lock_security_state_scope(session: Session, scope_digest: str) -> None:
+def _lock_security_state_scope(
+    session: Session, scope_digest: str, *, shared: bool = False
+) -> None:
     """按 scope_digest 加事务级 advisory lock，串行化同一 scope 的 state CAS（V21-04）。"""
 
     lock_id = int.from_bytes(
@@ -265,9 +339,7 @@ def _lock_security_state_scope(session: Session, scope_digest: str) -> None:
         byteorder="big",
         signed=True,
     )
-    session.execute(
-        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
-    )
+    _acquire_advisory_xact_lock(session, lock_id, shared=shared)
 
 
 def _lock_grant_identity(session: Session, grant_id: str) -> None:
@@ -661,17 +733,99 @@ class PostgresControlPlaneStore:
     def evaluation_transaction(self, event_id: str) -> Iterator[None]:
         """Commit every evaluation fact atomically under a per-event lock."""
 
-        lock_id = int.from_bytes(
-            hashlib.sha256(f"evaluation:{event_id}".encode("utf-8")).digest()[:8],
-            byteorder="big",
-            signed=True,
-        )
         if self._active_store_session.get() is not None:
             raise RuntimeError("nested evaluation transactions are not supported")
         with self._session_factory.begin() as session:
-            session.execute(
-                text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+            _acquire_advisory_xact_lock(session, _evaluation_lock_id(event_id))
+            token = self._active_store_session.set(session)
+            try:
+                yield
+            finally:
+                self._active_store_session.reset(token)
+
+    @contextmanager
+    def product_evaluation_transaction(
+        self,
+        event_id: str,
+        *,
+        task_id: str,
+        scope_digest: str,
+        runtime_ids: tuple[ProductRuntime, ProductRuntime],
+        credential_id: str,
+        credential_token_hash: str,
+    ) -> Iterator[None]:
+        """Freeze every persisted Product authority input through commit.
+
+        Runtime, policy, and task locks are shared so unrelated Product
+        evaluations may coexist while their writers remain excluded.  The
+        state/projection lock is exclusive because the transaction atomically
+        pre-registers its Phase-C projection envelope as a reservation.  That
+        reservation prevents another event in the same scope from committing
+        against the same historical anchor before commit→project completes.
+        """
+
+        if runtime_ids != ("langgraph", "openclaw"):
+            raise ValueError("Product authority requires both runtimes in order")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                event_id,
+                task_id,
+                scope_digest,
+                credential_id,
+                credential_token_hash,
             )
+        ):
+            raise ValueError("Product authority fence identities must be non-empty")
+        if self._active_store_session.get() is not None:
+            raise RuntimeError("nested evaluation transactions are not supported")
+
+        with self._session_factory.begin() as session:
+            # Fixed global order: event → dual runtime → policy → task →
+            # state/projection → credential.  Every authority lock is acquired
+            # before the active session becomes visible to the first getter.
+            _acquire_advisory_xact_lock(session, _evaluation_lock_id(event_id))
+            for runtime in runtime_ids:
+                _lock_product_runtime_status(session, runtime, shared=True)
+            _lock_policy_snapshot(session, shared=True)
+            _lock_task_identity(session, task_id, shared=True)
+            _lock_security_state_scope(session, scope_digest)
+            _lock_credential_identity(
+                session,
+                credential_id,
+                credential_token_hash,
+                shared=True,
+            )
+            locked_credential_id = session.execute(
+                select(credentials.c.credential_id)
+                .where(
+                    credentials.c.credential_id == credential_id,
+                    credentials.c.token_hash == credential_token_hash,
+                    credentials.c.revoked_at.is_(None),
+                )
+                .with_for_update(read=True)
+            ).scalar_one_or_none()
+            if locked_credential_id is None:
+                raise ProductAuthorityCredentialUnavailableError(
+                    "Product credential is missing, changed, or revoked"
+                )
+
+            token = self._active_store_session.set(session)
+            try:
+                yield
+            finally:
+                self._active_store_session.reset(token)
+
+    @contextmanager
+    def security_state_transaction(self, scope_digest: str) -> Iterator[None]:
+        """Serialize and atomically commit one scope reconciliation."""
+
+        if not isinstance(scope_digest, str) or not scope_digest:
+            raise ValueError("scope_digest must be non-empty")
+        if self._active_store_session.get() is not None:
+            raise RuntimeError("nested store transactions are not supported")
+        with self._session_factory.begin() as session:
+            _lock_security_state_scope(session, scope_digest)
             token = self._active_store_session.set(session)
             try:
                 yield
@@ -1251,9 +1405,13 @@ class PostgresControlPlaneStore:
                 "revoked_at": stmt.excluded.revoked_at,
             },
         )
-        with self._session_factory() as session:
+        with self._session_factory.begin() as session:
+            _lock_credential_identity(
+                session,
+                record.credential_id,
+                record.token_hash,
+            )
             session.execute(stmt)
-            session.commit()
         return record
 
     def get_credential_by_token_hash(self, token_hash: str) -> CredentialRecord | None:
@@ -1261,7 +1419,7 @@ class PostgresControlPlaneStore:
             credentials.c.token_hash == token_hash,
             credentials.c.revoked_at.is_(None),
         )
-        with self._session_factory() as session:
+        with self._read_session() as session:
             row = session.execute(stmt).scalar_one_or_none()
         if row is None:
             return None
@@ -1281,7 +1439,8 @@ class PostgresControlPlaneStore:
         current_stmt = select(credentials.c.payload_json).where(
             credentials.c.credential_id == credential_id
         )
-        with self._session_factory() as session:
+        with self._session_factory.begin() as session:
+            _lock_credential_id(session, credential_id)
             current = session.execute(current_stmt).scalar_one_or_none()
             if current is None:
                 raise KeyError(credential_id)
@@ -1296,7 +1455,6 @@ class PostgresControlPlaneStore:
                     revoked_at=revoked_at,
                 )
             )
-            session.commit()
         return record
 
     def add_action_critic_review(
@@ -1464,10 +1622,7 @@ class PostgresControlPlaneStore:
         updated_at = utc_now_iso()
         with self._session_factory() as session:
             with session.begin():
-                session.execute(
-                    text("SELECT pg_advisory_xact_lock(:lock_id)"),
-                    {"lock_id": _POLICY_SNAPSHOT_ADVISORY_LOCK_ID},
-                )
+                _lock_policy_snapshot(session)
                 current_revision = session.execute(
                     select(policy_snapshots.c.revision).where(
                         policy_snapshots.c.policy_id == "current"
@@ -1641,52 +1796,17 @@ class PostgresControlPlaneStore:
     ) -> bool:
         # 事务内 advisory lock + 单条条件 UPDATE（rowcount 判定）；无既有行
         # 时以 expected_state_version == 0 为 CAS 前提插入，与 memory 语义对齐。
-        with self._session_factory() as session:
-            with session.begin():
-                _lock_security_state_scope(session, scope_digest)
-                result = cast(
-                    CursorResult[Any],
-                    session.execute(
-                        update(security_states)
-                        .where(
-                            security_states.c.scope_digest == scope_digest,
-                            security_states.c.state_version == expected_state_version,
-                        )
-                        .values(
-                            state_version=record.state_version,
-                            canonical_payload=record.canonical_payload,
-                            dirty=record.dirty,
-                            dirty_domains=record.dirty_domains,
-                            projector_version=record.projector_version,
-                            updated_at=record.updated_at,
-                        )
-                    ),
-                )
-                if result.rowcount == 1:
-                    return True
-                if result.rowcount != 0:  # pragma: no cover - PK 单行不变量
-                    raise StateVersionConflictError(
-                        expected_state_version=expected_state_version,
-                        current_state_version=-1,
-                    )
-                exists = session.execute(
-                    select(security_states.c.state_version).where(
-                        security_states.c.scope_digest == scope_digest
-                    )
-                ).scalar_one_or_none()
-                if exists is not None:
-                    raise StateVersionConflictError(
-                        expected_state_version=expected_state_version,
-                        current_state_version=int(exists),
-                    )
-                if expected_state_version != 0:
-                    raise StateVersionConflictError(
-                        expected_state_version=expected_state_version,
-                        current_state_version=0,
-                    )
+        with self._write_session() as session:
+            _lock_security_state_scope(session, scope_digest)
+            result = cast(
+                CursorResult[Any],
                 session.execute(
-                    pg_insert(security_states).values(
-                        scope_digest=scope_digest,
+                    update(security_states)
+                    .where(
+                        security_states.c.scope_digest == scope_digest,
+                        security_states.c.state_version == expected_state_version,
+                    )
+                    .values(
                         state_version=record.state_version,
                         canonical_payload=record.canonical_payload,
                         dirty=record.dirty,
@@ -1694,8 +1814,42 @@ class PostgresControlPlaneStore:
                         projector_version=record.projector_version,
                         updated_at=record.updated_at,
                     )
-                )
+                ),
+            )
+            if result.rowcount == 1:
                 return True
+            if result.rowcount != 0:  # pragma: no cover - PK 单行不变量
+                raise StateVersionConflictError(
+                    expected_state_version=expected_state_version,
+                    current_state_version=-1,
+                )
+            exists = session.execute(
+                select(security_states.c.state_version).where(
+                    security_states.c.scope_digest == scope_digest
+                )
+            ).scalar_one_or_none()
+            if exists is not None:
+                raise StateVersionConflictError(
+                    expected_state_version=expected_state_version,
+                    current_state_version=int(exists),
+                )
+            if expected_state_version != 0:
+                raise StateVersionConflictError(
+                    expected_state_version=expected_state_version,
+                    current_state_version=0,
+                )
+            session.execute(
+                pg_insert(security_states).values(
+                    scope_digest=scope_digest,
+                    state_version=record.state_version,
+                    canonical_payload=record.canonical_payload,
+                    dirty=record.dirty,
+                    dirty_domains=record.dirty_domains,
+                    projector_version=record.projector_version,
+                    updated_at=record.updated_at,
+                )
+            )
+            return True
 
     def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         # 事务内 advisory lock：state_version 保持不变；无既有行时创建
@@ -1708,115 +1862,114 @@ class PostgresControlPlaneStore:
         from agentguard_core.signals.models import CoverageDomain
 
         merged_domains = cast("list[CoverageDomain]", sorted(set(domains)))
-        with self._session_factory() as session:
-            with session.begin():
-                _lock_security_state_scope(session, scope_digest)
-                row = (
-                    session.execute(
-                        select(
-                            security_states.c.state_version,
-                            security_states.c.canonical_payload,
-                            security_states.c.dirty_domains,
-                            security_states.c.projector_version,
-                        ).where(security_states.c.scope_digest == scope_digest)
-                    )
-                    .mappings()
-                    .one_or_none()
+        with self._write_session() as session:
+            _lock_security_state_scope(session, scope_digest)
+            row = (
+                session.execute(
+                    select(
+                        security_states.c.state_version,
+                        security_states.c.canonical_payload,
+                        security_states.c.dirty_domains,
+                        security_states.c.projector_version,
+                    ).where(security_states.c.scope_digest == scope_digest)
                 )
-                if row is None:
-                    # F1 双口径同步：payload 内的 dirty_domains 与列同时写入。
-                    empty_state = OnlineSecurityState(
-                        watermarks=StateWatermarks(
-                            committed_sequence=None,
-                            projected_sequence=None,
-                            runtime_receipt_sequence=None,
-                            memory_sequence=None,
-                            gaps=[],
-                        ),
-                        dirty_domains=merged_domains,
-                    )
-                    session.execute(
-                        pg_insert(security_states).values(
-                            scope_digest=scope_digest,
-                            state_version=0,
-                            canonical_payload=empty_state.model_dump(mode="json"),
-                            dirty=True,
-                            dirty_domains=merged_domains,
-                            projector_version=PROJECTOR_VERSION,
-                            updated_at=utc_now_iso(),
-                        )
-                    )
-                    return
-                merged = sorted(set(row["dirty_domains"]) | set(merged_domains))
-                # F1 双口径同步：把 dirty 域并入 canonical_payload 的
-                # dirty_domains（model_dump(mode="json") 口径，改后仍可
-                # model_validate 读回），否则 projector 从 payload 重建
-                # 状态后回写会静默清除失败事实。
-                payload_state = OnlineSecurityState.model_validate(
-                    row["canonical_payload"]
-                )
-                payload_state = payload_state.model_copy(
-                    update={
-                        "dirty_domains": sorted(
-                            set(payload_state.dirty_domains) | set(merged)
-                        )
-                    }
+                .mappings()
+                .one_or_none()
+            )
+            if row is None:
+                # F1 双口径同步：payload 内的 dirty_domains 与列同时写入。
+                empty_state = OnlineSecurityState(
+                    watermarks=StateWatermarks(
+                        committed_sequence=None,
+                        projected_sequence=None,
+                        runtime_receipt_sequence=None,
+                        memory_sequence=None,
+                        gaps=[],
+                    ),
+                    dirty_domains=merged_domains,
                 )
                 session.execute(
-                    update(security_states)
-                    .where(security_states.c.scope_digest == scope_digest)
-                    .values(
+                    pg_insert(security_states).values(
+                        scope_digest=scope_digest,
+                        state_version=0,
+                        canonical_payload=empty_state.model_dump(mode="json"),
                         dirty=True,
-                        dirty_domains=merged,
-                        canonical_payload=payload_state.model_dump(mode="json"),
+                        dirty_domains=merged_domains,
+                        projector_version=PROJECTOR_VERSION,
                         updated_at=utc_now_iso(),
                     )
                 )
+                return
+            merged = sorted(set(row["dirty_domains"]) | set(merged_domains))
+            # F1 双口径同步：把 dirty 域并入 canonical_payload 的
+            # dirty_domains（model_dump(mode="json") 口径，改后仍可
+            # model_validate 读回），否则 projector 从 payload 重建
+            # 状态后回写会静默清除失败事实。
+            payload_state = OnlineSecurityState.model_validate(row["canonical_payload"])
+            payload_state = payload_state.model_copy(
+                update={
+                    "dirty_domains": sorted(
+                        set(payload_state.dirty_domains) | set(merged)
+                    )
+                }
+            )
+            session.execute(
+                update(security_states)
+                .where(security_states.c.scope_digest == scope_digest)
+                .values(
+                    dirty=True,
+                    dirty_domains=merged,
+                    canonical_payload=payload_state.model_dump(mode="json"),
+                    updated_at=utc_now_iso(),
+                )
+            )
 
     def record_projection(
         self, record: ProjectionIdentityRecord
     ) -> tuple[ProjectionIdentityRecord, bool]:
         # 幂等三分支：PK 唯一 + 回读比对 digest；同身份异 digest 拒绝。
-        with self._session_factory() as session:
-            with session.begin():
-                _lock_security_state_scope(session, record.scope_digest)
-                existing = self._get_projection_locked(
-                    session,
-                    record.scope_digest,
-                    record.source_record_type,
-                    record.source_record_id,
-                    record.source_revision,
-                    record.projector_version,
+        # ``_write_session`` joins the Product evaluation transaction when it
+        # is active, making the audit row and projection reservation one
+        # physical commit.  Outside that boundary behavior is unchanged.
+        with self._write_session() as session:
+            _lock_security_state_scope(session, record.scope_digest)
+            existing = self._get_projection_locked(
+                session,
+                record.scope_digest,
+                record.source_record_type,
+                record.source_record_id,
+                record.source_revision,
+                record.projector_version,
+            )
+            if existing is not None:
+                if existing.delta_digest == record.delta_digest:
+                    return existing, False
+                raise ProjectionDigestConflictError(
+                    projection_key="|".join(
+                        [
+                            record.scope_digest,
+                            record.source_record_type,
+                            record.source_record_id,
+                            str(record.source_revision),
+                            record.projector_version,
+                        ]
+                    ),
+                    existing_digest=existing.delta_digest,
+                    incoming_digest=record.delta_digest,
                 )
-                if existing is not None:
-                    if existing.delta_digest == record.delta_digest:
-                        return existing, False
-                    raise ProjectionDigestConflictError(
-                        projection_key="|".join(
-                            [
-                                record.scope_digest,
-                                record.source_record_type,
-                                record.source_record_id,
-                                str(record.source_revision),
-                                record.projector_version,
-                            ]
-                        ),
-                        existing_digest=existing.delta_digest,
-                        incoming_digest=record.delta_digest,
-                    )
-                session.execute(
-                    pg_insert(projection_records).values(
-                        scope_digest=record.scope_digest,
-                        source_record_type=record.source_record_type,
-                        source_record_id=record.source_record_id,
-                        source_revision=record.source_revision,
-                        projector_version=record.projector_version,
-                        delta_digest=record.delta_digest,
-                        delta_payload=record.delta_payload,
-                        applied_state_version=record.applied_state_version,
-                        created_at=record.created_at,
-                    )
+            session.execute(
+                pg_insert(projection_records).values(
+                    scope_digest=record.scope_digest,
+                    source_record_type=record.source_record_type,
+                    source_record_id=record.source_record_id,
+                    source_revision=record.source_revision,
+                    projector_version=record.projector_version,
+                    delta_digest=record.delta_digest,
+                    delta_payload=record.delta_payload,
+                    applied_state_version=record.applied_state_version,
+                    created_at=record.created_at,
                 )
+            )
         return record, True
 
     def _get_projection_locked(
@@ -2547,7 +2700,7 @@ class PostgresControlPlaneStore:
                     if lease_row is None:
                         raise LeaseStoreError(
                             "v21-06:lease_missing",
-                            "consumption exists but its execution lease is " "missing",
+                            "consumption exists but its execution lease is missing",
                         )
                     # F1：终态校验先于 expires_at —— revoked/expired 状态
                     # 的 lease 不得被幂等重放绕过（撤销/过期语义

@@ -18,16 +18,22 @@ from pathlib import Path
 import pytest
 from agentguard_core import (
     GuardEvent,
+    PolicyBundle,
     SecurityContext,
     ToolCallPayload,
     ToolDescriptor,
 )
+from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority import SecurityStateScope, scope_digest_projection
 from fastapi.testclient import TestClient
 
 from guard_api.auth import ApiAuthError, AuthContext
 from guard_api.main import create_app
-from guard_api.models import TaskCreateRequest
+from guard_api.models import (
+    ADAPTER_CREDENTIAL_SCOPES,
+    CredentialRecord,
+    TaskCreateRequest,
+)
 from guard_api.services.policy import PolicyService
 from guard_api.services.product_activation import load_frozen_product_activation
 from guard_api.services.runtime_binding import (
@@ -49,6 +55,7 @@ from tests.support.product_activation import (
     TEST_PRODUCT_ACTIVATION_SECRET_B64,
     ProductActivationFixture,
     build_test_product_activation,
+    product_runtime_status_for_activation,
     write_test_product_activation,
 )
 
@@ -62,6 +69,8 @@ _SHADOW_SECRET_B64 = base64.urlsafe_b64encode(
     b"product-binding-independent-shadow-secret-01"
 ).decode("ascii")
 _SESSION_ID = "session:product-binding"
+_RUNTIME_CREDENTIAL_ID = "cred_product_binding_langgraph"
+_RUNTIME_CREDENTIAL_HASH = "product-binding-token-hash"
 
 
 def _settings(path: Path, fixture: ProductActivationFixture) -> GuardApiSettings:
@@ -86,10 +95,33 @@ def _product_context(
     GuardApiSettings,
     MemoryControlPlaneStore,
 ]:
-    fixture = build_test_product_activation(now=datetime.now(timezone.utc))
+    policy = PolicyBundle()
+    fixture = build_test_product_activation(
+        now=datetime.now(timezone.utc),
+        policy_digest=canonical_sha256(policy.model_dump(mode="json")),
+    )
     path = tmp_path / "product-activation.json"
     write_test_product_activation(path, fixture)
-    return fixture, _settings(path, fixture), MemoryControlPlaneStore()
+    store = MemoryControlPlaneStore()
+    store.save_policy_snapshot(policy, expected_revision=0, updated_by="p0-test")
+    for runtime in ("langgraph", "openclaw"):
+        store.save_product_runtime_status(
+            product_runtime_status_for_activation(fixture, runtime)
+        )
+    entry = fixture.bundle.runtime_entry("langgraph")
+    store.create_credential(
+        CredentialRecord(
+            credential_id=_RUNTIME_CREDENTIAL_ID,
+            token_hash=_RUNTIME_CREDENTIAL_HASH,
+            principal_type="component",
+            principal_id=entry.principal_id,
+            role="adapter",
+            scopes=list(ADAPTER_CREDENTIAL_SCOPES),
+            runtime=entry.runtime,
+            agent_id=entry.agent_id,
+        )
+    )
+    return fixture, _settings(path, fixture), store
 
 
 def _task_payload(
@@ -165,8 +197,10 @@ def _auth(
         principal_type="component",
         principal_id=principal_id or entry.principal_id,
         role="adapter",
-        scopes=["event:evaluate"],
+        scopes=list(ADAPTER_CREDENTIAL_SCOPES),
         auth_method="bearer",
+        credential_id=_RUNTIME_CREDENTIAL_ID,
+        credential_token_hash=_RUNTIME_CREDENTIAL_HASH,
         runtime=runtime or entry.runtime,
         agent_id=agent_id or entry.agent_id,
     )
@@ -176,9 +210,11 @@ def _event(
     task_id: str,
     *,
     session_id: str | None = _SESSION_ID,
+    event_id: str = "evt_product_binding_pipeline",
+    call_id: str = "call:product-binding",
 ) -> GuardEvent:
     return GuardEvent(
-        event_id="evt_product_binding_pipeline",
+        event_id=event_id,
         event_type="tool_call_proposed",
         runtime="langgraph",
         trace_id="trace:product-binding-evaluate",
@@ -192,7 +228,7 @@ def _event(
         payload=ToolCallPayload(
             tool=ToolDescriptor(
                 name="safe_product_tool",
-                call_id="call:product-binding",
+                call_id=call_id,
             ),
             arguments={},
             derived_resources=[],
@@ -642,12 +678,10 @@ def test_product_phase_b_rejects_same_content_new_task_revision(
         )
     )
 
-    outcome = pipeline.build_phase_b(event, materials)
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        pipeline.build_phase_b(event, materials)
 
-    assert outcome is not None
-    assert outcome.revalidation.status == "stale"
-    assert "v21-09:stale_task_digest" in outcome.revalidation.reason_codes
-    assert outcome.raw_v21_decision is None
+    assert raised.value.code == PRODUCT_TASK_IDENTITY_MISMATCH
 
 
 def test_product_phase_b_rechecks_task_content_integrity(tmp_path: Path) -> None:

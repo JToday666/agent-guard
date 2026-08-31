@@ -1,4 +1,4 @@
-"""V21-09 四段式编排 pipeline（shadow-only，V2 mode 默认 off）。
+"""V21-09 四段式编排 pipeline（legacy shadow + Product fail-closed）。
 
 契约依据：``12_决策记录_V21-09前置.md`` D3（revoked 来源：online state
 record 同源同锁只读）、D4（四段式事务边界 / S8 消除）、D5（clock 正式化：
@@ -17,17 +17,22 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
   在 assess 后、revalidate 前调用（天然事务外，03 §12 禁止
   ``BEGIN → LLM → COMMIT``）；
 - **Phase B（短事务内消费）**：``build_phase_b`` —— 由 ``evaluation.py``
-  在 ``evaluation_transaction`` 内调用：legacy 链照常 + 轻量 re-read
-  （state version / task head / policy digest）→ ``revalidate_assessment``
-  五元组 CAS → 证据构建；stale → 放弃本次 V21-09 权威提交、证据按 D8 记
-  ``degraded_stale_judgment``，legacy 主链不受影响；
+  在 authority transaction 内调用。legacy 路径保持轻量 re-read
+  （state version / task head / policy digest）与 D8 stale 语义；Product
+  路径在 store-native lockset 下严格重读 activation、双 runtime status、
+  credential、精确 policy revision、完整 TaskFact 与 state/projection
+  history，形成 composite authority digest。所有 staged side effect 后，
+  ``finalize_product_commit`` 再次重读并比对该 digest；任一漂移均回滚并
+  返回稳定 503，禁止回退 current；
 - **Phase C（事务提交后投影）**：``run_phase_c`` —— Phase B audit
-  commit 成功且事务退出后（02 §3 commit→project 时序：投影在事务
-  外），V2 mode enabled 且 revalidation valid 时 scope_lock 内
+  commit 成功且事务退出后（02 §3 commit→project 时序：实际 state
+  投影仍在事务外），V2 mode enabled 且 revalidation valid 时 scope_lock 内
   ensure_ready → base 校验 → ``project_committed``（verify 钩子复核
   审计记录存在性，F0-8）；delta 在 Phase B 以 materials 的
   state_version 为 base 确定性构造（信封 delta_digest 冻结时刻即真实，
-  见 ``prepare_phase_c``），Phase C 锁内 base 漂移 → fail-closed
+  见 ``prepare_phase_c``）。Product 会把 exact projection envelope 作为
+  reservation 与 audit 原子提交，阻止同 scope 的第二个事件复用同一
+  base；Phase C 锁内 base 漂移 → fail-closed
   跳过**不置脏**；投影失败一律告警收敛、不重试（D9：replay 补投影
   承接；重试/对账机制归 V21-10/11）；stale → 不进入 Phase C；
 - **audit**：T5 既有 ``evidence.decision_v21`` 同条记录写面；V21-09
@@ -39,17 +44,20 @@ clock_version="v21-09"）、D8（revalidate stale → degraded_stale_judgment）
 （``run_phase_a`` 返回 None）时的逐字节降级回退路径——其降级信封形状
 与 V21-08 完全一致，V2 mode off 时两者均零行为变化。
 
-降级收敛范式（V21-08 既有）：全链路异常不外抛、绝不影响 legacy
+legacy 降级收敛范式（V21-08 既有）：全链路异常不外抛、绝不影响 legacy
 decision / approval / audit 主链；Phase A 不可恢复异常 → 返回 None
 （调用方回退 V21-08 路径）；Phase B 异常 → 返回 None（本次评估不产
-v21 证据，legacy 照常）。
+v21 证据，legacy 照常）。Product Active 不使用该收敛路径：任何
+authority/phase failure 都是 503，且事务内 side effect 为零。
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
 from agentguard_core import (
@@ -97,8 +105,14 @@ from agentguard_core.security_context import (
 
 from guard_api.security_state import SecurityStateNotReadyError, SecurityStateService
 from guard_api.auth import AuthContext
+from guard_api.runtime_status import ProductRuntime
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
-from guard_api.storage.base import ControlPlaneStore
+from guard_api.storage.base import (
+    MAX_REBUILD_INPUT_LIMIT,
+    ControlPlaneStore,
+    ProductAuthorityCredentialUnavailableError,
+    ProjectionIdentityRecord,
+)
 
 from .policy import PolicyService
 from .runtime_binding import (
@@ -123,6 +137,9 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PHASE_C_BASE_DRIFT_SKIPS",
     "PIPELINE_CLOCK_VERSION",
+    "PRODUCT_AUTHORITY_NOT_CURRENT",
+    "PRODUCT_CREDENTIAL_NOT_CURRENT",
+    "PRODUCT_POLICY_NOT_CURRENT",
     "PRODUCT_SECURITY_STATE_NOT_READY",
     "V21PhaseBOutcome",
     "V21PhaseCPlan",
@@ -143,17 +160,11 @@ PIPELINE_CLOCK_VERSION = "v21-09"
 #: V21-08 shadow plan 一致，plan_id 独立便于审计归因）。
 _PIPELINE_SNAPSHOT_PLAN_ID = "v21-09-pipeline:snapshot-plan"
 
-#: Phase B state version 漂移时的 snapshot digest 哨兵：版本已变则
-#: snapshot 必然漂移，无需重建 snapshot 求 digest（事务内禁止 snapshot
-#: I/O，S8）；哨兵与任何真实 digest（sha256: 前缀）不碰撞，必然触发
-#: stale_snapshot_digest，fail-closed。
+#: Legacy Phase B state version 漂移时的 snapshot digest 哨兵：版本已变
+#: 则 snapshot 必然漂移，无需重建 snapshot 求 digest；哨兵与任何真实
+#: digest（sha256: 前缀）不碰撞，必然触发 stale_snapshot_digest。
+#: Product 分支不使用哨兵，而是在持锁事务内严格重建并比对完整 snapshot。
 _SNAPSHOT_DRIFT_SENTINEL = "v21-09:snapshot_drift"
-
-# A TaskFact revision/principal/scope change can preserve task_digest because
-# that digest intentionally covers normalized task content only.  Feed a
-# non-digest sentinel into the existing CAS comparator so such identity drift
-# is still stale and can never finalize Product authority.
-_TASK_IDENTITY_DRIFT_SENTINEL = "v21-09:task_identity_drift"
 
 #: 无权威 policy snapshot record 时的确定性 revision 占位（与 V21-08
 #: shadow 同口径纪律，值独立归因 pipeline）。
@@ -174,6 +185,12 @@ PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
 #: Public fail-closed code for a Product state row that cannot be consumed
 #: without initialization, rebuild, repair, or ambiguity.
 PRODUCT_SECURITY_STATE_NOT_READY = "V21_PRODUCT_SECURITY_STATE_NOT_READY"
+
+#: Product policy/authority inputs are availability failures (503), never
+#: ordinary shadow stale evidence and never permission to fall back to current.
+PRODUCT_POLICY_NOT_CURRENT = "V21_PRODUCT_POLICY_NOT_CURRENT"
+PRODUCT_AUTHORITY_NOT_CURRENT = "V21_PRODUCT_AUTHORITY_NOT_CURRENT"
+PRODUCT_CREDENTIAL_NOT_CURRENT = "V21_PRODUCT_CREDENTIAL_NOT_CURRENT"
 
 
 class V21OfficialEvaluationUnavailableError(RuntimeError):
@@ -303,6 +320,13 @@ class V21PhaseBOutcome:
     # 五 digest binding 裁决结论（``validate_semantic_binding``）；
     # judgment 缺席时恒 None。供审计 metadata 承载，避免重复计算。
     semantic_binding_valid: bool | None = None
+    # Product-only composite anchor captured while the store-native authority
+    # fence is held.  Only this digest is emitted; credential and runtime
+    # observation internals remain private.  The timestamp is deliberately
+    # named ``initial``: the final precommit recapture happens later and its
+    # instant is persisted as the projection reservation ``created_at``.
+    product_authority_digest: str | None = None
+    product_authority_initial_checked_at: str | None = None
 
 
 @dataclass(frozen=True)
@@ -315,7 +339,9 @@ class V21PhaseCPlan:
     Phase C 才构造则 Phase B 信封无法持有真实 digest。故 delta 在
     Phase B 以 materials 的 state_version 为 base 确定性构造（信封
     引用真实）；Phase C 锁内复核 base，漂移则 fail-closed 跳过不置
-    脏（避免置脏扩散；D9 replay 补投影承接）。
+    脏（避免置脏扩散；D9 replay 补投影承接）。Product 在物理 commit
+    前只预登记 exact projection reservation，实际 state CAS 仍保持
+    commit → project。
     """
 
     audit_id: str
@@ -325,6 +351,22 @@ class V21PhaseCPlan:
     #: delta_digest / source identity），全量 delta 本体随
     #: projection_records，不内嵌审计证据。
     envelope: dict[str, Any]
+    #: Product commits the exact envelope as an audit-side reservation before
+    #: returning.  Phase C must reconcile the full bounded history atomically
+    #: instead of treating this as a legacy first-time projection.
+    precommit_reserved: bool = False
+
+
+@dataclass(frozen=True)
+class _ProductAuthorityCapture:
+    """Exact Product authority scalars consumed by Core revalidation."""
+
+    state_version: int
+    task_digest: str
+    policy_digest: str
+    snapshot_digest: str
+    authority_digest: str
+    checked_at: datetime
 
 
 def _phase_a_payload_digest(
@@ -341,6 +383,7 @@ def _phase_a_payload_digest(
     scope_digest: str | None,
     degraded_kind: PhaseADegradedKind | None,
     state_authority_digest: str | None,
+    auth_context: AuthContext | None,
     runtime_binding: ResolvedRuntimeBinding | None,
 ) -> str:
     """Digest every mutable Phase-A object consumed after the read boundary."""
@@ -356,6 +399,21 @@ def _phase_a_payload_digest(
             "actor_principal_id": runtime_binding.actor_principal_id,
             "activation_ref_digest": runtime_binding.activation_ref_digest,
             "source": runtime_binding.source,
+        }
+    )
+    auth_projection = (
+        None
+        if auth_context is None
+        else {
+            "principal_type": auth_context.principal_type,
+            "principal_id": auth_context.principal_id,
+            "role": auth_context.role,
+            "scopes": sorted(auth_context.scopes),
+            "auth_method": auth_context.auth_method,
+            "credential_id": auth_context.credential_id,
+            "credential_token_hash": auth_context.credential_token_hash,
+            "runtime": auth_context.runtime,
+            "agent_id": auth_context.agent_id,
         }
     )
     return canonical_sha256(
@@ -385,6 +443,7 @@ def _phase_a_payload_digest(
             "scope_digest": scope_digest,
             "degraded_kind": degraded_kind,
             "state_authority_digest": state_authority_digest,
+            "auth_context": auth_projection,
             "runtime_binding": binding_projection,
         }
     )
@@ -476,11 +535,14 @@ def build_evaluation_delta(
 
 
 class V21PipelineService:
-    """V21-09 四段式编排器（shadow-only；只读旁路，绝不外抛）。
+    """V21-09 四段式编排器（legacy shadow + Product fail-closed）。
 
     构造即完成 mode / secret 解析（与 V21ShadowService 同一门控口径：
     复用 ``AGENTGUARD_V21_MODE`` 与 server secret 配置）；mode off 时
-    ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。
+    ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。兼容路径继续把
+    异常收敛为 shadow 旁路；加载 Product activation 时，完整 authority
+    fence、最终 precommit 复核和 reservation 为强制 503 边界。本批次
+    仍保留外层 Product selector fuse，正式 selection 在后续批次接线。
     """
 
     def __init__(
@@ -561,6 +623,65 @@ class V21PipelineService:
     @property
     def active(self) -> bool:
         return self._mode == "active"
+
+    @property
+    def product_active(self) -> bool:
+        """Whether this pipeline is bound to a verified Product activation."""
+
+        return self._runtime_binding_resolver.product_active
+
+    @contextmanager
+    def authority_transaction(
+        self,
+        event: GuardEvent,
+        materials: V21PipelineMaterials,
+    ) -> Iterator[None]:
+        """Select the unchanged or Product authority transaction boundary.
+
+        The local per-scope lock is deliberately outermost.  Projectors use
+        ``scope_lock -> database state lock``; preserving that order here
+        avoids a DB/local lock inversion while the database lock-set remains
+        the cross-process source of truth.
+        """
+
+        if not self.product_active:
+            with self._store.evaluation_transaction(event.event_id):
+                yield
+            return
+
+        if (
+            materials.task_id is None
+            or materials.scope_digest is None
+            or materials.auth_context is None
+            or materials.auth_context.credential_id is None
+            or materials.auth_context.credential_token_hash is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_CREDENTIAL_NOT_CURRENT)
+        activation = self._runtime_binding_resolver.product_activation
+        assert activation is not None
+        runtime_ids: tuple[ProductRuntime, ProductRuntime] = (
+            activation.bundle.runtimes[0].runtime,
+            activation.bundle.runtimes[1].runtime,
+        )
+        if runtime_ids != ("langgraph", "openclaw"):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        with self._state_service.store_access.scope_lock(materials.scope_digest):
+            try:
+                with self._store.product_evaluation_transaction(
+                    event.event_id,
+                    task_id=materials.task_id,
+                    scope_digest=materials.scope_digest,
+                    runtime_ids=runtime_ids,
+                    credential_id=materials.auth_context.credential_id,
+                    credential_token_hash=(
+                        materials.auth_context.credential_token_hash
+                    ),
+                ):
+                    yield
+            except ProductAuthorityCredentialUnavailableError as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    PRODUCT_CREDENTIAL_NOT_CURRENT
+                ) from exc
 
     def _raise_if_active(self, code: str, exc: Exception) -> None:
         if self.active:
@@ -698,8 +819,22 @@ class V21PipelineService:
             bundle = snapshot_record.policy_bundle
             policy_revision: str | None = str(snapshot_record.revision)
         else:
+            if self.product_active:
+                # A callback/default policy cannot be frozen by the Product
+                # store transaction and has no exact monotonic revision.
+                raise V21OfficialEvaluationUnavailableError(PRODUCT_POLICY_NOT_CURRENT)
             bundle = self._policy_service.current_snapshot()
             policy_revision = None
+        if self.product_active:
+            activation = self._runtime_binding_resolver.product_activation
+            assert activation is not None
+            if (
+                snapshot_record is None
+                or snapshot_record.revision <= 0
+                or canonical_sha256(bundle.model_dump(mode="json"))
+                != activation.bundle.policy_digest
+            ):
+                raise V21OfficialEvaluationUnavailableError(PRODUCT_POLICY_NOT_CURRENT)
         decision, detection_results = GuardEngine().evaluate_with_results(event, bundle)
 
         clock = EvaluationClock(
@@ -743,6 +878,7 @@ class V21PipelineService:
                     scope_digest=None,
                     degraded_kind="component_failure",
                     state_authority_digest=None,
+                    auth_context=auth_context,
                     runtime_binding=None,
                 ),
                 bundle=bundle,
@@ -788,6 +924,7 @@ class V21PipelineService:
                 scope_digest=scope_digest,
                 degraded_kind=degraded_kind,
                 state_authority_digest=state_authority_digest,
+                auth_context=auth_context,
                 runtime_binding=runtime_binding,
             ),
             bundle=bundle,
@@ -838,6 +975,7 @@ class V21PipelineService:
                 scope_digest=prepared.scope_digest,
                 degraded_kind=prepared.degraded_kind,
                 state_authority_digest=prepared.state_authority_digest,
+                auth_context=prepared.auth_context,
                 runtime_binding=prepared.runtime_binding,
             )
         ):
@@ -1044,6 +1182,222 @@ class V21PipelineService:
             state_authority_digest,
         )
 
+    def _capture_product_authority(
+        self,
+        event: GuardEvent,
+        materials: V21PipelineMaterials,
+    ) -> _ProductAuthorityCapture:
+        """Re-read one complete Product authority snapshot under its fence."""
+
+        if (
+            not self.product_active
+            or materials.runtime_binding is None
+            or materials.auth_context is None
+            or materials.snapshot is None
+            or materials.snapshot.task is None
+            or materials.task_id is None
+            or materials.scope_digest is None
+            or materials.state_authority_digest is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+
+        try:
+            sampled = self._runtime_binding_resolver.clock()
+            if sampled.tzinfo is None or sampled.utcoffset() is None:
+                raise ValueError("authority clock must be timezone-aware")
+            checked_at = sampled.astimezone(timezone.utc)
+        except Exception as exc:  # noqa: BLE001 - clock is an authority input.
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_AUTHORITY_NOT_CURRENT
+            ) from exc
+
+        binding = materials.runtime_binding
+        self._runtime_binding_resolver.revalidate(
+            binding,
+            reference_time=checked_at,
+        )
+        current_binding = self._runtime_binding_resolver.resolve_evaluation(
+            materials.auth_context,
+            event=event,
+            task_principal_id=materials.snapshot.task.principal_id,
+            reference_time=checked_at,
+        )
+        if current_binding != binding:
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
+
+        activation = self._runtime_binding_resolver.product_activation
+        assert activation is not None
+        # Delayed import avoids the intentional product_activation -> pipeline
+        # error-boundary dependency during module initialization.
+        from .product_activation import (  # noqa: PLC0415
+            RUNTIME_OBSERVATION_MISMATCH,
+            reconcile_product_runtime_observations,
+        )
+
+        observations = reconcile_product_runtime_observations(
+            activation,
+            self._store,
+        )
+        if not observations.matched or observations.observation_digest is None:
+            raise V21OfficialEvaluationUnavailableError(RUNTIME_OBSERVATION_MISMATCH)
+
+        auth = materials.auth_context
+        if (
+            auth.auth_method != "bearer"
+            or auth.credential_id is None
+            or auth.credential_token_hash is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_CREDENTIAL_NOT_CURRENT)
+        credential = self._store.get_credential_by_token_hash(
+            auth.credential_token_hash
+        )
+        if credential is None or not all(
+            (
+                credential.credential_id == auth.credential_id,
+                credential.token_hash == auth.credential_token_hash,
+                credential.principal_type == auth.principal_type,
+                credential.principal_id == auth.principal_id,
+                credential.role == auth.role,
+                sorted(credential.scopes) == sorted(auth.scopes),
+                credential.runtime == auth.runtime,
+                credential.agent_id == auth.agent_id,
+                credential.revoked_at is None,
+                "event:evaluate" in credential.scopes,
+            )
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_CREDENTIAL_NOT_CURRENT)
+        if credential.expires_at is not None:
+            try:
+                credential_expiry = datetime.fromisoformat(
+                    credential.expires_at.replace("Z", "+00:00")
+                )
+                if (
+                    credential_expiry.tzinfo is None
+                    or credential_expiry.utcoffset() is None
+                    or checked_at >= credential_expiry.astimezone(timezone.utc)
+                ):
+                    raise ValueError("credential expired")
+            except (TypeError, ValueError) as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    PRODUCT_CREDENTIAL_NOT_CURRENT
+                ) from exc
+
+        policy_record = self._store.get_policy_snapshot_record()
+        policy_digest = canonical_sha256(materials.bundle.model_dump(mode="json"))
+        if (
+            policy_record is None
+            or materials.policy_revision is None
+            or str(policy_record.revision) != materials.policy_revision
+            or canonical_sha256(policy_record.policy_bundle.model_dump(mode="json"))
+            != policy_digest
+            or policy_digest != activation.bundle.policy_digest
+            or materials.snapshot.policy_revision != materials.policy_revision
+            or materials.snapshot.policy_digest != policy_digest
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_POLICY_NOT_CURRENT)
+
+        task_record = self._store.get_task_fact(materials.task_id)
+        if task_record is None:
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
+        current_task = task_record.task_fact
+        assessed_task = materials.snapshot.task
+        try:
+            compile_task_authority(
+                current_task,
+                materials.snapshot.scope,
+                server_keys=self._task_scope_keyring,
+            )
+        except TaskAuthorityError as exc:
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID) from exc
+        if (
+            current_task.task_id != materials.task_id
+            or current_task.model_dump(mode="json")
+            != assessed_task.model_dump(mode="json")
+            or canonical_sha256(task_record.canonical_payload)
+            != canonical_sha256(current_task.model_dump(mode="json"))
+            or task_record.expected_revision != current_task.revision - 1
+        ):
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
+
+        try:
+            current_snapshot, current_revoked, state_authority_digest = (
+                self._state_service.read_ready_snapshot_with_revoked(
+                    materials.scope_digest,
+                    scope=materials.snapshot.scope,
+                    task_fact_head=current_task,
+                    evaluation_clock=materials.clock,
+                    policy_revision=materials.policy_revision,
+                    policy_digest=policy_digest,
+                    plan=_pipeline_snapshot_plan(),
+                )
+            )
+        except SecurityStateNotReadyError as exc:
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            ) from exc
+        if (
+            state_authority_digest != materials.state_authority_digest
+            or current_snapshot.snapshot_digest != materials.snapshot.snapshot_digest
+            or canonical_sha256(current_snapshot.model_dump(mode="json"))
+            != canonical_sha256(materials.snapshot.model_dump(mode="json"))
+            or current_revoked != materials.revoked_grant_ids
+        ):
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            )
+
+        authority_digest = canonical_sha256(
+            {
+                "schema_version": "product-authority-anchor/1.0",
+                "event_digest": materials.event_digest,
+                "activation": {
+                    "content_digest": activation.content_digest,
+                    "activation_ref_digest": activation.bundle.activation_ref_digest,
+                    "signer_key_id": activation.bundle.signer_key_id,
+                    "candidate_artifact_manifest_digest": (
+                        activation.bundle.candidate_artifact_manifest_digest
+                    ),
+                    "policy_digest": activation.bundle.policy_digest,
+                    "dataset_digest": activation.bundle.dataset_digest,
+                    "contract_digest": activation.bundle.contract_digest,
+                },
+                "runtime_binding": {
+                    "runtime": binding.runtime,
+                    "principal_id": binding.principal_id,
+                    "agent_id": binding.agent_id,
+                    "runtime_binding_id": binding.runtime_binding_id,
+                    "actor_principal_id": binding.actor_principal_id,
+                    "activation_ref_digest": binding.activation_ref_digest,
+                    "source": binding.source,
+                },
+                "runtime_observation_digest": observations.observation_digest,
+                "credential_digest": canonical_sha256(
+                    credential.model_dump(mode="json")
+                ),
+                "policy_revision": policy_record.revision,
+                "policy_digest": policy_digest,
+                "task_authority_digest": canonical_sha256(
+                    {
+                        "task_fact": current_task.model_dump(mode="json"),
+                        "canonical_payload": task_record.canonical_payload,
+                        "request_digest": task_record.request_digest,
+                        "expected_revision": task_record.expected_revision,
+                    }
+                ),
+                "state_authority_digest": state_authority_digest,
+                "snapshot_digest": current_snapshot.snapshot_digest,
+                "revoked_grant_ids": current_revoked,
+            }
+        )
+        return _ProductAuthorityCapture(
+            state_version=current_snapshot.state_version,
+            task_digest=current_task.task_digest,
+            policy_digest=policy_digest,
+            snapshot_digest=current_snapshot.snapshot_digest,
+            authority_digest=authority_digest,
+            checked_at=checked_at,
+        )
+
     # ------------------------------------------------------------------
     # Phase B：短事务内消费材料
     # ------------------------------------------------------------------
@@ -1053,10 +1407,11 @@ class V21PipelineService:
     ) -> V21PhaseBOutcome | None:
         """Phase B（D4：由 evaluation 编排在 evaluation_transaction 内调用）。
 
-        只做轻量 re-read（state version / task head / policy digest）与
-        纯函数 revalidate / 证据构建；**禁止 snapshot/task 全量 I/O**
-        （S8 消除锚点）。stale → 信封按 D8 记 degraded_stale_judgment，
-        legacy 主链不受影响。任何异常收敛为 None（本次不产 v21 证据）。
+        Legacy 分支只做轻量 re-read（state version / task head / policy
+        digest）与纯函数 revalidate / 证据构建，保持原有 D8 stale 与
+        异常收敛语义。Product 分支在 store-native authority fence 内
+        严格重读完整有界 authority，并把任何异常映射为稳定 503；不会
+        产生 current fallback。
         """
 
         try:
@@ -1098,6 +1453,7 @@ class V21PipelineService:
                 scope_digest=materials.scope_digest,
                 degraded_kind=materials.degraded_kind,
                 state_authority_digest=materials.state_authority_digest,
+                auth_context=materials.auth_context,
                 runtime_binding=materials.runtime_binding,
             ):
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID)
@@ -1152,63 +1508,43 @@ class V21PipelineService:
             )
 
         assert materials.scope_digest is not None
-        # 事务内轻量 re-read（03 §12 L462）：只取版本/digest 标量，
-        # 不做 snapshot / task 全量往返。
-        state_record = self._store.get_security_state(materials.scope_digest)
-        current_state_version = (
-            state_record.state_version if state_record is not None else -1
-        )
-        task_record = (
-            self._store.get_task_fact(materials.task_id)
-            if materials.task_id is not None
-            else None
-        )
-        assessed_task = materials.snapshot.task
-        current_task = task_record.task_fact if task_record is not None else None
-        if self._runtime_binding_resolver.product_active:
-            if current_task is None:
-                raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
-            try:
-                compile_task_authority(
-                    current_task,
-                    materials.snapshot.scope,
-                    server_keys=self._task_scope_keyring,
-                )
-            except TaskAuthorityError as exc:
-                raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID) from exc
-            task_identity_matches = bool(
-                (assessed_task is None and current_task is None)
-                or (
-                    assessed_task is not None
-                    and current_task is not None
-                    and assessed_task.task_id == current_task.task_id
-                    and assessed_task.revision == current_task.revision
-                    and assessed_task.principal_id == current_task.principal_id
-                    and assessed_task.scope_digest == current_task.scope_digest
-                    and assessed_task.scope_key_id == current_task.scope_key_id
-                    and assessed_task.status == current_task.status
-                )
-            )
-            current_task_digest = (
-                current_task.task_digest
-                if task_identity_matches and current_task is not None
-                else None if task_identity_matches else _TASK_IDENTITY_DRIFT_SENTINEL
-            )
+        product_capture: _ProductAuthorityCapture | None = None
+        if self.product_active:
+            # Product consumes the complete strict authority anchor.  Any
+            # mismatch is a 503 availability failure, never ordinary shadow
+            # stale evidence and never a legacy/current fallback.
+            product_capture = self._capture_product_authority(event, materials)
+            current_state_version = product_capture.state_version
+            current_task_digest = product_capture.task_digest
+            current_policy_digest = product_capture.policy_digest
+            current_snapshot_digest = product_capture.snapshot_digest
         else:
+            # Compatibility path retains the original scalar re-read and stale
+            # evidence semantics byte-for-byte.
+            state_record = self._store.get_security_state(materials.scope_digest)
+            current_state_version = (
+                state_record.state_version if state_record is not None else -1
+            )
+            task_record = (
+                self._store.get_task_fact(materials.task_id)
+                if materials.task_id is not None
+                else None
+            )
+            current_task = task_record.task_fact if task_record is not None else None
             current_task_digest = (
                 current_task.task_digest if current_task is not None else None
             )
-        current_policy_digest = canonical_sha256(
-            self._policy_service.current_snapshot().model_dump(mode="json")
-        )
-        # snapshot digest 派生口径：state version 未变 → snapshot 结构性
-        # 输入（state/task/policy/clock/plan）均未变，digest 恒等于评估
-        # 时点值；版本漂移 → 哨兵必然触发 stale（不重建 snapshot，S8）。
-        current_snapshot_digest = (
-            materials.assessment.snapshot_digest
-            if current_state_version == materials.state_version
-            else _SNAPSHOT_DRIFT_SENTINEL
-        )
+            current_policy_digest = canonical_sha256(
+                self._policy_service.current_snapshot().model_dump(mode="json")
+            )
+            # snapshot digest 派生口径：state version 未变 → snapshot 结构性
+            # 输入（state/task/policy/clock/plan）均未变，digest 恒等于评估
+            # 时点值；版本漂移 → 哨兵必然触发 stale（不重建 snapshot，S8）。
+            current_snapshot_digest = (
+                materials.assessment.snapshot_digest
+                if current_state_version == materials.state_version
+                else _SNAPSHOT_DRIFT_SENTINEL
+            )
 
         revalidation = revalidate_assessment(
             materials.assessment,
@@ -1218,6 +1554,8 @@ class V21PipelineService:
             current_policy_digest=current_policy_digest,
             current_snapshot_digest=current_snapshot_digest,
         )
+        if self.product_active and revalidation.status != "valid":
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
         stale_codes = (
             list(revalidation.reason_codes) if revalidation.status == "stale" else []
         )
@@ -1277,6 +1615,16 @@ class V21PipelineService:
             final_decision_id=final_decision_id,
             final_decision_digest=final_decision_digest,
             semantic_binding_valid=semantic_binding_valid,
+            product_authority_digest=(
+                product_capture.authority_digest
+                if product_capture is not None
+                else None
+            ),
+            product_authority_initial_checked_at=(
+                product_capture.checked_at.isoformat()
+                if product_capture is not None
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1324,7 +1672,110 @@ class V21PipelineService:
             scope_digest=materials.scope_digest,
             delta=delta,
             envelope=state_delta_v21_envelope(reference),
+            precommit_reserved=self.product_active,
         )
+
+    def finalize_product_commit(
+        self,
+        event: GuardEvent,
+        materials: V21PipelineMaterials,
+        *,
+        audit_id: str,
+        phase_c_plan: V21PhaseCPlan | None,
+        expected_authority_digest: str | None,
+        initial_authority_checked_at: str | None,
+    ) -> None:
+        """Perform the final Product check and reserve commit→project.
+
+        This is deliberately one last application call inside the Product
+        transaction.  It re-captures the complete authority anchor after all
+        staged side effects, then atomically pre-registers the exact Phase-C
+        envelope alongside the audit commit.  The online-state CAS still runs
+        only after commit; the reservation makes a concurrent same-scope
+        strict read fail closed instead of committing against the same anchor.
+        """
+
+        if not self.product_active:
+            return
+        if expected_authority_digest is None or initial_authority_checked_at is None:
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        try:
+            first_checked_at = datetime.fromisoformat(
+                initial_authority_checked_at.replace("Z", "+00:00")
+            )
+            if first_checked_at.tzinfo is None or first_checked_at.utcoffset() is None:
+                raise ValueError("initial_authority_checked_at must be timezone-aware")
+        except (TypeError, ValueError) as exc:
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_AUTHORITY_NOT_CURRENT
+            ) from exc
+
+        try:
+            capture = self._capture_product_authority(event, materials)
+        except V21OfficialEvaluationUnavailableError:
+            raise
+        except RuntimeBindingResolutionError as exc:
+            self._raise_runtime_binding_error(exc)
+        except Exception as exc:  # noqa: BLE001 - stable final 503 boundary.
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_AUTHORITY_NOT_CURRENT
+            ) from exc
+        if (
+            capture.authority_digest != expected_authority_digest
+            or capture.checked_at < first_checked_at.astimezone(timezone.utc)
+            or phase_c_plan is None
+            or phase_c_plan.audit_id != audit_id
+            or not phase_c_plan.precommit_reserved
+            or phase_c_plan.scope_digest != materials.scope_digest
+            or phase_c_plan.delta.base_state_version != materials.state_version
+            or phase_c_plan.delta.new_state_version != materials.state_version + 1
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        audit = self._store.get_audit_event(audit_id)
+        if (
+            audit is None
+            or audit.record_type != "policy_evaluation"
+            or audit.links.get("event_id") != event.event_id
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+
+        # The strict reader and bounded rebuild deliberately reject a history
+        # whose returned size reaches MAX_REBUILD_INPUT_LIMIT because they can
+        # no longer prove that the read is complete.  Prove headroom for this
+        # new reservation *before* it commits: 998 existing rows may become
+        # 999, but 999 may not become the ambiguous/truncated 1000th row.  The
+        # Product transaction already holds the scope's state/projection lock,
+        # so this count-by-bounded-read and the insert are one authority view.
+        existing_history = self._store.list_rebuild_inputs(
+            phase_c_plan.scope_digest,
+            limit=MAX_REBUILD_INPUT_LIMIT,
+        )
+        if len(existing_history) >= MAX_REBUILD_INPUT_LIMIT - 1:
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            )
+
+        reservation = ProjectionIdentityRecord(
+            scope_digest=phase_c_plan.scope_digest,
+            source_record_type=phase_c_plan.delta.source.source_record_type,
+            source_record_id=phase_c_plan.delta.source.source_record_id,
+            source_revision=phase_c_plan.delta.source.source_revision,
+            projector_version=phase_c_plan.delta.projector_version,
+            delta_digest=phase_c_plan.delta.delta_digest,
+            delta_payload=phase_c_plan.delta.model_dump(mode="json"),
+            applied_state_version=phase_c_plan.delta.new_state_version,
+            created_at=capture.checked_at.isoformat(),
+        )
+        try:
+            _stored, created = self._store.record_projection(reservation)
+        except Exception as exc:  # noqa: BLE001 - stable Product boundary.
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            ) from exc
+        if not created:
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            )
 
     def run_phase_c(self, plan: V21PhaseCPlan | None) -> None:
         """Phase C（D4：evaluation_transaction 提交**之后**调用）。
@@ -1351,60 +1802,120 @@ class V21PipelineService:
     def _project_evaluation(self, plan: V21PhaseCPlan) -> None:
         """commit → project 锁内编排（照搬 approval 范本锁序）。
 
-        scope_lock(scope_digest) 内：ensure_ready → 读 base → base
-        校验（漂移 → fail-closed 跳过**不置脏**：delta_digest 已在
-        Phase B 冻结进审计信封，rebase 会使引用失真；置脏域最小化，
-        D9 replay 补投影承接）→ ``project_committed``（verify 钩子
-        复核审计记录存在性，F0-8）。
+        新的 legacy envelope 保持原有 ensure_ready → base 校验纪律；
+        base 漂移仍 fail-closed 跳过且不 rebase。若 exact projection
+        envelope 已存在（Product precommit reservation 或 crash-window
+        replay），则直接交给 ``project_committed`` 的幂等/重建分支：它
+        会区分已反映 no-op、尚未反映 apply、以及其他 projector 已推进
+        时的 bounded rebuild，避免 reservation 永久卡住 strict reader。
         """
 
         scope_digest = plan.scope_digest
-        with self._state_service.store_access.scope_lock(scope_digest):
-            self._state_service.ensure_ready(scope_digest)
-            current = self._state_service.store_access.get_security_state(scope_digest)
-            # S2 缺态哨兵口径统一（与 Phase B 同为 -1）：ensure_ready
-            # 后 current 正常必在场；-1 不与任何真实 state_version
-            # （empty_online_state 初始版本为 0）碰撞，缺态时必然
-            # 触发 base 漂移跳过分支（fail-closed）而非误投影。
-            base_state_version = current.state_version if current is not None else -1
-            if base_state_version != plan.delta.base_state_version:
-                # base 漂移（Phase B→C 窗口内被其他投影推进）：信封
-                # 引用已冻结，不 rebase、不重试、不置脏。S1 结构化
-                # 留痕：计数器 + 结构化日志键（进程级观测信号）；
-                # D9 replay 补投影对该场景不可达（补投影锁内同样
-                # 复核 base，漂移时同样跳过），由 V21-10 离线对账
-                # （audit 信封 × projection_records 差集）承接。
-                PHASE_C_BASE_DRIFT_SKIPS["count"] += 1
-                logger.warning(
-                    "v21-09 evaluation projection skipped for audit %s: "
-                    "base state version drifted (%s -> %s); fail-closed "
-                    "without dirtying "
-                    "(v21_phase_c_skip_reason=base_drift, "
-                    "v21_phase_c_skip_total=%s; D9 backfill unreachable "
-                    "for this scenario, V21-10 reconciliation owns it)",
-                    plan.audit_id,
-                    plan.delta.base_state_version,
-                    base_state_version,
-                    PHASE_C_BASE_DRIFT_SKIPS["count"],
+        committed_record = CommittedRecord(
+            record_id=f"policy-evaluation:{plan.audit_id}",
+            committed=True,
+            source_record_type="policy_evaluation",
+            source_record_id=plan.audit_id,
+            source_revision=_EVALUATION_SOURCE_REVISION,
+            scope_digest=scope_digest,
+            projector_version=PROJECTOR_VERSION,
+            delta=plan.delta,
+        )
+        # Audit records are append-only.  Verify that source before acquiring
+        # either the local scope lock or the backend state transaction, then
+        # pass a pure identity check to the projector.  In particular, never
+        # read the audit store while holding the Memory state lock: legacy
+        # evaluation holds audit before reading state, so state -> audit here
+        # would invert that established order and could deadlock mixed-mode
+        # services sharing one store.
+        source_committed = self._verify_evaluation_committed(committed_record)
+
+        def verify_prechecked_source(record: CommittedRecord) -> bool:
+            return source_committed and all(
+                (
+                    record.committed,
+                    record.record_id == committed_record.record_id,
+                    record.source_record_type == committed_record.source_record_type,
+                    record.source_record_id == committed_record.source_record_id,
+                    record.source_revision == committed_record.source_revision,
+                    record.scope_digest == committed_record.scope_digest,
+                    record.projector_version == committed_record.projector_version,
+                    record.delta == committed_record.delta,
                 )
-                return
-            committed_record = CommittedRecord(
-                record_id=f"policy-evaluation:{plan.audit_id}",
-                committed=True,
-                source_record_type="policy_evaluation",
-                source_record_id=plan.audit_id,
-                source_revision=_EVALUATION_SOURCE_REVISION,
-                scope_digest=scope_digest,
-                projector_version=PROJECTOR_VERSION,
-                delta=plan.delta,
             )
-            result = self._state_service.project_committed(
-                committed_record,
-                scope_digest=scope_digest,
-                verify_source_committed=self._verify_evaluation_committed,
+
+        with self._state_service.store_access.scope_lock(scope_digest):
+            store_transaction = (
+                self._state_service.store_access.transaction(scope_digest)
+                if plan.precommit_reserved
+                else nullcontext()
             )
+            with store_transaction:
+                existing = self._state_service.store_access.get_projection(
+                    scope_digest,
+                    plan.delta.source.source_record_type,
+                    plan.delta.source.source_record_id,
+                    plan.delta.source.source_revision,
+                    plan.delta.projector_version,
+                )
+                if plan.precommit_reserved:
+                    # The normal path already has this row.  Re-recording is
+                    # an exact idempotency/digest check and also lets D9 repair
+                    # a deleted/missing reservation from the committed audit.
+                    self._state_service.store_access.record_projection(
+                        ProjectionIdentityRecord(
+                            scope_digest=scope_digest,
+                            source_record_type=(plan.delta.source.source_record_type),
+                            source_record_id=plan.delta.source.source_record_id,
+                            source_revision=plan.delta.source.source_revision,
+                            projector_version=plan.delta.projector_version,
+                            delta_digest=plan.delta.delta_digest,
+                            delta_payload=plan.delta.model_dump(mode="json"),
+                            applied_state_version=plan.delta.new_state_version,
+                            created_at=datetime.now(timezone.utc).isoformat(),
+                        )
+                    )
+                    # Rebuild while the backend's exclusive scope transaction
+                    # remains held.  This absorbs both the Product reservation
+                    # and any foreign envelope whose producer crashed before
+                    # its state CAS; no projection history can interleave.
+                    self._state_service.reconcile_projection_history(scope_digest)
+                elif existing is None:
+                    self._state_service.ensure_ready(scope_digest)
+                    current = self._state_service.store_access.get_security_state(
+                        scope_digest
+                    )
+                    # S2 缺态哨兵口径统一（与 Phase B 同为 -1）：
+                    # ensure_ready 后 current 正常必在场；-1 不与任何真实
+                    # state_version（empty state 初始为 0）碰撞。
+                    base_state_version = (
+                        current.state_version if current is not None else -1
+                    )
+                    if base_state_version != plan.delta.base_state_version:
+                        # Compatibility branch: the envelope has not been
+                        # reserved, so rebase would invalidate its audited
+                        # digest.
+                        PHASE_C_BASE_DRIFT_SKIPS["count"] += 1
+                        logger.warning(
+                            "v21-09 evaluation projection skipped for audit %s: "
+                            "base state version drifted (%s -> %s); fail-closed "
+                            "without dirtying "
+                            "(v21_phase_c_skip_reason=base_drift, "
+                            "v21_phase_c_skip_total=%s; V21-10 reconciliation "
+                            "owns it)",
+                            plan.audit_id,
+                            plan.delta.base_state_version,
+                            base_state_version,
+                            PHASE_C_BASE_DRIFT_SKIPS["count"],
+                        )
+                        return
+                result = self._state_service.project_committed(
+                    committed_record,
+                    scope_digest=scope_digest,
+                    verify_source_committed=verify_prechecked_source,
+                )
         logger.info(
-            "v21-09 evaluation projection %s for audit %s " "(state_version=%s)",
+            "v21-09 evaluation projection %s for audit %s (state_version=%s)",
             result.outcome,
             plan.audit_id,
             result.state_version,
@@ -1415,7 +1926,8 @@ class V21PipelineService:
 
         policy_evaluation 审计记录已在 evaluation_transaction 内 commit
         （commit→project 时序前置）；查不到 / record_type 不符即拒绝
-        投影，未提交记录不得成为后续历史状态。
+        投影，未提交记录不得成为后续历史状态。本读取必须发生在任何
+        state/scope 锁之前；调用方随后只可把结果封装成无 I/O verifier。
         """
 
         audit = self._store.get_audit_event(record.source_record_id)
@@ -1463,14 +1975,16 @@ class V21PipelineService:
             return
         expected_digest = reference.get("delta_digest")
         source_record_id = reference.get("source_record_id")
+        source_record_type = reference.get("source_record_type")
         raw_revision = reference.get("source_revision")
-        source_revision = (
-            raw_revision
-            if isinstance(raw_revision, int) and not isinstance(raw_revision, bool)
-            else _EVALUATION_SOURCE_REVISION
-        )
-        if not isinstance(expected_digest, str) or not isinstance(
-            source_record_id, str
+        if (
+            not isinstance(expected_digest, str)
+            or not isinstance(source_record_id, str)
+            or source_record_id != audit.audit_id
+            or source_record_type != "policy_evaluation"
+            or not isinstance(raw_revision, int)
+            or isinstance(raw_revision, bool)
+            or raw_revision != _EVALUATION_SOURCE_REVISION
         ):
             logger.info(
                 "v21-09 replay projection backfill skipped for audit %s: "
@@ -1500,16 +2014,26 @@ class V21PipelineService:
             )
             return
         scope_digest = task_record.task_fact.scope_digest
+        product_precommit_reserved = all(
+            isinstance(audit.metadata.get(field), str)
+            for field in (
+                "product_authority_digest",
+                "product_authority_initial_checked_at",
+            )
+        )
 
-        # 五元组幂等键短路：已登记 → 无补投影可做。
+        # Preserve the compatibility D9 contract: an already registered
+        # legacy five-tuple is a zero-projector replay.  Product reservations
+        # are different because the row may have committed before its state
+        # CAS; they must continue through the full reconcile/repair path.
         existing_projection = self._state_service.store_access.get_projection(
             scope_digest,
             "policy_evaluation",
             source_record_id,
-            source_revision,
+            raw_revision,
             PROJECTOR_VERSION,
         )
-        if existing_projection is not None:
+        if existing_projection is not None and not product_precommit_reserved:
             return
 
         # delta 重建：decision_v21 payload 的 state_version 即当时
@@ -1556,5 +2080,6 @@ class V21PipelineService:
             scope_digest=scope_digest,
             delta=delta,
             envelope=delta_envelope,
+            precommit_reserved=product_precommit_reserved,
         )
         self._project_evaluation(plan)

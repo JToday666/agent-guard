@@ -76,6 +76,7 @@ class ProductRuntimeObservationReconciliation:
 
     matched: bool
     reason_codes: tuple[str, ...]
+    observation_digest: str | None = None
 
 
 def _now_utc() -> datetime:
@@ -318,6 +319,7 @@ def reconcile_product_runtime_observations(
 
     try:
         activation.assert_unchanged()
+        observations: list[dict[str, object]] = []
         for runtime in _PRODUCT_RUNTIMES:
             entry = activation.bundle.runtime_entry(runtime)  # type: ignore[arg-type]
             identity = ProductRuntimeStatusIdentityV1(
@@ -344,12 +346,22 @@ def reconcile_product_runtime_observations(
                     matched=False,
                     reason_codes=(RUNTIME_OBSERVATION_MISMATCH,),
                 )
+            observations.append(status.model_dump(mode="json"))
     except Exception:
         return ProductRuntimeObservationReconciliation(
             matched=False,
             reason_codes=(RUNTIME_OBSERVATION_MISMATCH,),
         )
-    return ProductRuntimeObservationReconciliation(matched=True, reason_codes=())
+    return ProductRuntimeObservationReconciliation(
+        matched=True,
+        reason_codes=(),
+        observation_digest=canonical_sha256(
+            {
+                "activation_ref_digest": activation.bundle.activation_ref_digest,
+                "observations": observations,
+            }
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

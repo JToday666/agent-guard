@@ -145,6 +145,7 @@ class RuntimeBindingResolver:
         *,
         runtime: str,
         claimed_runtime_binding_id: str | None = None,
+        reference_time: datetime | None = None,
     ) -> ResolvedRuntimeBinding:
         """Resolve the subject for one Task Ingress create/revise request.
 
@@ -161,7 +162,7 @@ class RuntimeBindingResolver:
             )
             return resolved
 
-        self._require_current_product_activation()
+        self._require_current_product_activation(reference_time=reference_time)
         if auth_context.runtime is None:
             # Only the authenticated control-plane identity may delegate task
             # creation to one of the two signed Product runtime subjects.
@@ -208,6 +209,7 @@ class RuntimeBindingResolver:
         *,
         event: GuardEvent,
         task_principal_id: str,
+        reference_time: datetime | None = None,
     ) -> ResolvedRuntimeBinding:
         """Reconstruct the runtime identity for an authoritative TaskFact scope.
 
@@ -232,7 +234,7 @@ class RuntimeBindingResolver:
                 source="legacy_derived",
             )
 
-        self._require_current_product_activation()
+        self._require_current_product_activation(reference_time=reference_time)
         if auth_context is None or auth_context.runtime is None:
             raise RuntimeBindingResolutionError(PRODUCT_RUNTIME_IDENTITY_MISMATCH)
         entry = self._product_entry(auth_context.runtime)
@@ -259,7 +261,12 @@ class RuntimeBindingResolver:
             source="product_activation",
         )
 
-    def revalidate(self, resolved: ResolvedRuntimeBinding) -> None:
+    def revalidate(
+        self,
+        resolved: ResolvedRuntimeBinding,
+        *,
+        reference_time: datetime | None = None,
+    ) -> None:
         """Recheck the Product activation immediately before a later phase.
 
         Legacy derivation has no external activation to revalidate and is a
@@ -270,7 +277,7 @@ class RuntimeBindingResolver:
 
         if self.product_activation is None:
             return
-        self._require_current_product_activation()
+        self._require_current_product_activation(reference_time=reference_time)
         if resolved.source != "product_activation":
             raise RuntimeBindingResolutionError(PRODUCT_RUNTIME_IDENTITY_MISMATCH)
         entry = self._product_entry(resolved.runtime)
@@ -304,12 +311,17 @@ class RuntimeBindingResolver:
             source="legacy_derived",
         )
 
-    def _require_current_product_activation(self) -> None:
+    def _require_current_product_activation(
+        self, *, reference_time: datetime | None = None
+    ) -> None:
         activation = self.product_activation
         assert activation is not None
         try:
             activation.assert_unchanged()
-            current = self.clock().astimezone(timezone.utc)
+            sampled = self.clock() if reference_time is None else reference_time
+            if sampled.tzinfo is None or sampled.utcoffset() is None:
+                raise ValueError("Product authority time must be timezone-aware")
+            current = sampled.astimezone(timezone.utc)
         except Exception as exc:  # noqa: BLE001 - collapse clock/validity failures.
             raise RuntimeBindingResolutionError(PRODUCT_ACTIVATION_NOT_CURRENT) from exc
         if (
