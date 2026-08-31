@@ -1,0 +1,723 @@
+{
+  "$defs": {
+    "ResidualRiskAcceptanceV1": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "residual_boundaries": {
+              "const": [
+                "openclaw_has_no_authoritative_invocation_start_hook",
+                "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+                "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+                "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+                "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+              ]
+            }
+          },
+          "required": [
+            "residual_boundaries"
+          ]
+        }
+      ],
+      "description": "Signed, short-lived acceptance of explicitly named runtime boundaries.",
+      "properties": {
+        "acceptance_ref_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Acceptance Ref Digest",
+          "type": "string"
+        },
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "canary_cohort": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Canary Cohort",
+          "type": "string"
+        },
+        "candidate_artifact_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Artifact Digest",
+          "type": "string"
+        },
+        "environment": {
+          "const": "internal_rc_canary",
+          "title": "Environment",
+          "type": "string"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "host_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Host Inventory Digest",
+          "type": "string"
+        },
+        "issued_at": {
+          "title": "Issued At",
+          "type": "string"
+        },
+        "plugin_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Plugin Inventory Digest",
+          "type": "string"
+        },
+        "plugin_order_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Plugin Order Inventory Digest",
+          "type": "string"
+        },
+        "plugin_version": {
+          "const": "0.1.0-rc.1",
+          "title": "Plugin Version",
+          "type": "string"
+        },
+        "profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "release_scope": {
+          "const": "internal_rc_canary",
+          "default": "internal_rc_canary",
+          "title": "Release Scope",
+          "type": "string"
+        },
+        "residual_boundaries": {
+          "items": {
+            "enum": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Residual Boundaries",
+          "type": "array"
+        },
+        "reviewer_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Reviewer Id",
+          "type": "string"
+        },
+        "runtime": {
+          "const": "openclaw",
+          "default": "openclaw",
+          "title": "Runtime",
+          "type": "string"
+        },
+        "runtime_binding_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Runtime Binding Id",
+          "type": "string"
+        },
+        "runtime_version": {
+          "const": "2026.7.1-2",
+          "title": "Runtime Version",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "server_signature": {
+          "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+          "title": "Server Signature",
+          "type": "string"
+        },
+        "signer_key_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Signer Key Id",
+          "type": "string"
+        },
+        "tool_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Tool Inventory Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime_version",
+        "plugin_version",
+        "reviewer_id",
+        "candidate_artifact_digest",
+        "profile_id",
+        "profile_digest",
+        "agent_id",
+        "runtime_binding_id",
+        "host_inventory_digest",
+        "plugin_inventory_digest",
+        "plugin_order_inventory_digest",
+        "tool_inventory_digest",
+        "canary_cohort",
+        "environment",
+        "residual_boundaries",
+        "issued_at",
+        "expires_at",
+        "signer_key_id",
+        "acceptance_ref_digest",
+        "server_signature"
+      ],
+      "title": "ResidualRiskAcceptanceV1",
+      "type": "object"
+    },
+    "RolloutAdmissionRecordV1": {
+      "additionalProperties": false,
+      "description": "Signed proof that a fixed candidate passed the named admission evidence.",
+      "properties": {
+        "admission_ref_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Admission Ref Digest",
+          "type": "string"
+        },
+        "candidate_artifact_manifest_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Candidate Artifact Manifest Digest",
+          "type": "string"
+        },
+        "capability_matrix_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Capability Matrix Digest",
+          "type": "string"
+        },
+        "contract_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Contract Digest",
+          "type": "string"
+        },
+        "dataset_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Dataset Digest",
+          "type": "string"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "issued_at": {
+          "title": "Issued At",
+          "type": "string"
+        },
+        "langgraph_conformance_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Langgraph Conformance Digest",
+          "type": "string"
+        },
+        "openclaw_conformance_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Openclaw Conformance Digest",
+          "type": "string"
+        },
+        "policy_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Policy Digest",
+          "type": "string"
+        },
+        "schema_version": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "server_signature": {
+          "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+          "title": "Server Signature",
+          "type": "string"
+        },
+        "signer_key_id": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Signer Key Id",
+          "type": "string"
+        },
+        "source_revision": {
+          "maxLength": 128,
+          "minLength": 7,
+          "title": "Source Revision",
+          "type": "string"
+        },
+        "tool_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Tool Inventory Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "candidate_artifact_manifest_digest",
+        "source_revision",
+        "policy_digest",
+        "dataset_digest",
+        "contract_digest",
+        "langgraph_conformance_digest",
+        "openclaw_conformance_digest",
+        "capability_matrix_digest",
+        "tool_inventory_digest",
+        "issued_at",
+        "expires_at",
+        "signer_key_id",
+        "admission_ref_digest",
+        "server_signature"
+      ],
+      "title": "RolloutAdmissionRecordV1",
+      "type": "object"
+    },
+    "RuntimeActivationEntryV1": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "properties": {
+            "event_types": {
+              "const": [
+                "context_assembled",
+                "memory_write_proposed",
+                "message_send_proposed",
+                "model_input_prepared",
+                "model_output_produced",
+                "tool_call_proposed",
+                "tool_result_produced"
+              ]
+            }
+          },
+          "required": [
+            "event_types"
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "runtime": {
+                "const": "langgraph"
+              }
+            },
+            "required": [
+              "runtime"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ask_release_mode": {
+                "const": "strong_binding"
+              },
+              "plugin_inventory_digest": {
+                "type": "null"
+              },
+              "plugin_order_inventory_digest": {
+                "type": "null"
+              },
+              "plugin_version": {
+                "const": "0.1.0rc1"
+              },
+              "profile_id": {
+                "const": "agentguard-langgraph-v2"
+              },
+              "residual_boundaries": {
+                "const": []
+              },
+              "residual_risk_acceptance_digest": {
+                "type": "null"
+              },
+              "runtime_version": {
+                "const": "1.2.7"
+              }
+            },
+            "required": [
+              "residual_boundaries"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "runtime": {
+                "const": "openclaw"
+              }
+            },
+            "required": [
+              "runtime"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ask_release_mode": {
+                "const": "restricted_allow_once"
+              },
+              "plugin_inventory_digest": {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "plugin_order_inventory_digest": {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "plugin_version": {
+                "const": "0.1.0-rc.1"
+              },
+              "profile_id": {
+                "const": "agentguard-openclaw-v2-restricted"
+              },
+              "residual_boundaries": {
+                "const": [
+                  "openclaw_has_no_authoritative_invocation_start_hook",
+                  "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+                  "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+                  "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+                  "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+                ]
+              },
+              "residual_risk_acceptance_digest": {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "runtime_version": {
+                "const": "2026.7.1-2"
+              }
+            },
+            "required": [
+              "plugin_inventory_digest",
+              "plugin_order_inventory_digest",
+              "residual_risk_acceptance_digest",
+              "residual_boundaries"
+            ]
+          }
+        }
+      ],
+      "description": "One runtime identity and immutable candidate inventory activation.",
+      "properties": {
+        "adapter_artifact_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Adapter Artifact Digest",
+          "type": "string"
+        },
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "ask_release_mode": {
+          "enum": [
+            "strong_binding",
+            "restricted_allow_once"
+          ],
+          "title": "Ask Release Mode",
+          "type": "string"
+        },
+        "canary_cohort": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Canary Cohort",
+          "type": "string"
+        },
+        "capability_report_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Capability Report Digest",
+          "type": "string"
+        },
+        "environment": {
+          "const": "internal_rc_canary",
+          "default": "internal_rc_canary",
+          "title": "Environment",
+          "type": "string"
+        },
+        "event_types": {
+          "items": {
+            "enum": [
+              "tool_call_proposed",
+              "context_assembled",
+              "model_input_prepared",
+              "model_output_produced",
+              "tool_result_produced",
+              "memory_write_proposed",
+              "message_send_proposed"
+            ],
+            "type": "string"
+          },
+          "title": "Event Types",
+          "type": "array"
+        },
+        "expires_at": {
+          "title": "Expires At",
+          "type": "string"
+        },
+        "host_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Host Inventory Digest",
+          "type": "string"
+        },
+        "plugin_inventory_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin Inventory Digest"
+        },
+        "plugin_order_inventory_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Plugin Order Inventory Digest"
+        },
+        "plugin_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Plugin Version",
+          "type": "string"
+        },
+        "principal_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Principal Id",
+          "type": "string"
+        },
+        "profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "residual_boundaries": {
+          "items": {
+            "enum": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ],
+            "type": "string"
+          },
+          "title": "Residual Boundaries",
+          "type": "array"
+        },
+        "residual_risk_acceptance_digest": {
+          "anyOf": [
+            {
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Residual Risk Acceptance Digest"
+        },
+        "runtime": {
+          "enum": [
+            "langgraph",
+            "openclaw"
+          ],
+          "title": "Runtime",
+          "type": "string"
+        },
+        "runtime_binding_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Runtime Binding Id",
+          "type": "string"
+        },
+        "runtime_version": {
+          "maxLength": 64,
+          "minLength": 1,
+          "title": "Runtime Version",
+          "type": "string"
+        },
+        "tool_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Tool Inventory Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "runtime",
+        "runtime_version",
+        "plugin_version",
+        "profile_id",
+        "profile_digest",
+        "principal_id",
+        "agent_id",
+        "runtime_binding_id",
+        "event_types",
+        "adapter_artifact_digest",
+        "capability_report_digest",
+        "host_inventory_digest",
+        "tool_inventory_digest",
+        "ask_release_mode",
+        "residual_boundaries",
+        "canary_cohort",
+        "expires_at"
+      ],
+      "title": "RuntimeActivationEntryV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://agentguard.dev/schemas/product_activation_bundle_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "properties": {
+        "runtimes": {
+          "maxItems": 2,
+          "minItems": 2,
+          "prefixItems": [
+            {
+              "properties": {
+                "runtime": {
+                  "const": "langgraph"
+                }
+              },
+              "required": [
+                "runtime"
+              ]
+            },
+            {
+              "properties": {
+                "runtime": {
+                  "const": "openclaw"
+                }
+              },
+              "required": [
+                "runtime"
+              ]
+            }
+          ]
+        }
+      },
+      "required": [
+        "runtimes"
+      ]
+    }
+  ],
+  "description": "Strict dual-runtime product activation for one immutable candidate.",
+  "properties": {
+    "activation_ref_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Activation Ref Digest",
+      "type": "string"
+    },
+    "candidate_artifact_manifest_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Artifact Manifest Digest",
+      "type": "string"
+    },
+    "contract_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Contract Digest",
+      "type": "string"
+    },
+    "dataset_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Digest",
+      "type": "string"
+    },
+    "expires_at": {
+      "title": "Expires At",
+      "type": "string"
+    },
+    "issued_at": {
+      "title": "Issued At",
+      "type": "string"
+    },
+    "mode": {
+      "const": "active",
+      "default": "active",
+      "title": "Mode",
+      "type": "string"
+    },
+    "policy_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Policy Digest",
+      "type": "string"
+    },
+    "residual_risk_acceptance": {
+      "$ref": "#/$defs/ResidualRiskAcceptanceV1"
+    },
+    "rollout_admission_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Rollout Admission Digest",
+      "type": "string"
+    },
+    "rollout_admission_record": {
+      "$ref": "#/$defs/RolloutAdmissionRecordV1"
+    },
+    "runtimes": {
+      "items": {
+        "$ref": "#/$defs/RuntimeActivationEntryV1"
+      },
+      "title": "Runtimes",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "server_signature": {
+      "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+      "title": "Server Signature",
+      "type": "string"
+    },
+    "signer_key_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Signer Key Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_artifact_manifest_digest",
+    "rollout_admission_digest",
+    "rollout_admission_record",
+    "residual_risk_acceptance",
+    "policy_digest",
+    "dataset_digest",
+    "contract_digest",
+    "runtimes",
+    "issued_at",
+    "expires_at",
+    "signer_key_id",
+    "activation_ref_digest",
+    "server_signature"
+  ],
+  "title": "ProductActivationBundleV1",
+  "type": "object"
+}

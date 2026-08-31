@@ -1,0 +1,241 @@
+{
+  "$id": "https://agentguard.dev/schemas/approval_release_directive_v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "not_applicable"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action_binding": {
+            "const": "none"
+          },
+          "receipt_requirement": {
+            "const": "not_applicable"
+          },
+          "required_runtime_profile": {
+            "type": "null"
+          },
+          "residual_boundaries": {
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "forbidden"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action_binding": {
+            "const": "none"
+          },
+          "receipt_requirement": {
+            "const": "not_applicable"
+          },
+          "required_runtime_profile": {
+            "type": "null"
+          },
+          "residual_boundaries": {
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "strong_binding"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action_binding": {
+            "const": "exact"
+          },
+          "receipt_requirement": {
+            "const": "required_durable"
+          },
+          "required_runtime_profile": {
+            "const": "C3"
+          },
+          "residual_boundaries": {
+            "maxItems": 0
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "restricted_allow_once"
+          }
+        },
+        "required": [
+          "mode"
+        ]
+      },
+      "then": {
+        "properties": {
+          "action_binding": {
+            "const": "best_effort_host"
+          },
+          "receipt_requirement": {
+            "const": "required_durable"
+          },
+          "required_runtime_profile": {
+            "const": "C1"
+          },
+          "residual_boundaries": {
+            "const": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ]
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    }
+  ],
+  "description": "New-reader release authority with a deliberately safe legacy projection.",
+  "properties": {
+    "action_binding": {
+      "enum": [
+        "exact",
+        "best_effort_host",
+        "none"
+      ],
+      "title": "Action Binding",
+      "type": "string"
+    },
+    "activation_ref_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Activation Ref Digest",
+      "type": "string"
+    },
+    "capability_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Capability Digest",
+      "type": "string"
+    },
+    "human_only": {
+      "const": true,
+      "default": true,
+      "title": "Human Only",
+      "type": "boolean"
+    },
+    "mode": {
+      "enum": [
+        "not_applicable",
+        "forbidden",
+        "strong_binding",
+        "restricted_allow_once"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "receipt_requirement": {
+      "enum": [
+        "not_applicable",
+        "required_durable"
+      ],
+      "title": "Receipt Requirement",
+      "type": "string"
+    },
+    "required_runtime_profile": {
+      "anyOf": [
+        {
+          "enum": [
+            "C1",
+            "C3"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Required Runtime Profile"
+    },
+    "residual_boundaries": {
+      "items": {
+        "enum": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+          "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+          "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+        ],
+        "type": "string"
+      },
+      "title": "Residual Boundaries",
+      "type": "array"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "scope_digest": {
+      "pattern": "^(?:sha256|hmac-sha256):[0-9a-f]{64}$",
+      "title": "Scope Digest",
+      "type": "string"
+    },
+    "single_use": {
+      "const": true,
+      "default": true,
+      "title": "Single Use",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "mode",
+    "required_runtime_profile",
+    "action_binding",
+    "receipt_requirement",
+    "activation_ref_digest",
+    "scope_digest",
+    "capability_digest",
+    "residual_boundaries"
+  ],
+  "title": "ApprovalReleaseDirectiveV2",
+  "type": "object"
+}

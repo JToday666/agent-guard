@@ -1,0 +1,669 @@
+{
+  "$defs": {
+    "RuntimeEventCapabilityV2": {
+      "additionalProperties": false,
+      "description": "One runtime's truthful capability at a concrete GuardEvent boundary.",
+      "properties": {
+        "active": {
+          "title": "Active",
+          "type": "boolean"
+        },
+        "enforcement": {
+          "enum": [
+            "observation",
+            "pre_execution_c1",
+            "pre_execution_c3",
+            "post_execution_isolation",
+            "not_supported"
+          ],
+          "title": "Enforcement",
+          "type": "string"
+        },
+        "event_type": {
+          "enum": [
+            "tool_call_proposed",
+            "context_assembled",
+            "model_input_prepared",
+            "model_output_produced",
+            "tool_result_produced",
+            "memory_write_proposed",
+            "message_send_proposed"
+          ],
+          "title": "Event Type",
+          "type": "string"
+        },
+        "residual_boundaries": {
+          "items": {
+            "enum": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ],
+            "type": "string"
+          },
+          "title": "Residual Boundaries",
+          "type": "array"
+        },
+        "supported": {
+          "title": "Supported",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "event_type",
+        "supported",
+        "active",
+        "enforcement",
+        "residual_boundaries"
+      ],
+      "title": "RuntimeEventCapabilityV2",
+      "type": "object"
+    }
+  },
+  "$id": "https://agentguard.dev/schemas/runtime_capability_report_v2.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "langgraph"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "c0_registration": {
+            "const": true
+          },
+          "c1_pre_execution_interception": {
+            "const": true
+          },
+          "c2_correlation": {
+            "const": true
+          },
+          "c3_atomic_replace_and_seal": {
+            "const": true
+          },
+          "c4_outcome_receipts": {
+            "const": true
+          },
+          "events": {
+            "maxItems": 7,
+            "minItems": 7,
+            "prefixItems": [
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "context_assembled"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c3"
+                  },
+                  "event_type": {
+                    "const": "memory_write_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c3"
+                  },
+                  "event_type": {
+                    "const": "message_send_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "model_input_prepared"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "post_execution_isolation"
+                  },
+                  "event_type": {
+                    "const": "model_output_produced"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c3"
+                  },
+                  "event_type": {
+                    "const": "tool_call_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "post_execution_isolation"
+                  },
+                  "event_type": {
+                    "const": "tool_result_produced"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              }
+            ]
+          },
+          "profile_id": {
+            "const": "agentguard-langgraph-v2"
+          },
+          "residual_boundaries": {
+            "const": []
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "openclaw"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "c0_registration": {
+            "const": true
+          },
+          "c1_pre_execution_interception": {
+            "const": true
+          },
+          "c2_correlation": {
+            "const": true
+          },
+          "c3_atomic_replace_and_seal": {
+            "const": false
+          },
+          "c4_outcome_receipts": {
+            "const": true
+          },
+          "events": {
+            "maxItems": 7,
+            "minItems": 7,
+            "prefixItems": [
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "context_assembled"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "memory_write_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": [
+                      "openclaw_has_no_authoritative_invocation_start_hook",
+                      "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+                      "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook"
+                    ]
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "message_send_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": [
+                      "openclaw_has_no_authoritative_invocation_start_hook",
+                      "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+                      "openclaw_message_sending_host_exception_or_timeout_can_fail_open"
+                    ]
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "model_input_prepared"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "post_execution_isolation"
+                  },
+                  "event_type": {
+                    "const": "model_output_produced"
+                  },
+                  "residual_boundaries": {
+                    "const": []
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "pre_execution_c1"
+                  },
+                  "event_type": {
+                    "const": "tool_call_proposed"
+                  },
+                  "residual_boundaries": {
+                    "const": [
+                      "openclaw_has_no_authoritative_invocation_start_hook",
+                      "openclaw_hook_cannot_atomically_replace_and_seal_final_action"
+                    ]
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              },
+              {
+                "properties": {
+                  "enforcement": {
+                    "const": "post_execution_isolation"
+                  },
+                  "event_type": {
+                    "const": "tool_result_produced"
+                  },
+                  "residual_boundaries": {
+                    "const": [
+                      "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+                    ]
+                  },
+                  "supported": {
+                    "const": true
+                  }
+                },
+                "required": [
+                  "event_type",
+                  "supported",
+                  "active",
+                  "enforcement",
+                  "residual_boundaries"
+                ]
+              }
+            ]
+          },
+          "profile_id": {
+            "const": "agentguard-openclaw-v2-restricted"
+          },
+          "residual_boundaries": {
+            "const": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ]
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "active": {
+            "const": true
+          }
+        },
+        "required": [
+          "active"
+        ]
+      },
+      "then": {
+        "properties": {
+          "events": {
+            "items": {
+              "properties": {
+                "active": {
+                  "const": true
+                }
+              },
+              "required": [
+                "active"
+              ]
+            }
+          },
+          "supported": {
+            "const": true
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "active": {
+            "const": false
+          }
+        },
+        "required": [
+          "active"
+        ]
+      },
+      "then": {
+        "properties": {
+          "events": {
+            "items": {
+              "properties": {
+                "active": {
+                  "const": false
+                }
+              },
+              "required": [
+                "active"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "Runtime capability report separating support from activation state.",
+  "properties": {
+    "active": {
+      "title": "Active",
+      "type": "boolean"
+    },
+    "agent_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "c0_registration": {
+      "title": "C0 Registration",
+      "type": "boolean"
+    },
+    "c1_pre_execution_interception": {
+      "title": "C1 Pre Execution Interception",
+      "type": "boolean"
+    },
+    "c2_correlation": {
+      "title": "C2 Correlation",
+      "type": "boolean"
+    },
+    "c3_atomic_replace_and_seal": {
+      "title": "C3 Atomic Replace And Seal",
+      "type": "boolean"
+    },
+    "c4_outcome_receipts": {
+      "title": "C4 Outcome Receipts",
+      "type": "boolean"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/RuntimeEventCapabilityV2"
+      },
+      "title": "Events",
+      "type": "array"
+    },
+    "profile_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "report_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Report Digest",
+      "type": "string"
+    },
+    "residual_boundaries": {
+      "items": {
+        "enum": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+          "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+          "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+        ],
+        "type": "string"
+      },
+      "title": "Residual Boundaries",
+      "type": "array"
+    },
+    "runtime": {
+      "enum": [
+        "langgraph",
+        "openclaw"
+      ],
+      "title": "Runtime",
+      "type": "string"
+    },
+    "runtime_binding_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Runtime Binding Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "2.0",
+      "default": "2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "supported": {
+      "title": "Supported",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "runtime",
+    "agent_id",
+    "runtime_binding_id",
+    "profile_id",
+    "supported",
+    "active",
+    "c0_registration",
+    "c1_pre_execution_interception",
+    "c2_correlation",
+    "c3_atomic_replace_and_seal",
+    "c4_outcome_receipts",
+    "events",
+    "residual_boundaries",
+    "report_digest"
+  ],
+  "title": "RuntimeCapabilityReportV2",
+  "type": "object"
+}

@@ -1,0 +1,182 @@
+{
+  "$id": "https://agentguard.dev/schemas/residual_risk_acceptance_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "properties": {
+        "residual_boundaries": {
+          "const": [
+            "openclaw_has_no_authoritative_invocation_start_hook",
+            "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+            "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+            "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+            "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+          ]
+        }
+      },
+      "required": [
+        "residual_boundaries"
+      ]
+    }
+  ],
+  "description": "Signed, short-lived acceptance of explicitly named runtime boundaries.",
+  "properties": {
+    "acceptance_ref_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Acceptance Ref Digest",
+      "type": "string"
+    },
+    "agent_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "canary_cohort": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Canary Cohort",
+      "type": "string"
+    },
+    "candidate_artifact_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Artifact Digest",
+      "type": "string"
+    },
+    "environment": {
+      "const": "internal_rc_canary",
+      "title": "Environment",
+      "type": "string"
+    },
+    "expires_at": {
+      "title": "Expires At",
+      "type": "string"
+    },
+    "host_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Host Inventory Digest",
+      "type": "string"
+    },
+    "issued_at": {
+      "title": "Issued At",
+      "type": "string"
+    },
+    "plugin_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Plugin Inventory Digest",
+      "type": "string"
+    },
+    "plugin_order_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Plugin Order Inventory Digest",
+      "type": "string"
+    },
+    "plugin_version": {
+      "const": "0.1.0-rc.1",
+      "title": "Plugin Version",
+      "type": "string"
+    },
+    "profile_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Profile Digest",
+      "type": "string"
+    },
+    "profile_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "release_scope": {
+      "const": "internal_rc_canary",
+      "default": "internal_rc_canary",
+      "title": "Release Scope",
+      "type": "string"
+    },
+    "residual_boundaries": {
+      "items": {
+        "enum": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+          "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+          "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Residual Boundaries",
+      "type": "array"
+    },
+    "reviewer_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Reviewer Id",
+      "type": "string"
+    },
+    "runtime": {
+      "const": "openclaw",
+      "default": "openclaw",
+      "title": "Runtime",
+      "type": "string"
+    },
+    "runtime_binding_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Runtime Binding Id",
+      "type": "string"
+    },
+    "runtime_version": {
+      "const": "2026.7.1-2",
+      "title": "Runtime Version",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "server_signature": {
+      "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+      "title": "Server Signature",
+      "type": "string"
+    },
+    "signer_key_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Signer Key Id",
+      "type": "string"
+    },
+    "tool_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Tool Inventory Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtime_version",
+    "plugin_version",
+    "reviewer_id",
+    "candidate_artifact_digest",
+    "profile_id",
+    "profile_digest",
+    "agent_id",
+    "runtime_binding_id",
+    "host_inventory_digest",
+    "plugin_inventory_digest",
+    "plugin_order_inventory_digest",
+    "tool_inventory_digest",
+    "canary_cohort",
+    "environment",
+    "residual_boundaries",
+    "issued_at",
+    "expires_at",
+    "signer_key_id",
+    "acceptance_ref_digest",
+    "server_signature"
+  ],
+  "title": "ResidualRiskAcceptanceV1",
+  "type": "object"
+}
