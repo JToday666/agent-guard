@@ -20,6 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..actions.canonical_json import canonical_hmac_sha256, canonical_sha256
 from ..events.payloads import GuardEventType
+from .activation_ack import ActivationAckV1, ProductRuntime
 from .competition import (
     DecisionAuthority,
     V21AuthoritySelectionError,
@@ -166,7 +167,6 @@ _MEMORY_WRITE_PATTERNS = (
     ),
 )
 
-ProductRuntime = Literal["langgraph", "openclaw"]
 ApprovalReleaseModeV2 = Literal[
     "not_applicable", "forbidden", "strong_binding", "restricted_allow_once"
 ]
@@ -1190,134 +1190,6 @@ class ProductDecisionAuthorityEvidenceV1(BaseModel):
         }:
             raise ValueError("event type does not permit approval release")
         return self
-
-
-class ActivationAckV1(BaseModel):
-    """Short-lived server acknowledgement of exact runtime activation identity."""
-
-    model_config = ConfigDict(
-        extra="forbid",
-        frozen=True,
-        json_schema_extra=cast(
-            dict[str, Any],
-            {
-                "allOf": [
-                    {
-                        "if": {
-                            "properties": {"runtime": {"const": "langgraph"}},
-                            "required": ["runtime"],
-                        },
-                        "then": {
-                            "properties": {
-                                "runtime_version": {"const": "1.2.7"},
-                                "plugin_version": {"const": "0.1.0rc1"},
-                                "profile_id": {"const": "agentguard-langgraph-v2"},
-                                "plugin_inventory_digest": {"type": "null"},
-                                "plugin_order_inventory_digest": {"type": "null"},
-                            }
-                        },
-                    },
-                    {
-                        "if": {
-                            "properties": {"runtime": {"const": "openclaw"}},
-                            "required": ["runtime"],
-                        },
-                        "then": {
-                            "properties": {
-                                "runtime_version": {"const": "2026.7.1-2"},
-                                "plugin_version": {"const": "0.1.0-rc.1"},
-                                "profile_id": {
-                                    "const": "agentguard-openclaw-v2-restricted"
-                                },
-                                "plugin_inventory_digest": {
-                                    "type": "string",
-                                    "pattern": _DIGEST,
-                                },
-                                "plugin_order_inventory_digest": {
-                                    "type": "string",
-                                    "pattern": _DIGEST,
-                                },
-                            },
-                            "required": [
-                                "plugin_inventory_digest",
-                                "plugin_order_inventory_digest",
-                            ],
-                        },
-                    },
-                ]
-            },
-        ),
-    )
-
-    schema_version: Literal["1.0"] = "1.0"
-    runtime: ProductRuntime
-    runtime_version: str = Field(min_length=1, max_length=64)
-    plugin_version: str = Field(min_length=1, max_length=64)
-    agent_id: str = Field(min_length=1, max_length=128)
-    runtime_binding_id: str = Field(min_length=1, max_length=256)
-    profile_id: str = Field(min_length=1, max_length=128)
-    activation_ref_digest: str = Field(pattern=_DIGEST)
-    capability_digest: str = Field(pattern=_DIGEST)
-    host_inventory_digest: str = Field(pattern=_DIGEST)
-    plugin_inventory_digest: str | None = Field(default=None, pattern=_DIGEST)
-    plugin_order_inventory_digest: str | None = Field(default=None, pattern=_DIGEST)
-    tool_inventory_digest: str = Field(pattern=_DIGEST)
-    issued_at: str
-    expires_at: str
-    ack_token: str = Field(pattern=_SIGNATURE)
-
-    @model_validator(mode="after")
-    def validate_ack(self) -> "ActivationAckV1":
-        _require_window(
-            self.issued_at,
-            self.expires_at,
-            maximum=timedelta(seconds=120),
-        )
-        expected_runtime_version = {
-            "langgraph": "1.2.7",
-            "openclaw": "2026.7.1-2",
-        }[self.runtime]
-        if self.runtime_version != expected_runtime_version:
-            raise ValueError(
-                f"{self.runtime} activation ack requires runtime_version="
-                f"{expected_runtime_version}"
-            )
-        expected_plugin_version = {
-            "langgraph": "0.1.0rc1",
-            "openclaw": "0.1.0-rc.1",
-        }[self.runtime]
-        if self.plugin_version != expected_plugin_version:
-            raise ValueError(
-                f"{self.runtime} activation ack requires plugin_version="
-                f"{expected_plugin_version}"
-            )
-        expected_profile_id = _RUNTIME_PROFILE_IDS[self.runtime]
-        if self.profile_id != expected_profile_id:
-            raise ValueError(
-                f"{self.runtime} activation ack requires profile_id="
-                f"{expected_profile_id}"
-            )
-        if self.runtime == "openclaw" and any(
-            value is None
-            for value in (
-                self.plugin_inventory_digest,
-                self.plugin_order_inventory_digest,
-            )
-        ):
-            raise ValueError("OpenClaw activation ack requires plugin inventories")
-        if self.runtime == "langgraph" and any(
-            value is not None
-            for value in (
-                self.plugin_inventory_digest,
-                self.plugin_order_inventory_digest,
-            )
-        ):
-            raise ValueError("LangGraph activation ack has no plugin inventories")
-        return self
-
-    def token_projection(self) -> dict[str, Any]:
-        dumped = self.model_dump(mode="json", exclude={"ack_token"})
-        return {key: dumped[key] for key in sorted(dumped)}
 
 
 def build_runtime_capability_report(**values: Any) -> RuntimeCapabilityReportV2:
