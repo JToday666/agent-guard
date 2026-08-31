@@ -417,6 +417,60 @@
     {
       "if": {
         "properties": {
+          "runtime": {
+            "const": "langgraph"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "activation_ack": {
+                "properties": {
+                  "runtime": {
+                    "const": "langgraph"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "openclaw"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "metadata": {
+            "properties": {
+              "activation_ack": {
+                "properties": {
+                  "runtime": {
+                    "const": "openclaw"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
           "links": {
             "required": ["lease_id", "consumption_id"]
           }

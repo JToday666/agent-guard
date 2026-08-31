@@ -94,6 +94,7 @@ def test_receipt_accepts_only_a_strict_identity_bound_activation_ack() -> None:
     wrong_runtime["metadata"]["activation_ack"] = _ack(runtime="openclaw")
     with pytest.raises(ValidationError, match="runtime must match"):
         RuntimeOutcomeReceipt.model_validate(wrong_runtime)
+    assert not Draft202012Validator(_receipt_schema()).is_valid(wrong_runtime)
 
     wrong_agent = copy.deepcopy(payload)
     wrong_agent["metadata"]["activation_ack"] = _ack(agent_id="other-agent")
@@ -107,6 +108,41 @@ def test_receipt_accepts_only_a_strict_identity_bound_activation_ack() -> None:
     )
     with pytest.raises(ValidationError, match="issued after receipt"):
         RuntimeOutcomeReceipt.model_validate(future_ack)
+
+
+def test_openclaw_receipt_accepts_its_exact_runtime_ack() -> None:
+    payload = _receipt_payload()
+    payload["runtime"] = "openclaw"
+    payload["metadata"]["activation_ack"] = _ack(runtime="openclaw")
+
+    receipt = RuntimeOutcomeReceipt.model_validate(payload)
+    dumped = receipt.model_dump(mode="json")
+
+    assert dumped["metadata"]["activation_ack"]["runtime"] == "openclaw"
+    assert Draft202012Validator(_receipt_schema()).is_valid(dumped)
+
+
+@pytest.mark.parametrize(
+    ("issued_at", "expires_at"),
+    [
+        ("2026-08-15T08:09:00+00:00", "2026-08-15T08:09:00+00:00"),
+        ("2026-08-15T08:09:00+00:00", "2026-08-15T08:11:01+00:00"),
+        ("2026-08-15T08:09:00", "2026-08-15T08:11:00"),
+        ("not-a-time", "2026-08-15T08:11:00+00:00"),
+    ],
+)
+def test_receipt_rejects_invalid_ack_validity_windows(
+    issued_at: str,
+    expires_at: str,
+) -> None:
+    payload = _receipt_payload()
+    ack = _ack()
+    ack["issued_at"] = issued_at
+    ack["expires_at"] = expires_at
+    payload["metadata"]["activation_ack"] = ack
+
+    with pytest.raises(ValidationError):
+        RuntimeOutcomeReceipt.model_validate(payload)
 
 
 def test_receipt_ack_schema_reuses_the_standalone_authority_schema() -> None:
@@ -159,3 +195,10 @@ def test_secret_scan_exempts_only_the_typed_ack_token_leaf() -> None:
     nested_smuggle["metadata"]["activation_ack"] = _ack(agent_id=secret_agent)
     with pytest.raises(ValidationError, match="cannot contain strong-binding secret"):
         RuntimeOutcomeReceipt.model_validate(nested_smuggle)
+
+    ack_smuggle = copy.deepcopy(payload)
+    ack_smuggle["metadata"]["activation_ack"][
+        "runtime_binding_id"
+    ] = f"lease-v1:{'c' * 64}"
+    with pytest.raises(ValidationError, match="cannot contain strong-binding secret"):
+        RuntimeOutcomeReceipt.model_validate(ack_smuggle)
