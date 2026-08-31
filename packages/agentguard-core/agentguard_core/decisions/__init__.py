@@ -16,6 +16,10 @@ from .models import (
     RuleHit,
     RuleOverrideDecision,
 )
+from .runtime_observations import (
+    PreEvaluationBlockDiagnostic,
+    PreEvaluationBlockFailureCode,
+)
 from .policy import build_guard_decision
 from .results import DetectionResult
 
@@ -42,6 +46,8 @@ __all__ = [
     "OpenClawInventoryDigestsV1",
     "OPENCLAW_RESIDUAL_BOUNDARIES",
     "ProductDecisionAuthorityEvidenceV1",
+    "PreEvaluationBlockDiagnostic",
+    "PreEvaluationBlockFailureCode",
     "ResidualRiskAcceptanceV1",
     "RolloutAdmissionRecordV1",
     "RuntimeActivationEntryV1",
