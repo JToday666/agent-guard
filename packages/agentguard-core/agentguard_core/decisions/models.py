@@ -6,9 +6,10 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..ids import new_id, utc_now_iso
+from .activation_ack import ActivationAckV1
 
 _RUNTIME_SECRET_MATERIAL = re.compile(r"(?:hmac-sha256|lease-v1):[0-9a-f]{64}")
 
@@ -219,6 +220,17 @@ class RuntimeOutcomeMetadata(BaseModel):
 
     agent_id: str = Field(min_length=1, max_length=128)
     outcome_kind: RuntimeOutcomeKind
+    activation_ack: ActivationAckV1 | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+
+    @field_validator("activation_ack", mode="before")
+    @classmethod
+    def _reject_explicit_null_ack(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("activation_ack must be omitted instead of null")
+        return value
 
 
 class RuntimeInterventionEvidence(BaseModel):
@@ -376,6 +388,17 @@ class RuntimeOutcomeReceipt(AuditEvent):
     def _validate_receipt(self) -> "RuntimeOutcomeReceipt":
         occurred_at = _runtime_timestamp(self.timestamp, "timestamp")
         self.timestamp = occurred_at.isoformat()
+        activation_ack = self.metadata.activation_ack
+        if activation_ack is not None:
+            if activation_ack.runtime != self.runtime:
+                raise ValueError("activation ack runtime must match receipt runtime")
+            if activation_ack.agent_id != self.metadata.agent_id:
+                raise ValueError("activation ack agent must match receipt agent")
+            if (
+                _runtime_timestamp(activation_ack.issued_at, "activation_ack.issued_at")
+                > occurred_at
+            ):
+                raise ValueError("activation ack cannot be issued after receipt")
         if self.evidence.execution.completed_at != self.timestamp:
             raise ValueError("execution.completed_at must equal receipt timestamp")
         expected_audit_id = (
@@ -505,7 +528,10 @@ class RuntimeOutcomeReceipt(AuditEvent):
             raise ValueError("execution_completed requires executed status")
         if kind == "execution_failed" and status != "failed":
             raise ValueError("execution_failed requires failed status")
-        if _RUNTIME_SECRET_MATERIAL.search(self.model_dump_json()) is not None:
+        secret_scan_json = self.model_dump_json(
+            exclude={"metadata": {"activation_ack": {"ack_token"}}}
+        )
+        if _RUNTIME_SECRET_MATERIAL.search(secret_scan_json) is not None:
             raise ValueError(
                 "runtime outcome receipts cannot contain strong-binding secret material"
             )
