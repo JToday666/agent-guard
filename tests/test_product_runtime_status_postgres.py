@@ -20,7 +20,16 @@ from agentguard_core import (
 from agentguard_core.decisions.product import PRODUCT_EVENT_TYPES
 from guard_api.models import AdapterStatusRecord
 from guard_api.runtime_status import ProductRuntimeStatusV2
+from guard_api.services.product_activation import (
+    FrozenProductActivation,
+    reconcile_product_runtime_observations,
+)
+from guard_api.storage.integrity import canonical_sha256
 from guard_api.storage.postgres import PostgresControlPlaneStore
+from tests.support.product_activation import (
+    build_test_product_activation,
+    product_runtime_status_for_activation,
+)
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 
 pytestmark = pytest.mark.postgres
@@ -226,6 +235,39 @@ def test_product_status_dual_write_is_typed_deep_and_legacy_stripped() -> None:
         reread = store.get_product_runtime_status(status.identity())
         assert reread is not None
         assert "mutated-after-save" not in reread.hooks
+    finally:
+        reset_control_plane_schema(database_url)
+
+
+def test_product_activation_reconciliation_uses_exact_postgres_rows() -> None:
+    database_url = get_test_database_url()
+    store = PostgresControlPlaneStore(database_url)
+    try:
+        reset_control_plane_schema(database_url)
+        store.initialize()
+        fixture = build_test_product_activation()
+        activation = FrozenProductActivation(
+            bundle=fixture.bundle,
+            source_path="/test/product-activation.json",
+            content_digest=canonical_sha256(fixture.bundle.model_dump(mode="json")),
+        )
+        for runtime in ("langgraph", "openclaw"):
+            store.save_product_runtime_status(
+                product_runtime_status_for_activation(fixture, runtime)
+            )
+
+        assert reconcile_product_runtime_observations(
+            activation,
+            store,
+        ).matched
+
+        openclaw = product_runtime_status_for_activation(fixture, "openclaw")
+        store.save_product_runtime_status(
+            openclaw.model_copy(update={"runtime_version": "drifted-host"})
+        )
+        drifted = reconcile_product_runtime_observations(activation, store)
+        assert drifted.matched is False
+        assert drifted.reason_codes == ("V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH",)
     finally:
         reset_control_plane_schema(database_url)
 

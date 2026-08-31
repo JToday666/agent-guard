@@ -36,10 +36,12 @@ from guard_api.services import (
     CtProjectionService,
     EvaluationService,
     load_frozen_competition_activation,
+    load_frozen_product_activation,
     MemoryGuardService,
     MetricService,
     PolicyService,
     PolicyValidationError,
+    ProductActivePreSelectorFuse,
     ProvenanceWriter,
     TaskIngressService,
     TraceService,
@@ -81,12 +83,26 @@ def create_app(
     llm_approval_reviewer: LlmApprovalReviewer | None = None,
 ) -> FastAPI:
     settings = settings or GuardApiSettings()
-    competition_activation = load_frozen_competition_activation(settings)
+    product_activation = load_frozen_product_activation(settings)
+    competition_activation = (
+        None
+        if product_activation is not None
+        else load_frozen_competition_activation(settings)
+    )
     if store is None:
         if settings.storage_backend == "memory":
             store = MemoryControlPlaneStore()
         else:
             store = PostgresControlPlaneStore(settings.database_url)
+
+    product_active_fuse = (
+        ProductActivePreSelectorFuse(
+            activation=product_activation,
+            store=store,
+        )
+        if product_activation is not None
+        else None
+    )
 
     auth = CapabilityAuthService(settings=settings, store=store)
     provenance_writer = ProvenanceWriter(store=store)
@@ -207,6 +223,7 @@ def create_app(
         ct_projection_service=ct_projection_service,
         context_builder_service=context_builder_service,
         competition_activation=competition_activation,
+        product_active_fuse=product_active_fuse,
     )
     task_ingress_service = TaskIngressService(store=store, settings=settings)
 

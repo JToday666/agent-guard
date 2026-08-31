@@ -24,6 +24,13 @@ from .evidence import EventDescription, build_audit_event, describe_guard_event
 from .memory import MemoryGuardService
 from .metrics import MetricService
 from .policy import PolicyService, PolicyValidationError
+from .product_activation import (
+    FrozenProductActivation,
+    ProductActivePreSelectorFuse,
+    ProductRuntimeObservationReconciliation,
+    load_frozen_product_activation,
+    reconcile_product_runtime_observations,
+)
 from .provenance import ProvenanceWriter
 from .task_ingress import TaskIngressService
 from .trace import TraceService
@@ -56,6 +63,9 @@ __all__ = [
     "MetricService",
     "PolicyService",
     "PolicyValidationError",
+    "FrozenProductActivation",
+    "ProductActivePreSelectorFuse",
+    "ProductRuntimeObservationReconciliation",
     "ProvenanceWriter",
     "TaskIngressService",
     "TraceService",
@@ -68,4 +78,6 @@ __all__ = [
     "describe_guard_event",
     "prepare_context_manifest",
     "load_frozen_competition_activation",
+    "load_frozen_product_activation",
+    "reconcile_product_runtime_observations",
 ]
