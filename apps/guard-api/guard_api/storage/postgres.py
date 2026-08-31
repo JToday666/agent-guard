@@ -57,6 +57,11 @@ from guard_api.models import (
     EvaluationRun,
     LlmApprovalReview,
 )
+from guard_api.runtime_status import (
+    ProductRuntime,
+    ProductRuntimeStatusIdentityV1,
+    ProductRuntimeStatusV2,
+)
 from guard_api.storage.base import (
     ApprovalExecutionLeaseExpiredError,
     ApprovalExecutionLeaseStateInvalidError,
@@ -136,6 +141,7 @@ from guard_api.storage.sqlalchemy_models import (
     metadata,
     policy_snapshot_history,
     policy_snapshots,
+    product_runtime_statuses_v2,
     provenance_edges,
     provenance_nodes,
     task_facts,
@@ -172,6 +178,58 @@ def _lock_provenance_identity(session: Session, kind: str, stable_id: str) -> No
     )
     session.execute(
         text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
+
+
+def _lock_product_runtime_status(session: Session, runtime: str) -> None:
+    """Serialize V2 and compatibility-projection writes for one runtime."""
+
+    lock_id = int.from_bytes(
+        hashlib.sha256(f"product_runtime_status:{runtime}".encode("utf-8")).digest()[
+            :8
+        ],
+        byteorder="big",
+        signed=True,
+    )
+    session.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_id)"), {"lock_id": lock_id}
+    )
+
+
+def _adapter_status_upsert(
+    *,
+    adapter_id: str,
+    payload: dict[str, Any],
+    updated_at: datetime,
+) -> Any:
+    """Build the unchanged single-row legacy compatibility projection."""
+
+    heartbeat_at = payload.get("last_heartbeat_at")
+    stmt = pg_insert(adapter_statuses).values(
+        adapter_id=adapter_id,
+        status=payload["status"],
+        loaded=payload["loaded"],
+        runtime_id=payload.get("runtime_id"),
+        agent_id=payload.get("agent_id"),
+        enforcement_mode=payload.get("enforcement_mode"),
+        last_heartbeat_at=(
+            _database_datetime(heartbeat_at) if heartbeat_at is not None else None
+        ),
+        payload_json=payload,
+        updated_at=updated_at,
+    )
+    return stmt.on_conflict_do_update(
+        index_elements=[adapter_statuses.c.adapter_id],
+        set_={
+            "status": stmt.excluded.status,
+            "loaded": stmt.excluded.loaded,
+            "runtime_id": stmt.excluded.runtime_id,
+            "agent_id": stmt.excluded.agent_id,
+            "enforcement_mode": stmt.excluded.enforcement_mode,
+            "last_heartbeat_at": stmt.excluded.last_heartbeat_at,
+            "payload_json": stmt.excluded.payload_json,
+            "updated_at": stmt.excluded.updated_at,
+        },
     )
 
 
@@ -1007,39 +1065,39 @@ class PostgresControlPlaneStore:
         ]
 
     def save_adapter_status(
-        self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]
+        self,
+        adapter_id: str,
+        status: AdapterStatusRecord | dict[str, Any],
+        *,
+        preserve_heartbeat: bool = False,
     ) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
-        heartbeat_at = payload.get("last_heartbeat_at")
-        stmt = pg_insert(adapter_statuses).values(
-            adapter_id=adapter_id,
-            status=payload["status"],
-            loaded=payload["loaded"],
-            runtime_id=payload.get("runtime_id"),
-            agent_id=payload.get("agent_id"),
-            enforcement_mode=payload.get("enforcement_mode"),
-            last_heartbeat_at=(
-                _database_datetime(heartbeat_at) if heartbeat_at is not None else None
-            ),
-            payload_json=payload,
-            updated_at=func.statement_timestamp(),
-        )
-        stmt = stmt.on_conflict_do_update(
-            index_elements=[adapter_statuses.c.adapter_id],
-            set_={
-                "status": stmt.excluded.status,
-                "loaded": stmt.excluded.loaded,
-                "runtime_id": stmt.excluded.runtime_id,
-                "agent_id": stmt.excluded.agent_id,
-                "enforcement_mode": stmt.excluded.enforcement_mode,
-                "last_heartbeat_at": stmt.excluded.last_heartbeat_at,
-                "payload_json": stmt.excluded.payload_json,
-                "updated_at": func.statement_timestamp(),
-            },
-        )
-        with self._session_factory() as session:
-            session.execute(stmt)
-            session.commit()
+        with self._write_session() as session:
+            _lock_product_runtime_status(session, adapter_id)
+            if preserve_heartbeat:
+                existing_payload = session.execute(
+                    select(adapter_statuses.c.payload_json).where(
+                        adapter_statuses.c.adapter_id == adapter_id
+                    )
+                ).scalar_one_or_none()
+                payload["last_heartbeat_at"] = (
+                    AdapterStatusRecord.model_validate(existing_payload)
+                    .model_dump(mode="json")
+                    .get("last_heartbeat_at")
+                    if existing_payload is not None
+                    else None
+                )
+                payload = AdapterStatusRecord.model_validate(payload).model_dump(
+                    mode="json"
+                )
+            accepted_at = session.execute(select(func.clock_timestamp())).scalar_one()
+            session.execute(
+                _adapter_status_upsert(
+                    adapter_id=adapter_id,
+                    payload=payload,
+                    updated_at=accepted_at,
+                )
+            )
         return payload
 
     def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
@@ -1062,6 +1120,103 @@ class PostgresControlPlaneStore:
             ).model_dump(mode="json")
             for row in rows
         }
+
+    def save_product_runtime_status(
+        self, status: ProductRuntimeStatusV2 | dict[str, Any]
+    ) -> ProductRuntimeStatusV2:
+        record = ProductRuntimeStatusV2.model_validate(status)
+        payload = record.model_dump(mode="json")
+        # Round-trip through the serialized form so callers cannot mutate the
+        # instance retained for persistence and all nested values are typed.
+        stored_record = ProductRuntimeStatusV2.model_validate(payload)
+        identity = stored_record.identity()
+        legacy_payload = stored_record.to_legacy_adapter_status().model_dump(
+            mode="json"
+        )
+        heartbeat_at = _database_datetime(stored_record.last_heartbeat_at)
+
+        with self._write_session() as session:
+            _lock_product_runtime_status(session, identity.runtime)
+            accepted_at = session.execute(select(func.clock_timestamp())).scalar_one()
+            stmt = pg_insert(product_runtime_statuses_v2).values(
+                runtime=identity.runtime,
+                agent_id=identity.agent_id,
+                runtime_binding_id=identity.runtime_binding_id,
+                profile_id=identity.profile_id,
+                status=stored_record.status,
+                loaded=stored_record.loaded,
+                runtime_id=stored_record.runtime_id,
+                enforcement_mode=stored_record.enforcement_mode,
+                last_heartbeat_at=heartbeat_at,
+                payload_json=payload,
+                updated_at=accepted_at,
+            )
+            stmt = stmt.on_conflict_do_update(
+                index_elements=[
+                    product_runtime_statuses_v2.c.runtime,
+                    product_runtime_statuses_v2.c.agent_id,
+                    product_runtime_statuses_v2.c.runtime_binding_id,
+                    product_runtime_statuses_v2.c.profile_id,
+                ],
+                set_={
+                    "write_sequence": text("DEFAULT"),
+                    "status": stmt.excluded.status,
+                    "loaded": stmt.excluded.loaded,
+                    "runtime_id": stmt.excluded.runtime_id,
+                    "enforcement_mode": stmt.excluded.enforcement_mode,
+                    "last_heartbeat_at": stmt.excluded.last_heartbeat_at,
+                    "payload_json": stmt.excluded.payload_json,
+                    "updated_at": stmt.excluded.updated_at,
+                },
+            )
+            session.execute(stmt)
+            session.execute(
+                _adapter_status_upsert(
+                    adapter_id=identity.runtime,
+                    payload=legacy_payload,
+                    updated_at=accepted_at,
+                )
+            )
+        return ProductRuntimeStatusV2.model_validate(payload)
+
+    def get_product_runtime_status(
+        self, identity: ProductRuntimeStatusIdentityV1 | dict[str, Any]
+    ) -> ProductRuntimeStatusV2 | None:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        stmt = select(product_runtime_statuses_v2.c.payload_json).where(
+            product_runtime_statuses_v2.c.runtime == exact.runtime,
+            product_runtime_statuses_v2.c.agent_id == exact.agent_id,
+            product_runtime_statuses_v2.c.runtime_binding_id
+            == exact.runtime_binding_id,
+            product_runtime_statuses_v2.c.profile_id == exact.profile_id,
+        )
+        with self._read_session() as session:
+            payload = session.execute(stmt).scalar_one_or_none()
+        if payload is None:
+            return None
+        return ProductRuntimeStatusV2.model_validate(payload)
+
+    def list_product_runtime_statuses(
+        self, *, runtime: ProductRuntime | None = None, limit: int = 100
+    ) -> list[ProductRuntimeStatusV2]:
+        if runtime is not None and runtime not in {"langgraph", "openclaw"}:
+            raise ValueError("runtime must be langgraph or openclaw")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 500
+        ):
+            raise ValueError("limit must be an integer between 1 and 500")
+        stmt = (
+            select(product_runtime_statuses_v2.c.payload_json)
+            .order_by(desc(product_runtime_statuses_v2.c.write_sequence))
+            .limit(limit)
+        )
+        if runtime is not None:
+            stmt = stmt.where(product_runtime_statuses_v2.c.runtime == runtime)
+        with self._read_session() as session:
+            payloads = session.execute(stmt).scalars().all()
+        return [ProductRuntimeStatusV2.model_validate(payload) for payload in payloads]
 
     def create_credential(
         self, credential: CredentialRecord | dict[str, Any]

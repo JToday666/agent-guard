@@ -37,6 +37,11 @@ from guard_api.models import (
     EvaluationRun,
     LlmApprovalReview,
 )
+from guard_api.runtime_status import (
+    ProductRuntime,
+    ProductRuntimeStatusIdentityV1,
+    ProductRuntimeStatusV2,
+)
 from guard_api.storage.base import (
     ApprovalExecutionLeaseExpiredError,
     ApprovalExecutionLeaseStateInvalidError,
@@ -168,6 +173,10 @@ class MemoryControlPlaneStore:
     config_audit_findings: list[dict[str, Any]] = field(default_factory=list)
     evaluation_runs: dict[str, dict[str, Any]] = field(default_factory=dict)
     adapter_statuses: dict[str, dict[str, Any]] = field(default_factory=dict)
+    product_runtime_statuses_v2: dict[
+        tuple[str, str, str, str], tuple[int, ProductRuntimeStatusV2]
+    ] = field(default_factory=dict)
+    product_runtime_status_write_sequence: int = 0
     credentials: dict[str, CredentialRecord] = field(default_factory=dict)
     action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
     memory_changes: dict[str, MemoryGuardChange] = field(default_factory=dict)
@@ -194,6 +203,9 @@ class MemoryControlPlaneStore:
     provenance_lock: Any = field(default_factory=RLock, init=False, repr=False)
     policy_evaluation_lock: Any = field(default_factory=Lock, init=False, repr=False)
     evaluation_run_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    product_runtime_status_lock: Any = field(
+        default_factory=RLock, init=False, repr=False
+    )
     policy_snapshot_lock: Any = field(default_factory=Lock, init=False, repr=False)
     task_fact_lock: Any = field(default_factory=Lock, init=False, repr=False)
     security_state_lock: Any = field(default_factory=Lock, init=False, repr=False)
@@ -581,17 +593,92 @@ class MemoryControlPlaneStore:
         return rows[: _bounded_limit(limit)]
 
     def save_adapter_status(
-        self, adapter_id: str, status: AdapterStatusRecord | dict[str, Any]
+        self,
+        adapter_id: str,
+        status: AdapterStatusRecord | dict[str, Any],
+        *,
+        preserve_heartbeat: bool = False,
     ) -> dict[str, Any]:
         payload = AdapterStatusRecord.model_validate(status).model_dump(mode="json")
-        self.adapter_statuses[adapter_id] = payload
-        return payload
+        with self.product_runtime_status_lock:
+            if preserve_heartbeat:
+                existing = self.adapter_statuses.get(adapter_id)
+                payload["last_heartbeat_at"] = (
+                    existing.get("last_heartbeat_at") if existing is not None else None
+                )
+                payload = AdapterStatusRecord.model_validate(payload).model_dump(
+                    mode="json"
+                )
+            self.adapter_statuses[adapter_id] = deepcopy(payload)
+        return deepcopy(payload)
 
     def get_adapter_status(self, adapter_id: str) -> dict[str, Any] | None:
-        return self.adapter_statuses.get(adapter_id)
+        with self.product_runtime_status_lock:
+            payload = self.adapter_statuses.get(adapter_id)
+            return deepcopy(payload) if payload is not None else None
 
     def list_adapter_statuses(self) -> dict[str, dict[str, Any]]:
-        return dict(self.adapter_statuses)
+        with self.product_runtime_status_lock:
+            return deepcopy(self.adapter_statuses)
+
+    def save_product_runtime_status(
+        self, status: ProductRuntimeStatusV2 | dict[str, Any]
+    ) -> ProductRuntimeStatusV2:
+        record = ProductRuntimeStatusV2.model_validate(status)
+        stored = deepcopy(record)
+        identity = stored.identity()
+        key = (
+            identity.runtime,
+            identity.agent_id,
+            identity.runtime_binding_id,
+            identity.profile_id,
+        )
+        legacy_payload = stored.to_legacy_adapter_status().model_dump(mode="json")
+        with self.product_runtime_status_lock:
+            self.product_runtime_status_write_sequence += 1
+            self.product_runtime_statuses_v2[key] = (
+                self.product_runtime_status_write_sequence,
+                stored,
+            )
+            self.adapter_statuses[identity.runtime] = deepcopy(legacy_payload)
+        return deepcopy(stored)
+
+    def get_product_runtime_status(
+        self, identity: ProductRuntimeStatusIdentityV1 | dict[str, Any]
+    ) -> ProductRuntimeStatusV2 | None:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        key = (
+            exact.runtime,
+            exact.agent_id,
+            exact.runtime_binding_id,
+            exact.profile_id,
+        )
+        with self.product_runtime_status_lock:
+            row = self.product_runtime_statuses_v2.get(key)
+            return deepcopy(row[1]) if row is not None else None
+
+    def list_product_runtime_statuses(
+        self, *, runtime: ProductRuntime | None = None, limit: int = 100
+    ) -> list[ProductRuntimeStatusV2]:
+        if runtime is not None and runtime not in {"langgraph", "openclaw"}:
+            raise ValueError("runtime must be langgraph or openclaw")
+        if (
+            isinstance(limit, bool)
+            or not isinstance(limit, int)
+            or not 1 <= limit <= 500
+        ):
+            raise ValueError("limit must be an integer between 1 and 500")
+        with self.product_runtime_status_lock:
+            rows = [
+                (write_sequence, record)
+                for key, (
+                    write_sequence,
+                    record,
+                ) in self.product_runtime_statuses_v2.items()
+                if runtime is None or key[0] == runtime
+            ]
+            rows.sort(key=lambda row: row[0], reverse=True)
+            return [deepcopy(record) for _, record in rows[:limit]]
 
     def create_credential(
         self, credential: CredentialRecord | dict[str, Any]

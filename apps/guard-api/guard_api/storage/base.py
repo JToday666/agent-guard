@@ -32,6 +32,11 @@ from guard_api.models import (
     EvaluationRun,
     LlmApprovalReview,
 )
+from guard_api.runtime_status import (
+    ProductRuntime,
+    ProductRuntimeStatusIdentityV1,
+    ProductRuntimeStatusV2,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -766,12 +771,28 @@ class ControlPlaneStore(Protocol):
     ) -> list[dict]: ...
 
     def save_adapter_status(
-        self, adapter_id: str, status: AdapterStatusRecord | dict
+        self,
+        adapter_id: str,
+        status: AdapterStatusRecord | dict,
+        *,
+        preserve_heartbeat: bool = False,
     ) -> dict: ...
 
     def get_adapter_status(self, adapter_id: str) -> dict | None: ...
 
     def list_adapter_statuses(self) -> dict[str, dict]: ...
+
+    def save_product_runtime_status(
+        self, status: ProductRuntimeStatusV2 | dict
+    ) -> ProductRuntimeStatusV2: ...
+
+    def get_product_runtime_status(
+        self, identity: ProductRuntimeStatusIdentityV1 | dict
+    ) -> ProductRuntimeStatusV2 | None: ...
+
+    def list_product_runtime_statuses(
+        self, *, runtime: ProductRuntime | None = None, limit: int = 100
+    ) -> list[ProductRuntimeStatusV2]: ...
 
     def create_credential(
         self, credential: CredentialRecord | dict
