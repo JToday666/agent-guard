@@ -40,6 +40,9 @@ _ERROR_MESSAGES = {
     "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH": (
         "Runtime observation does not match the Product V2 activation."
     ),
+    "V21_PRODUCT_SECURITY_STATE_NOT_READY": (
+        "Product V2 security state is not ready for a read-only decision."
+    ),
     "V21_PRODUCT_SELECTOR_NOT_WIRED": ("Product V2 authority selector is not wired."),
     "SESSION_INVALID": "Browser session is invalid.",
     "SESSION_EXPIRED": "Browser session has expired.",

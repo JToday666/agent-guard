@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import json
+from copy import deepcopy
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ from guard_api.services.runtime_binding import (
 )
 from guard_api.services.task_ingress import TaskIngressService
 from guard_api.services.v21_pipeline import (
+    PRODUCT_SECURITY_STATE_NOT_READY,
     V21OfficialEvaluationUnavailableError,
     V21PipelineService,
 )
@@ -486,6 +488,66 @@ def test_product_pipeline_uses_exact_signed_scope_and_action_ir(tmp_path: Path) 
     assert materials.action_ir.principal_id == entry.principal_id
     assert materials.action_ir.runtime_binding_id == entry.runtime_binding_id
     assert materials.action_ir.scope_digest == scope_digest
+
+
+def test_product_pipeline_uses_only_the_strict_ready_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture, settings, store, created = _create_product_task(tmp_path)
+    scope_digest = str(created["scope_digest"])
+    SecurityStateService(store).ensure_ready(scope_digest)
+
+    def forbidden(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("Product Phase A used a repair-capable state reader")
+
+    monkeypatch.setattr(SecurityStateService, "ensure_ready", forbidden)
+    monkeypatch.setattr(
+        SecurityStateService,
+        "read_snapshot_with_revoked",
+        forbidden,
+    )
+
+    materials = _pipeline(store, settings).run_phase_a(
+        _event(str(created["task_id"])),
+        auth_context=_auth(fixture),
+    )
+
+    assert materials is not None
+    assert materials.snapshot is not None
+    assert materials.state_authority_digest is not None
+
+
+def test_product_pipeline_missing_state_is_503_and_zero_write(tmp_path: Path) -> None:
+    fixture, settings, store, created = _create_product_task(tmp_path)
+    scope_digest = str(created["scope_digest"])
+
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        _pipeline(store, settings).run_phase_a(
+            _event(str(created["task_id"])),
+            auth_context=_auth(fixture),
+        )
+
+    assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
+    assert store.get_security_state(scope_digest) is None
+
+
+def test_product_pipeline_dirty_state_is_503_without_rebuild(tmp_path: Path) -> None:
+    fixture, settings, store, created = _create_product_task(tmp_path)
+    scope_digest = str(created["scope_digest"])
+    state_service = SecurityStateService(store)
+    state_service.ensure_ready(scope_digest)
+    store.mark_security_state_dirty(scope_digest, ["behavior"])
+    before = deepcopy(store.get_security_state(scope_digest))
+
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        _pipeline(store, settings).run_phase_a(
+            _event(str(created["task_id"])),
+            auth_context=_auth(fixture),
+        )
+
+    assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
+    assert store.get_security_state(scope_digest) == before
 
 
 def test_product_pipeline_wrong_auth_fails_before_security_state_write(

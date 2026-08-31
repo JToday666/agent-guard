@@ -95,7 +95,7 @@ from agentguard_core.security_context import (
     projection_identity_key,
 )
 
-from guard_api.security_state import SecurityStateService
+from guard_api.security_state import SecurityStateNotReadyError, SecurityStateService
 from guard_api.auth import AuthContext
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
@@ -123,6 +123,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PHASE_C_BASE_DRIFT_SKIPS",
     "PIPELINE_CLOCK_VERSION",
+    "PRODUCT_SECURITY_STATE_NOT_READY",
     "V21PhaseBOutcome",
     "V21PhaseCPlan",
     "V21PhaseAPrepared",
@@ -169,6 +170,10 @@ _EVALUATION_SOURCE_REVISION = 1
 #: 只能由 V21-10 离线对账（audit 信封 × projection_records 差集）
 #: 承接；计数器供运维观测该窗口发生频率。
 PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
+
+#: Public fail-closed code for a Product state row that cannot be consumed
+#: without initialization, rebuild, repair, or ambiguity.
+PRODUCT_SECURITY_STATE_NOT_READY = "V21_PRODUCT_SECURITY_STATE_NOT_READY"
 
 
 class V21OfficialEvaluationUnavailableError(RuntimeError):
@@ -222,6 +227,7 @@ class V21PhaseAPrepared:
     task_id: str | None
     scope_digest: str | None
     degraded_kind: PhaseADegradedKind | None
+    state_authority_digest: str | None
     auth_context: AuthContext | None = None
     runtime_binding: ResolvedRuntimeBinding | None = None
 
@@ -259,6 +265,7 @@ class V21PipelineMaterials:
     # Exact Core acknowledgement for Gate A. ``None`` forbids committing the
     # candidate CT bundle even when shadow safely converged to DEFER.
     consumed_overlay_digest: str | None
+    state_authority_digest: str | None
     auth_context: AuthContext | None = None
     runtime_binding: ResolvedRuntimeBinding | None = None
     # V21-13 Stage 1 shadow：Phase A 事务外 semantic judgment 产物
@@ -333,6 +340,7 @@ def _phase_a_payload_digest(
     task_id: str | None,
     scope_digest: str | None,
     degraded_kind: PhaseADegradedKind | None,
+    state_authority_digest: str | None,
     runtime_binding: ResolvedRuntimeBinding | None,
 ) -> str:
     """Digest every mutable Phase-A object consumed after the read boundary."""
@@ -376,6 +384,7 @@ def _phase_a_payload_digest(
             "task_id": task_id,
             "scope_digest": scope_digest,
             "degraded_kind": degraded_kind,
+            "state_authority_digest": state_authority_digest,
             "runtime_binding": binding_projection,
         }
     )
@@ -706,7 +715,7 @@ class V21PipelineService:
                 policy_revision,
                 auth_context=auth_context,
             )
-        except RuntimeBindingResolutionError:
+        except (RuntimeBindingResolutionError, V21OfficialEvaluationUnavailableError):
             raise
         except Exception as exc:  # noqa: BLE001 - mode-specific boundary.
             if self.active:
@@ -733,6 +742,7 @@ class V21PipelineService:
                     task_id=_task_claim(event),
                     scope_digest=None,
                     degraded_kind="component_failure",
+                    state_authority_digest=None,
                     runtime_binding=None,
                 ),
                 bundle=bundle,
@@ -746,10 +756,18 @@ class V21PipelineService:
                 task_id=_task_claim(event),
                 scope_digest=None,
                 degraded_kind="component_failure",
+                state_authority_digest=None,
                 auth_context=auth_context,
             )
 
-        snapshot, revoked_grant_ids, task_id, scope_digest, runtime_binding = resolved
+        (
+            snapshot,
+            revoked_grant_ids,
+            task_id,
+            scope_digest,
+            runtime_binding,
+            state_authority_digest,
+        ) = resolved
         state_version = snapshot.state_version if snapshot is not None else 0
         degraded_kind: PhaseADegradedKind | None = (
             None if snapshot is not None else "snapshot_absent"
@@ -769,6 +787,7 @@ class V21PipelineService:
                 task_id=task_id,
                 scope_digest=scope_digest,
                 degraded_kind=degraded_kind,
+                state_authority_digest=state_authority_digest,
                 runtime_binding=runtime_binding,
             ),
             bundle=bundle,
@@ -782,6 +801,7 @@ class V21PipelineService:
             task_id=task_id,
             scope_digest=scope_digest,
             degraded_kind=degraded_kind,
+            state_authority_digest=state_authority_digest,
             auth_context=auth_context,
             runtime_binding=runtime_binding,
         )
@@ -817,6 +837,7 @@ class V21PipelineService:
                 task_id=prepared.task_id,
                 scope_digest=prepared.scope_digest,
                 degraded_kind=prepared.degraded_kind,
+                state_authority_digest=prepared.state_authority_digest,
                 runtime_binding=prepared.runtime_binding,
             )
         ):
@@ -922,6 +943,7 @@ class V21PipelineService:
             scope_digest=prepared.scope_digest,
             degraded_kind=prepared.degraded_kind,
             consumed_overlay_digest=outcome.consumed_overlay_digest,
+            state_authority_digest=prepared.state_authority_digest,
             auth_context=prepared.auth_context,
             runtime_binding=prepared.runtime_binding,
             semantic_judgment=semantic_judgment,
@@ -941,6 +963,7 @@ class V21PipelineService:
         str | None,
         str | None,
         ResolvedRuntimeBinding | None,
+        str | None,
     ]:
         """task claim → 权威 TaskFact head → scope → snapshot V + revoked。
 
@@ -954,13 +977,13 @@ class V21PipelineService:
         if task_id is None:
             if self._runtime_binding_resolver.product_active:
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
-            return None, [], None, None, None
+            return None, [], None, None, None, None
         record = self._store.get_task_fact(task_id)
         if record is None:
             # trusted claim 无对应权威 TaskFact：不得据此构造 snapshot。
             if self._runtime_binding_resolver.product_active:
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
-            return None, [], task_id, None, None
+            return None, [], task_id, None, None, None
         task_fact = record.task_fact
         runtime_binding = self._runtime_binding_resolver.resolve_evaluation(
             auth_context,
@@ -985,17 +1008,41 @@ class V21PipelineService:
                 )
             except TaskAuthorityError as exc:
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID) from exc
-        self._state_service.ensure_ready(scope_digest)
-        snapshot, revoked = self._state_service.read_snapshot_with_revoked(
+        snapshot_kwargs: dict[str, Any] = {
+            "scope": scope,
+            "task_fact_head": task_fact,
+            "evaluation_clock": clock,
+            "policy_revision": policy_revision or _UNVERSIONED_POLICY_REVISION,
+            "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
+            "plan": _pipeline_snapshot_plan(),
+        }
+        state_authority_digest: str | None = None
+        if self._runtime_binding_resolver.product_active:
+            try:
+                snapshot, revoked, state_authority_digest = (
+                    self._state_service.read_ready_snapshot_with_revoked(
+                        scope_digest,
+                        **snapshot_kwargs,
+                    )
+                )
+            except SecurityStateNotReadyError as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    PRODUCT_SECURITY_STATE_NOT_READY
+                ) from exc
+        else:
+            self._state_service.ensure_ready(scope_digest)
+            snapshot, revoked = self._state_service.read_snapshot_with_revoked(
+                scope_digest,
+                **snapshot_kwargs,
+            )
+        return (
+            snapshot,
+            list(revoked),
+            task_id,
             scope_digest,
-            scope=scope,
-            task_fact_head=task_fact,
-            evaluation_clock=clock,
-            policy_revision=policy_revision or _UNVERSIONED_POLICY_REVISION,
-            policy_digest=canonical_sha256(bundle.model_dump(mode="json")),
-            plan=_pipeline_snapshot_plan(),
+            runtime_binding,
+            state_authority_digest,
         )
-        return snapshot, list(revoked), task_id, scope_digest, runtime_binding
 
     # ------------------------------------------------------------------
     # Phase B：短事务内消费材料
@@ -1050,6 +1097,7 @@ class V21PipelineService:
                 task_id=materials.task_id,
                 scope_digest=materials.scope_digest,
                 degraded_kind=materials.degraded_kind,
+                state_authority_digest=materials.state_authority_digest,
                 runtime_binding=materials.runtime_binding,
             ):
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID)

@@ -17,6 +17,22 @@ from typing import Literal
 ProjectApplyOutcome = Literal["applied", "replayed_noop", "needs_rebuild", "conflict"]
 
 
+class SecurityStateNotReadyError(RuntimeError):
+    """A strict decision read could not prove one ready state snapshot.
+
+    This error is intentionally separate from ``SecurityStateProjectError``:
+    strict Product reads are observation-only and must never repair, rebuild,
+    initialize, or dirty the state they are trying to authorize against.
+    ``condition`` is a bounded diagnostic label and is not exposed as the
+    public Guard API error code.
+    """
+
+    def __init__(self, condition: str) -> None:
+        self.condition = condition
+        self.reason_code = "v21-04:security_state_not_ready"
+        super().__init__(self.reason_code)
+
+
 @dataclass(frozen=True, slots=True)
 class SecurityAlert:
     """结构化 security alert（返回给调用方，不改任何判定）。
