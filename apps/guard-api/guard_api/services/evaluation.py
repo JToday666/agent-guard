@@ -76,6 +76,7 @@ if TYPE_CHECKING:
     )
     from .v21_shadow import V21ShadowService
     from .competition import FrozenCompetitionActivation
+    from .product_activation import ProductActivePreSelectorFuse
 
 
 logger = logging.getLogger(__name__)
@@ -224,6 +225,7 @@ class EvaluationService:
         ct_projection_service: "CtProjectionService | None" = None,
         context_builder_service: "ContextBuilderService | None" = None,
         competition_activation: "FrozenCompetitionActivation | None" = None,
+        product_active_fuse: "ProductActivePreSelectorFuse | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -244,6 +246,12 @@ class EvaluationService:
         self.ct_projection_service = ct_projection_service
         self.context_builder_service = context_builder_service
         self.competition_activation = competition_activation
+        # P0-V21-01a2: loading a Product Active bundle arms a fail-closed
+        # pre-selector fuse.  It is deliberately checked at the very top of
+        # ``evaluate`` (after authenticated principal normalization) so an
+        # unwired Product selector can never fall through to current authority
+        # or touch replay/state/policy side-effect paths.
+        self.product_active_fuse = product_active_fuse
 
     def evaluate(
         self,
@@ -269,6 +277,8 @@ class EvaluationService:
             requesting_principal_id = auth_context.principal_id
         if requesting_principal_id is None:
             raise ValueError("requesting principal is required")
+        if self.product_active_fuse is not None:
+            self.product_active_fuse.enforce(event, auth_context)
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)

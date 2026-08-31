@@ -25,6 +25,16 @@ _ERROR_MESSAGES = {
     "CREDENTIAL_IDENTITY_INCOMPLETE": "Credential is missing its runtime identity binding.",
     "EVENT_IDENTITY_INCOMPLETE": "Runtime request is missing its agent identity.",
     "RUNTIME_IDENTITY_MISMATCH": "Runtime request does not match the credential identity.",
+    "V21_PRODUCT_ACTIVATION_NOT_CURRENT": (
+        "Product V2 activation is not currently valid."
+    ),
+    "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH": (
+        "Runtime request does not match the Product V2 activation identity."
+    ),
+    "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH": (
+        "Runtime observation does not match the Product V2 activation."
+    ),
+    "V21_PRODUCT_SELECTOR_NOT_WIRED": ("Product V2 authority selector is not wired."),
     "SESSION_INVALID": "Browser session is invalid.",
     "SESSION_EXPIRED": "Browser session has expired.",
     "CSRF_INVALID": "CSRF token is invalid.",

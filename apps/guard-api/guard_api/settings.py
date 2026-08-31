@@ -173,6 +173,23 @@ class GuardApiSettings:
             "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH"
         )
     )
+    # Runtime-neutral Product V2 activation uses an independent file, signer
+    # identity, and HMAC secret.  The three values are an all-or-none startup
+    # unit and never fall back to the competition/shadow signing domain.
+    v21_product_activation_path: str | None = field(
+        default_factory=lambda: _optional_env("AGENTGUARD_V21_PRODUCT_ACTIVATION_PATH")
+    )
+    v21_product_activation_server_secret: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_PRODUCT_ACTIVATION_SERVER_SECRET"
+        ),
+        repr=False,
+    )
+    v21_product_activation_signer_key_id: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_PRODUCT_ACTIVATION_SIGNER_KEY_ID"
+        )
+    )
     # shadow ActionIR 指纹专用 server secret（base64url，≥32 字节）。
     # 与 task scope keyring / audit checkpoint key 域隔离，不复用其他密钥。
     # mode enabled 而未配置时 V2 禁用（编排器返回 None），不得硬编码兜底。
@@ -351,6 +368,27 @@ class GuardApiSettings:
             label="AGENTGUARD_V21_SHADOW_SERVER_SECRET",
         )
 
+    def product_activation_configured(self) -> bool:
+        """Return whether the complete Product V2 activation unit is set."""
+
+        values = (
+            self.v21_product_activation_path,
+            self.v21_product_activation_server_secret,
+            self.v21_product_activation_signer_key_id,
+        )
+        return all(value is not None and bool(value.strip()) for value in values)
+
+    def v21_product_activation_server_secret_bytes(self) -> bytes | None:
+        """Decode the Product V2 HMAC secret without another-domain fallback."""
+
+        value = self.v21_product_activation_server_secret
+        if value is None or not value.strip():
+            return None
+        return _decode_base64url_key(
+            value,
+            label="AGENTGUARD_V21_PRODUCT_ACTIVATION_SERVER_SECRET",
+        )
+
     def effective_v21_mode(self) -> str:
         """Return the normalized V2.1 authority mode."""
 
@@ -481,19 +519,81 @@ class GuardApiSettings:
         if self.task_scope_configured():
             self.task_scope_signing_key()
 
+        product_activation_values = (
+            self.v21_product_activation_path,
+            self.v21_product_activation_server_secret,
+            self.v21_product_activation_signer_key_id,
+        )
+        product_activation_presence = tuple(
+            value is not None and bool(value.strip())
+            for value in product_activation_values
+        )
+        if any(product_activation_presence) and not all(product_activation_presence):
+            raise GuardApiConfigurationError(
+                "AGENTGUARD_V21_PRODUCT_ACTIVATION_PATH, "
+                "AGENTGUARD_V21_PRODUCT_ACTIVATION_SERVER_SECRET and "
+                "AGENTGUARD_V21_PRODUCT_ACTIVATION_SIGNER_KEY_ID must be "
+                "configured together"
+            )
+        if self.product_activation_configured():
+            assert self.v21_product_activation_path is not None
+            assert self.v21_product_activation_signer_key_id is not None
+            if not Path(self.v21_product_activation_path).is_absolute():
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_PRODUCT_ACTIVATION_PATH must be an absolute path"
+                )
+            if not _CHECKPOINT_KEY_ID_PATTERN.fullmatch(
+                self.v21_product_activation_signer_key_id
+            ):
+                raise GuardApiConfigurationError(
+                    "AGENTGUARD_V21_PRODUCT_ACTIVATION_SIGNER_KEY_ID must contain "
+                    "1-64 safe characters"
+                )
+            product_secret = self.v21_product_activation_server_secret_bytes()
+            shadow_secret = self.v21_shadow_server_secret_bytes()
+            if (
+                product_secret is not None
+                and shadow_secret is not None
+                and hmac.compare_digest(product_secret, shadow_secret)
+            ):
+                raise GuardApiConfigurationError(
+                    "Product activation and V2.1 shadow must use independent secrets"
+                )
+
         # Validate an optional C10 anchor at startup without requiring it for
         # existing EvaluationRun producers.
         self.evaluation_receipt_eligibility_expectation()
 
         effective_v21_mode = self.effective_v21_mode()
+        product_activation_configured = self.product_activation_configured()
+        competition_activation_configured = bool(
+            self.v21_competition_activation_path
+            and self.v21_competition_activation_path.strip()
+        )
+        if product_activation_configured and competition_activation_configured:
+            raise GuardApiConfigurationError(
+                "Product and competition V2.1 activation paths are mutually exclusive"
+            )
+        if product_activation_configured and effective_v21_mode != "active":
+            raise GuardApiConfigurationError(
+                "Product V2 activation requires AGENTGUARD_V21_MODE=active"
+            )
         if effective_v21_mode in {"limited_enable", "active"}:
-            activation_path = self.v21_competition_activation_path
-            if activation_path is None:
+            if effective_v21_mode == "limited_enable":
+                if not competition_activation_configured:
+                    raise GuardApiConfigurationError(
+                        "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH is required for "
+                        "V2.1 mode limited_enable"
+                    )
+            elif competition_activation_configured == product_activation_configured:
                 raise GuardApiConfigurationError(
-                    "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH is required for "
-                    f"V2.1 mode {effective_v21_mode}"
+                    "AGENTGUARD_V21_MODE=active requires exactly one competition "
+                    "or Product activation"
                 )
-            if not Path(activation_path).is_absolute():
+            if (
+                competition_activation_configured
+                and not Path(self.v21_competition_activation_path or "").is_absolute()
+            ):
                 raise GuardApiConfigurationError(
                     "AGENTGUARD_V21_COMPETITION_ACTIVATION_PATH must be an "
                     "absolute path"

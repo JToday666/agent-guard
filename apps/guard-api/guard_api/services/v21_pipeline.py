@@ -158,7 +158,7 @@ PHASE_C_BASE_DRIFT_SKIPS: dict[str, int] = {"count": 0}
 
 
 class V21OfficialEvaluationUnavailableError(RuntimeError):
-    """An active competition evaluation could not produce trusted authority."""
+    """An active V2 evaluation could not produce trusted authority."""
 
     def __init__(self, code: str) -> None:
         self.code = code
