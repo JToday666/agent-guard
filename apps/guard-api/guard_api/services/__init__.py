@@ -32,6 +32,11 @@ from .product_activation import (
     reconcile_product_runtime_observations,
 )
 from .provenance import ProvenanceWriter
+from .runtime_binding import (
+    ResolvedRuntimeBinding,
+    RuntimeBindingResolutionError,
+    RuntimeBindingResolver,
+)
 from .task_ingress import TaskIngressService
 from .trace import TraceService
 from .v21_pipeline import (
@@ -67,6 +72,9 @@ __all__ = [
     "ProductActivePreSelectorFuse",
     "ProductRuntimeObservationReconciliation",
     "ProvenanceWriter",
+    "ResolvedRuntimeBinding",
+    "RuntimeBindingResolutionError",
+    "RuntimeBindingResolver",
     "TaskIngressService",
     "TraceService",
     "V21PhaseBOutcome",

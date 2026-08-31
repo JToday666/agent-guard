@@ -43,6 +43,7 @@ from guard_api.services import (
     PolicyValidationError,
     ProductActivePreSelectorFuse,
     ProvenanceWriter,
+    RuntimeBindingResolver,
     TaskIngressService,
     TraceService,
     V21PipelineService,
@@ -102,6 +103,12 @@ def create_app(
         )
         if product_activation is not None
         else None
+    )
+    # One process-frozen authority resolver is shared by TaskFact issuance and
+    # V2 evaluation. Product mode accepts only the already verified activation
+    # wrapper; all other modes preserve the legacy derivation exactly.
+    runtime_binding_resolver = RuntimeBindingResolver(
+        product_activation=product_activation
     )
 
     auth = CapabilityAuthService(settings=settings, store=store)
@@ -193,6 +200,7 @@ def create_app(
             frozenset({"model_call"}) if competition_active else frozenset()
         ),
         competition_model_output_observation=competition_active,
+        runtime_binding_resolver=runtime_binding_resolver,
     )
     # CT-PR-03b：CT 事实投影编排器（D2/D3：独立 flag，默认关闭；
     # 仅 pipeline 材料就绪时生效）。构造无 I/O；flag off 时全部入口
@@ -225,7 +233,11 @@ def create_app(
         competition_activation=competition_activation,
         product_active_fuse=product_active_fuse,
     )
-    task_ingress_service = TaskIngressService(store=store, settings=settings)
+    task_ingress_service = TaskIngressService(
+        store=store,
+        settings=settings,
+        runtime_binding_resolver=runtime_binding_resolver,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:

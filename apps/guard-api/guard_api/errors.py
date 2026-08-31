@@ -31,6 +31,12 @@ _ERROR_MESSAGES = {
     "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH": (
         "Runtime request does not match the Product V2 activation identity."
     ),
+    "V21_PRODUCT_TASK_IDENTITY_MISMATCH": (
+        "Task identity does not match the Product V2 runtime binding."
+    ),
+    "V21_PRODUCT_TASK_SCOPE_INVALID": (
+        "Task authority does not match its Product V2 security scope."
+    ),
     "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH": (
         "Runtime observation does not match the Product V2 activation."
     ),

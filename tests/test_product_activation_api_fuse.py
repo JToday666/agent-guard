@@ -36,6 +36,7 @@ from guard_api.services.product_activation import (
 )
 from guard_api.services.v21_pipeline import V21OfficialEvaluationUnavailableError
 from guard_api.settings import GuardApiSettings
+from guard_api.storage.integrity import canonical_sha256
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.test_product_activation_contracts import _activation
 
@@ -234,7 +235,7 @@ def _frozen_activation() -> tuple[FrozenProductActivation, dict[str, Any]]:
         FrozenProductActivation(
             bundle=bundle,
             source_path="/process/frozen/product-activation.json",
-            content_digest="sha256:" + "a" * 64,
+            content_digest=canonical_sha256(bundle.model_dump(mode="json")),
         ),
         {
             "langgraph": langgraph_capability,

@@ -838,9 +838,7 @@ class CtProjectionService:
                     task_fact.principal_id if task_fact is not None else None
                 ),
                 runtime_binding_id=(
-                    f"binding:{task_fact.principal_id}"
-                    if task_fact is not None
-                    else None
+                    snapshot.scope.runtime_binding_id if task_fact is not None else None
                 ),
             )
         except Exception:  # noqa: BLE001 - ActionIR 构造失败 → 无 ActionIR 口径。
