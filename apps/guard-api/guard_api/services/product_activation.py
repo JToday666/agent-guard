@@ -33,14 +33,16 @@ from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 from guard_api.storage.integrity import canonical_sha256
 
+from .runtime_binding import (
+    PRODUCT_ACTIVATION_NOT_CURRENT as ACTIVATION_NOT_CURRENT,
+    PRODUCT_RUNTIME_IDENTITY_MISMATCH as RUNTIME_IDENTITY_MISMATCH,
+)
 from .v21_pipeline import V21OfficialEvaluationUnavailableError
 
 _MAX_ACTIVATION_BYTES = 64 * 1024
 _PRODUCT_RUNTIMES = ("langgraph", "openclaw")
 _SIGNER_KEY_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
-ACTIVATION_NOT_CURRENT = "V21_PRODUCT_ACTIVATION_NOT_CURRENT"
-RUNTIME_IDENTITY_MISMATCH = "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH"
 RUNTIME_OBSERVATION_MISMATCH = "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH"
 SELECTOR_NOT_WIRED = "V21_PRODUCT_SELECTOR_NOT_WIRED"
 
@@ -52,6 +54,20 @@ class FrozenProductActivation:
     bundle: ProductActivationBundleV1
     source_path: str
     content_digest: str
+
+    def __post_init__(self) -> None:
+        current_digest = canonical_sha256(self.bundle.model_dump(mode="json"))
+        if not hmac.compare_digest(current_digest, self.content_digest):
+            raise ValueError(
+                "frozen Product activation content digest does not match bundle"
+            )
+
+    def assert_unchanged(self) -> None:
+        """Fail if a shallow-frozen nested model was mutated in process."""
+
+        current_digest = canonical_sha256(self.bundle.model_dump(mode="json"))
+        if not hmac.compare_digest(current_digest, self.content_digest):
+            raise ValueError("frozen Product activation changed after verification")
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,6 +317,7 @@ def reconcile_product_runtime_observations(
     """Compare both exact Product status rows without legacy/freshness/ACK input."""
 
     try:
+        activation.assert_unchanged()
         for runtime in _PRODUCT_RUNTIMES:
             entry = activation.bundle.runtime_entry(runtime)  # type: ignore[arg-type]
             identity = ProductRuntimeStatusIdentityV1(
@@ -344,6 +361,10 @@ class ProductActivePreSelectorFuse:
     clock: Callable[[], datetime] = _now_utc
 
     def enforce(self, event: GuardEvent, auth_context: AuthContext | None) -> NoReturn:
+        try:
+            self.activation.assert_unchanged()
+        except ValueError as exc:
+            raise V21OfficialEvaluationUnavailableError(ACTIVATION_NOT_CURRENT) from exc
         current = self.clock()
         if not self.activation.bundle.valid_at(current):
             raise V21OfficialEvaluationUnavailableError(ACTIVATION_NOT_CURRENT)
