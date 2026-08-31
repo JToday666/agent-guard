@@ -57,6 +57,20 @@ Roadmap 的能力节点只记录方向、状态和硬依赖，不代替 Issue、
 
 Roadmap 不保存 owner、修改锁、evidence 字段或 Gate；并行协作、验证输出和变更讨论分别留在 PR、CI、状态页或对应契约中。只有能力被新增、拆分、合并、取消、改序，或硬依赖发生变化时，才需要同步修改 Roadmap 路线和调整记录。
 
+## 分批提交与 PR 列车
+
+非平凡功能必须在编码前拆成可独立审查、可独立验证、依赖有序的工作包，禁止先在一个功能分支完成整条产品链，再在结束时一次性提交超大 PR。拆分后的每一批都应保持兼容、默认关闭或 fail-closed，并能在当时的 `dev` 基线上通过完整 required checks。
+
+1. **先冻结 PR DAG**：写清公共契约、Control Plane、各 Runtime、证据/发布、Dashboard/文档之间的依赖。契约与 additive migration 先行，运行时与消费者随后，版本提升和能力完成声明最后收口。
+2. **一批一个审查目标**：一个 PR 不同时混入无关重构、格式化、版本发布和能力状态更新。通常以不超过 25 个手工维护文件或约 1,000 行非生成逻辑变更为目标；超过时必须在 PR 中说明为何继续拆分会破坏原子性、验证性或迁移安全。
+3. **提交保持原子**：每个 commit 只表达一个可回滚目的，提交信息使用中文为主的 `type(scope): 摘要`。Schema、模型、writer、reader、迁移和对应测试属于同一契约原子，不得留下会使中间 commit 无法构建的半套状态。
+4. **每批从最新 `dev` 开始**：使用 `codex/<能力>-<批次>` 临时分支。仓库对 `dev` 采用 strict required checks 与 squash merge，因此正式交付不得依赖以功能分支为 base 的 stacked PR。
+5. **顺序自动合并**：正式 Ready PR 只以 `dev` 为 base；通过独立审查并启用 squash auto-merge。必须等待上一批实际合入，再 fetch 新的 `origin/dev`，从新 merge SHA 创建或重建下一批 Ready PR。不得因已启用 auto-merge 而绕过失败检查或使用管理员 bypass。
+6. **分层验证**：提交前运行与本批相关的最小测试和静态检查；PR 仍必须通过 `dev` ruleset 的全部 required checks。跨批完整链路只在所有实现批次合入后运行，但单批不得依赖未来 PR 才能导入、启动或维持旧行为。
+7. **最后重新生成候选**：分批 squash 会产生新的最终 SHA。此前功能分支上的 wheel、tgz、OCI、SBOM、admission、activation、canary 或 soak 证据全部失效；必须从最终 `dev` SHA 重新构建和签署。
+
+可以提前创建 Draft PR 供并行评审，但 Draft 不得作为正式门禁结果。依赖合入后，必须把 Draft rebase 或重建到最新 `dev`、重新运行 required checks、完成独立审查，才能转为 Ready 并启用 auto-merge。若 PR 检查失败，只提交针对该失败的窄修复；不要顺手扩展范围。
+
 ## 测试分层
 
 Pytest 使用以下互斥分类：
@@ -109,6 +123,9 @@ pnpm openclaw:bench-shim:test
 
 ## Pull request 检查清单
 
+- PR 描述包含结果、范围、非目标、依赖、测试、风险和回滚；依赖前序 PR 时注明其编号和实际合入 SHA。
+- 分支从最新 `origin/dev` 创建；没有把已 squash 合入的旧祖先或其他批次重新带入 diff。
+- 启用 auto-merge 前已完成独立审查，并解决或明确处置全部阻塞意见；仓库平台的零 approval 配置不能替代这一步。
 - 变更范围单一，兼容性或迁移影响已写明。
 - 新行为有对应测试；失败路径和 fail-closed 路径有覆盖。
 - 文档描述的是已验证事实，尚未运行的门禁标为待验证。
@@ -123,4 +140,4 @@ pnpm openclaw:bench-shim:test
 - 只有实现结果已经落地才进入 `验证中`，只有目标 SHA 的相关检查通过才进入 `已完成`。
 - 若 PR 改变能力范围、拆分、合并、顺序或硬依赖，Roadmap 和调整记录已在同一变更中更新；否则不必修改 Roadmap。
 
-提交信息建议使用 `type(scope): summary`，例如 `fix(api): reject expired approval replay`。合并、发布和推送由维护者完成。
+提交信息使用中文为主的 `type(scope): 摘要`，例如 `fix(api): 拒绝过期审批重放`。合并、发布和推送由维护者完成。
