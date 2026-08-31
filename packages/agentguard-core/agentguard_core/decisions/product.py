@@ -1566,7 +1566,9 @@ def legacy_approval_release_projection(
         "forbidden": "forbidden",
         "strong_binding": "strong_binding_required",
         "restricted_allow_once": "forbidden",
-    }[directive.mode]  # type: ignore[return-value]
+    }[
+        directive.mode
+    ]  # type: ignore[return-value]
 
 
 def build_approval_release_directive(

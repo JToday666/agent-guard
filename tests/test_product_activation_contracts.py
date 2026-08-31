@@ -429,9 +429,8 @@ def test_python_and_node_share_frozen_p0_activation_projection_vectors() -> None
     bundle, _, openclaw = _activation()
 
     assert fixture["scope"] == "p0_activation_projections_only"
-    assert (
-        canonical_json_bytes(fixture["canonical_value"]).decode("utf-8")
-        == (fixture["canonical_value_json"])
+    assert canonical_json_bytes(fixture["canonical_value"]).decode("utf-8") == (
+        fixture["canonical_value_json"]
     )
     assert (
         canonical_sha256(fixture["canonical_value"])
