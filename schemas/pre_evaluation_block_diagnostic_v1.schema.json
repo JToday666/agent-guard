@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://agentguard.dev/schemas/pre_evaluation_block_diagnostic_v1.schema.json",
+  "$defs": {
+    "PreEvaluationBlockEvidence": {
+      "additionalProperties": false,
+      "description": "Bounded non-authority evidence that the side effect was not invoked.",
+      "properties": {
+        "authority_stage": {
+          "const": "pre_evaluation_blocked",
+          "title": "Authority Stage",
+          "type": "string"
+        },
+        "execution_state": {
+          "const": "not_invoked",
+          "title": "Execution State",
+          "type": "string"
+        },
+        "required_durable_spool": {
+          "const": true,
+          "title": "Required Durable Spool",
+          "type": "boolean"
+        },
+        "tool_replay_permitted": {
+          "const": false,
+          "title": "Tool Replay Permitted",
+          "type": "boolean"
+        },
+        "failure_code": {
+          "enum": [
+            "activation_authority_unavailable",
+            "guard_api_unavailable",
+            "wrong_binding",
+            "wrong_profile"
+          ],
+          "title": "Failure Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "authority_stage",
+        "execution_state",
+        "required_durable_spool",
+        "tool_replay_permitted",
+        "failure_code"
+      ],
+      "title": "PreEvaluationBlockEvidence",
+      "type": "object"
+    },
+    "PreEvaluationBlockLinks": {
+      "additionalProperties": false,
+      "description": "Frozen action and activation identity at the local fail-closed boundary.",
+      "properties": {
+        "event_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Event Id",
+          "type": "string"
+        },
+        "action_id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action Id",
+          "type": "string"
+        },
+        "activation_ref_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Activation Ref Digest",
+          "type": "string"
+        }
+      },
+      "required": [
+        "event_id",
+        "action_id",
+        "activation_ref_digest"
+      ],
+      "title": "PreEvaluationBlockLinks",
+      "type": "object"
+    },
+    "PreEvaluationBlockMetadata": {
+      "additionalProperties": false,
+      "description": "Exact OpenClaw host and inventory identity observed by the plugin.",
+      "properties": {
+        "agent_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "runtime_version": {
+          "const": "2026.7.1-2",
+          "title": "Runtime Version",
+          "type": "string"
+        },
+        "plugin_version": {
+          "const": "0.1.0-rc.1",
+          "title": "Plugin Version",
+          "type": "string"
+        },
+        "runtime_binding_id": {
+          "maxLength": 256,
+          "minLength": 1,
+          "title": "Runtime Binding Id",
+          "type": "string"
+        },
+        "profile_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Profile Id",
+          "type": "string"
+        },
+        "profile_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Profile Digest",
+          "type": "string"
+        },
+        "activation_ref_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Activation Ref Digest",
+          "type": "string"
+        },
+        "capability_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Capability Digest",
+          "type": "string"
+        },
+        "host_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Host Inventory Digest",
+          "type": "string"
+        },
+        "plugin_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Plugin Inventory Digest",
+          "type": "string"
+        },
+        "plugin_order_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Plugin Order Inventory Digest",
+          "type": "string"
+        },
+        "tool_inventory_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Tool Inventory Digest",
+          "type": "string"
+        },
+        "action_digest": {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "title": "Action Digest",
+          "type": "string"
+        },
+        "failure_code": {
+          "enum": [
+            "activation_authority_unavailable",
+            "guard_api_unavailable",
+            "wrong_binding",
+            "wrong_profile"
+          ],
+          "title": "Failure Code",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "runtime_version",
+        "plugin_version",
+        "runtime_binding_id",
+        "profile_id",
+        "profile_digest",
+        "activation_ref_digest",
+        "capability_digest",
+        "host_inventory_digest",
+        "plugin_inventory_digest",
+        "plugin_order_inventory_digest",
+        "tool_inventory_digest",
+        "action_digest",
+        "failure_code"
+      ],
+      "title": "PreEvaluationBlockMetadata",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Action-bound fact for an OpenClaw side effect blocked before evaluate.\n\nThis runtime observation is not a policy decision, activation ACK, approval,\nrelease directive, lease, or invocation authority.",
+  "oneOf": [
+    {
+      "properties": {
+        "reason": {
+          "const": "activation_authority_unavailable"
+        },
+        "metadata": {
+          "properties": {
+            "failure_code": {
+              "const": "activation_authority_unavailable"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        },
+        "evidence": {
+          "properties": {
+            "failure_code": {
+              "const": "activation_authority_unavailable"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "metadata",
+        "evidence"
+      ]
+    },
+    {
+      "properties": {
+        "reason": {
+          "const": "guard_api_unavailable"
+        },
+        "metadata": {
+          "properties": {
+            "failure_code": {
+              "const": "guard_api_unavailable"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        },
+        "evidence": {
+          "properties": {
+            "failure_code": {
+              "const": "guard_api_unavailable"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "metadata",
+        "evidence"
+      ]
+    },
+    {
+      "properties": {
+        "reason": {
+          "const": "wrong_binding"
+        },
+        "metadata": {
+          "properties": {
+            "failure_code": {
+              "const": "wrong_binding"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        },
+        "evidence": {
+          "properties": {
+            "failure_code": {
+              "const": "wrong_binding"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "metadata",
+        "evidence"
+      ]
+    },
+    {
+      "properties": {
+        "reason": {
+          "const": "wrong_profile"
+        },
+        "metadata": {
+          "properties": {
+            "failure_code": {
+              "const": "wrong_profile"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        },
+        "evidence": {
+          "properties": {
+            "failure_code": {
+              "const": "wrong_profile"
+            }
+          },
+          "required": [
+            "failure_code"
+          ]
+        }
+      },
+      "required": [
+        "reason",
+        "metadata",
+        "evidence"
+      ]
+    }
+  ],
+  "properties": {
+    "audit_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "pattern": "^audit_execution_blocked_.+$",
+      "title": "Audit Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "0.4",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "record_type": {
+      "const": "runtime_observation",
+      "title": "Record Type",
+      "type": "string"
+    },
+    "trace_id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Trace Id",
+      "type": "string"
+    },
+    "case_id": {
+      "anyOf": [
+        {
+          "maxLength": 160,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Case Id"
+    },
+    "runtime": {
+      "const": "openclaw",
+      "title": "Runtime",
+      "type": "string"
+    },
+    "timestamp": {
+      "format": "date-time",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:Z|[+-]\\d{2}:\\d{2})$",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "stage": {
+      "const": "pre_evaluation_blocked",
+      "title": "Stage",
+      "type": "string"
+    },
+    "event_type": {
+      "const": "execution_blocked",
+      "title": "Event Type",
+      "type": "string"
+    },
+    "attack_type": {
+      "const": null,
+      "title": "Attack Type",
+      "type": "null"
+    },
+    "is_malicious": {
+      "const": null,
+      "title": "Is Malicious",
+      "type": "null"
+    },
+    "summary": {
+      "const": "OpenClaw blocked a side effect before Guard evaluation",
+      "title": "Summary",
+      "type": "string"
+    },
+    "decision": {
+      "const": null,
+      "title": "Decision",
+      "type": "null"
+    },
+    "risk_score": {
+      "const": null,
+      "title": "Risk Score",
+      "type": "null"
+    },
+    "severity": {
+      "const": null,
+      "title": "Severity",
+      "type": "null"
+    },
+    "blocked": {
+      "const": true,
+      "title": "Blocked",
+      "type": "boolean"
+    },
+    "resource_targets": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 0,
+      "title": "Resource Targets",
+      "type": "array"
+    },
+    "rule_hits": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 0,
+      "title": "Rule Hits",
+      "type": "array"
+    },
+    "reason": {
+      "enum": [
+        "activation_authority_unavailable",
+        "guard_api_unavailable",
+        "wrong_binding",
+        "wrong_profile"
+      ],
+      "title": "Reason",
+      "type": "string"
+    },
+    "links": {
+      "$ref": "#/$defs/PreEvaluationBlockLinks"
+    },
+    "latency_ms": {
+      "const": null,
+      "title": "Latency Ms",
+      "type": "null"
+    },
+    "metadata": {
+      "$ref": "#/$defs/PreEvaluationBlockMetadata"
+    },
+    "evidence": {
+      "$ref": "#/$defs/PreEvaluationBlockEvidence"
+    }
+  },
+  "required": [
+    "audit_id",
+    "schema_version",
+    "record_type",
+    "trace_id",
+    "case_id",
+    "runtime",
+    "timestamp",
+    "stage",
+    "event_type",
+    "attack_type",
+    "is_malicious",
+    "summary",
+    "decision",
+    "risk_score",
+    "severity",
+    "blocked",
+    "resource_targets",
+    "rule_hits",
+    "reason",
+    "links",
+    "latency_ms",
+    "metadata",
+    "evidence"
+  ],
+  "title": "PreEvaluationBlockDiagnosticV1",
+  "type": "object"
+}
