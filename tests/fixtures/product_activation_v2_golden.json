@@ -1,0 +1,132 @@
+{
+  "activation_ack_signature_payload": {
+    "ack": {
+      "activation_ref_digest": "sha256:84137653945295959e6ee2a0d64019347e8e0baeaca10a22c350064afbb25e3b",
+      "agent_id": "main",
+      "capability_digest": "sha256:d106043e3d9022ecc3484113c06d08a5ede6734bd6e426212e6d7ec7479f9964",
+      "expires_at": "2026-09-01T00:02:00+00:00",
+      "host_inventory_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "issued_at": "2026-09-01T00:00:00+00:00",
+      "plugin_inventory_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "plugin_order_inventory_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+      "plugin_version": "0.1.0-rc.1",
+      "profile_id": "agentguard-openclaw-v2-restricted",
+      "runtime": "openclaw",
+      "runtime_binding_id": "binding:openclaw:main",
+      "runtime_version": "2026.7.1-2",
+      "schema_version": "1.0",
+      "tool_inventory_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    },
+    "domain": "agentguard/activation-ack/v1"
+  },
+  "activation_ack_token": "hmac-sha256:c168a14f555465f244d4bfb1c4f6f953d976842b6036c6fb0b93c21008f29b0e",
+  "canonical_value": {
+    "a": {
+      "event_type": "tool_call_proposed",
+      "runtime": "openclaw"
+    },
+    "z": [
+      "safe",
+      true,
+      7
+    ]
+  },
+  "canonical_value_digest": "sha256:b84a9c81c3cd6d8ec2f41c5433fd6638788d793a7deb450aba8bf7d0f8cf7590",
+  "canonical_value_hmac": "hmac-sha256:a867c9d886cd1fc1b4344795bf64cce5297bf7847685b7bcc87cf5dc956ae382",
+  "canonical_value_json": "{\"a\":{\"event_type\":\"tool_call_proposed\",\"runtime\":\"openclaw\"},\"z\":[\"safe\",true,7]}",
+  "openclaw_capability_digest": "sha256:d106043e3d9022ecc3484113c06d08a5ede6734bd6e426212e6d7ec7479f9964",
+  "openclaw_capability_projection": {
+    "active": true,
+    "agent_id": "main",
+    "c0_registration": true,
+    "c1_pre_execution_interception": true,
+    "c2_correlation": true,
+    "c3_atomic_replace_and_seal": false,
+    "c4_outcome_receipts": true,
+    "events": [
+      {
+        "active": true,
+        "enforcement": "pre_execution_c1",
+        "event_type": "context_assembled",
+        "residual_boundaries": [],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "pre_execution_c1",
+        "event_type": "memory_write_proposed",
+        "residual_boundaries": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook"
+        ],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "pre_execution_c1",
+        "event_type": "message_send_proposed",
+        "residual_boundaries": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_message_sending_host_exception_or_timeout_can_fail_open"
+        ],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "pre_execution_c1",
+        "event_type": "model_input_prepared",
+        "residual_boundaries": [],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "post_execution_isolation",
+        "event_type": "model_output_produced",
+        "residual_boundaries": [],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "pre_execution_c1",
+        "event_type": "tool_call_proposed",
+        "residual_boundaries": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action"
+        ],
+        "supported": true
+      },
+      {
+        "active": true,
+        "enforcement": "post_execution_isolation",
+        "event_type": "tool_result_produced",
+        "residual_boundaries": [
+          "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+        ],
+        "supported": true
+      }
+    ],
+    "profile_id": "agentguard-openclaw-v2-restricted",
+    "residual_boundaries": [
+      "openclaw_has_no_authoritative_invocation_start_hook",
+      "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+      "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+      "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+      "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+    ],
+    "runtime": "openclaw",
+    "runtime_binding_id": "binding:openclaw:main",
+    "schema_version": "2.0",
+    "supported": true
+  },
+  "residual_risk_ref_digest": "sha256:5c2ef34914a0e82010f9b0b448aced382d05b35374eb9c22767d02aeda9279c3",
+  "residual_risk_signature": "hmac-sha256:10ce2e0f8e173f4cd3473c6922ae2c0d8aec3ec8c7a4ecd0c2f974a99c80157c",
+  "residual_risk_signature_payload": {
+    "acceptance_ref_digest": "sha256:5c2ef34914a0e82010f9b0b448aced382d05b35374eb9c22767d02aeda9279c3",
+    "domain": "agentguard/residual-risk-acceptance/v1"
+  },
+  "schema_version": "1.0",
+  "scope": "p0_activation_projections_only",
+  "test_hmac_key_utf8": "product-v2-contract-secret-32bytes!!"
+}

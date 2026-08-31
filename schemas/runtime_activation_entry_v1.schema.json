@@ -1,0 +1,309 @@
+{
+  "$id": "https://agentguard.dev/schemas/runtime_activation_entry_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "properties": {
+        "event_types": {
+          "const": [
+            "context_assembled",
+            "memory_write_proposed",
+            "message_send_proposed",
+            "model_input_prepared",
+            "model_output_produced",
+            "tool_call_proposed",
+            "tool_result_produced"
+          ]
+        }
+      },
+      "required": [
+        "event_types"
+      ]
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "langgraph"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ask_release_mode": {
+            "const": "strong_binding"
+          },
+          "plugin_inventory_digest": {
+            "type": "null"
+          },
+          "plugin_order_inventory_digest": {
+            "type": "null"
+          },
+          "plugin_version": {
+            "const": "0.1.0rc1"
+          },
+          "profile_id": {
+            "const": "agentguard-langgraph-v2"
+          },
+          "residual_boundaries": {
+            "const": []
+          },
+          "residual_risk_acceptance_digest": {
+            "type": "null"
+          },
+          "runtime_version": {
+            "const": "1.2.7"
+          }
+        },
+        "required": [
+          "residual_boundaries"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "runtime": {
+            "const": "openclaw"
+          }
+        },
+        "required": [
+          "runtime"
+        ]
+      },
+      "then": {
+        "properties": {
+          "ask_release_mode": {
+            "const": "restricted_allow_once"
+          },
+          "plugin_inventory_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plugin_order_inventory_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "plugin_version": {
+            "const": "0.1.0-rc.1"
+          },
+          "profile_id": {
+            "const": "agentguard-openclaw-v2-restricted"
+          },
+          "residual_boundaries": {
+            "const": [
+              "openclaw_has_no_authoritative_invocation_start_hook",
+              "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+              "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+              "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+              "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+            ]
+          },
+          "residual_risk_acceptance_digest": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "runtime_version": {
+            "const": "2026.7.1-2"
+          }
+        },
+        "required": [
+          "plugin_inventory_digest",
+          "plugin_order_inventory_digest",
+          "residual_risk_acceptance_digest",
+          "residual_boundaries"
+        ]
+      }
+    }
+  ],
+  "description": "One runtime identity and immutable candidate inventory activation.",
+  "properties": {
+    "adapter_artifact_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Adapter Artifact Digest",
+      "type": "string"
+    },
+    "agent_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Agent Id",
+      "type": "string"
+    },
+    "ask_release_mode": {
+      "enum": [
+        "strong_binding",
+        "restricted_allow_once"
+      ],
+      "title": "Ask Release Mode",
+      "type": "string"
+    },
+    "canary_cohort": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Canary Cohort",
+      "type": "string"
+    },
+    "capability_report_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Capability Report Digest",
+      "type": "string"
+    },
+    "environment": {
+      "const": "internal_rc_canary",
+      "default": "internal_rc_canary",
+      "title": "Environment",
+      "type": "string"
+    },
+    "event_types": {
+      "items": {
+        "enum": [
+          "tool_call_proposed",
+          "context_assembled",
+          "model_input_prepared",
+          "model_output_produced",
+          "tool_result_produced",
+          "memory_write_proposed",
+          "message_send_proposed"
+        ],
+        "type": "string"
+      },
+      "title": "Event Types",
+      "type": "array"
+    },
+    "expires_at": {
+      "title": "Expires At",
+      "type": "string"
+    },
+    "host_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Host Inventory Digest",
+      "type": "string"
+    },
+    "plugin_inventory_digest": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plugin Inventory Digest"
+    },
+    "plugin_order_inventory_digest": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Plugin Order Inventory Digest"
+    },
+    "plugin_version": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Plugin Version",
+      "type": "string"
+    },
+    "principal_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Principal Id",
+      "type": "string"
+    },
+    "profile_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Profile Digest",
+      "type": "string"
+    },
+    "profile_id": {
+      "maxLength": 128,
+      "minLength": 1,
+      "title": "Profile Id",
+      "type": "string"
+    },
+    "residual_boundaries": {
+      "items": {
+        "enum": [
+          "openclaw_has_no_authoritative_invocation_start_hook",
+          "openclaw_hook_cannot_atomically_replace_and_seal_final_action",
+          "openclaw_message_sending_host_exception_or_timeout_can_fail_open",
+          "openclaw_non_tool_memory_write_has_no_native_pre_execution_hook",
+          "openclaw_sync_persistence_hooks_cannot_await_remote_decision_or_rollback"
+        ],
+        "type": "string"
+      },
+      "title": "Residual Boundaries",
+      "type": "array"
+    },
+    "residual_risk_acceptance_digest": {
+      "anyOf": [
+        {
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Residual Risk Acceptance Digest"
+    },
+    "runtime": {
+      "enum": [
+        "langgraph",
+        "openclaw"
+      ],
+      "title": "Runtime",
+      "type": "string"
+    },
+    "runtime_binding_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Runtime Binding Id",
+      "type": "string"
+    },
+    "runtime_version": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Runtime Version",
+      "type": "string"
+    },
+    "tool_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Tool Inventory Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "runtime",
+    "runtime_version",
+    "plugin_version",
+    "profile_id",
+    "profile_digest",
+    "principal_id",
+    "agent_id",
+    "runtime_binding_id",
+    "event_types",
+    "adapter_artifact_digest",
+    "capability_report_digest",
+    "host_inventory_digest",
+    "tool_inventory_digest",
+    "ask_release_mode",
+    "residual_boundaries",
+    "canary_cohort",
+    "expires_at"
+  ],
+  "title": "RuntimeActivationEntryV1",
+  "type": "object"
+}

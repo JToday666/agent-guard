@@ -1,0 +1,102 @@
+{
+  "$id": "https://agentguard.dev/schemas/rollout_admission_record_v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Signed proof that a fixed candidate passed the named admission evidence.",
+  "properties": {
+    "admission_ref_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Admission Ref Digest",
+      "type": "string"
+    },
+    "candidate_artifact_manifest_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Candidate Artifact Manifest Digest",
+      "type": "string"
+    },
+    "capability_matrix_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Capability Matrix Digest",
+      "type": "string"
+    },
+    "contract_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Contract Digest",
+      "type": "string"
+    },
+    "dataset_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Dataset Digest",
+      "type": "string"
+    },
+    "expires_at": {
+      "title": "Expires At",
+      "type": "string"
+    },
+    "issued_at": {
+      "title": "Issued At",
+      "type": "string"
+    },
+    "langgraph_conformance_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Langgraph Conformance Digest",
+      "type": "string"
+    },
+    "openclaw_conformance_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Openclaw Conformance Digest",
+      "type": "string"
+    },
+    "policy_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Policy Digest",
+      "type": "string"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "server_signature": {
+      "pattern": "^hmac-sha256:[0-9a-f]{64}$",
+      "title": "Server Signature",
+      "type": "string"
+    },
+    "signer_key_id": {
+      "maxLength": 64,
+      "minLength": 1,
+      "title": "Signer Key Id",
+      "type": "string"
+    },
+    "source_revision": {
+      "maxLength": 128,
+      "minLength": 7,
+      "title": "Source Revision",
+      "type": "string"
+    },
+    "tool_inventory_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Tool Inventory Digest",
+      "type": "string"
+    }
+  },
+  "required": [
+    "candidate_artifact_manifest_digest",
+    "source_revision",
+    "policy_digest",
+    "dataset_digest",
+    "contract_digest",
+    "langgraph_conformance_digest",
+    "openclaw_conformance_digest",
+    "capability_matrix_digest",
+    "tool_inventory_digest",
+    "issued_at",
+    "expires_at",
+    "signer_key_id",
+    "admission_ref_digest",
+    "server_signature"
+  ],
+  "title": "RolloutAdmissionRecordV1",
+  "type": "object"
+}
