@@ -9,11 +9,14 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKeyConstraint,
+    Identity,
     Index,
     Integer,
     MetaData,
+    PrimaryKeyConstraint,
     Table,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -232,6 +235,79 @@ adapter_statuses = Table(
         "ix_adapter_statuses_last_heartbeat_at",
         "last_heartbeat_at",
         postgresql_where=text("last_heartbeat_at IS NOT NULL"),
+    ),
+)
+
+product_runtime_statuses_v2 = Table(
+    "product_runtime_statuses_v2",
+    metadata,
+    Column("runtime", Text, nullable=False),
+    Column("agent_id", Text, nullable=False),
+    Column("runtime_binding_id", Text, nullable=False),
+    Column("profile_id", Text, nullable=False),
+    Column(
+        "write_sequence",
+        BigInteger,
+        Identity(always=True),
+        nullable=False,
+    ),
+    Column("status", Text, nullable=False),
+    Column("loaded", Boolean, nullable=False),
+    Column("runtime_id", Text, nullable=False),
+    Column("enforcement_mode", Text, nullable=False),
+    Column("last_heartbeat_at", DateTime(timezone=True), nullable=False),
+    Column("payload_json", JSONB, nullable=False),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.statement_timestamp(),
+    ),
+    CheckConstraint(
+        "agent_id COLLATE \"C\" ~ '^[!-~]+$' AND "
+        "runtime_binding_id COLLATE \"C\" ~ '^[!-~]+$' AND "
+        "profile_id COLLATE \"C\" ~ '^[!-~]+$' AND "
+        "char_length(agent_id) BETWEEN 1 AND 128 AND "
+        "char_length(runtime_binding_id) BETWEEN 1 AND 256 AND "
+        "((runtime = 'langgraph' AND "
+        "profile_id = 'agentguard-langgraph-v2') OR "
+        "(runtime = 'openclaw' AND "
+        "profile_id = 'agentguard-openclaw-v2-restricted'))",
+        name="ck_product_runtime_statuses_v2_exact_identity",
+    ),
+    CheckConstraint(
+        "status IN ('loaded', 'not_loaded', 'error', 'unknown')",
+        name="ck_product_runtime_statuses_v2_status",
+    ),
+    CheckConstraint(
+        "loaded = (status = 'loaded')",
+        name="ck_product_runtime_statuses_v2_loaded_status",
+    ),
+    CheckConstraint(
+        "enforcement_mode IN ('enforce', 'observe', 'disabled')",
+        name="ck_product_runtime_statuses_v2_enforcement_mode",
+    ),
+    PrimaryKeyConstraint(
+        "runtime",
+        "agent_id",
+        "runtime_binding_id",
+        "profile_id",
+        name="pk_product_runtime_statuses_v2",
+    ),
+    UniqueConstraint(
+        "write_sequence",
+        name="uq_product_runtime_statuses_v2_write_sequence",
+    ),
+    Index(
+        "ix_product_runtime_statuses_v2_runtime_sequence",
+        "runtime",
+        text("write_sequence DESC"),
+    ),
+    Index(
+        "ix_product_runtime_statuses_v2_runtime_heartbeat",
+        "runtime",
+        text("last_heartbeat_at DESC"),
+        text("write_sequence DESC"),
     ),
 )
 
