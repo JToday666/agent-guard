@@ -192,11 +192,34 @@ def test_core_client_preserves_binding_transiently_but_model_dump_hides_it(
             core_api_mode="guard-api-v0.3",
         )
     )
+    release_directive = {
+        "schema_version": "2.0",
+        "mode": "strong_binding",
+        "required_runtime_profile": "C3",
+        "human_only": True,
+        "single_use": True,
+        "action_binding": "exact",
+        "receipt_requirement": "required_durable",
+        "activation_ref_digest": "sha256:" + "a" * 64,
+        "scope_digest": "sha256:" + "b" * 64,
+        "capability_digest": "sha256:" + "c" * 64,
+        "residual_boundaries": [],
+    }
     response = {
         "decision": _decision().model_dump(),
         "approval": {"approval_id": "app_call_strong", "required": True},
         "policy_audit_id": "audit_policy_call_strong",
         "enforcement_binding": _binding(),
+        "decision_authority": {
+            "source": "v21",
+            "mode": "active",
+            "selection_basis": "profile_all",
+            "matched_path_ids": [],
+            "legacy_floor_applied": False,
+            "activation_ref_digest": "sha256:" + "a" * 64,
+            "approval_release": "strong_binding_required",
+        },
+        "approval_release_directive": release_directive,
     }
     monkeypatch.setattr(
         AgentGuardCoreClient,
@@ -208,8 +231,57 @@ def test_core_client_preserves_binding_transiently_but_model_dump_hides_it(
     decision = PolicyDecision.model_validate(raw)
 
     assert decision.enforcement_binding == _binding()
+    assert decision.approval_release_directive is not None
+    assert decision.approval_release_directive.model_dump(mode="json") == (
+        release_directive
+    )
     assert "enforcement_binding" not in decision.model_dump()
+    assert "approval_release_directive" not in decision.model_dump()
     assert FINGERPRINT not in repr(decision)
+
+
+@pytest.mark.parametrize("drift", ["missing-authority", "activation", "projection"])
+def test_product_release_directive_fails_closed_without_exact_authority(
+    drift: str,
+) -> None:
+    raw = {
+        **_decision().model_dump(),
+        "approval": {"approval_id": "app_call_strong", "required": True},
+        "decision_authority": {
+            "source": "v21",
+            "mode": "active",
+            "selection_basis": "profile_all",
+            "matched_path_ids": [],
+            "legacy_floor_applied": False,
+            "activation_ref_digest": "sha256:" + "a" * 64,
+            "approval_release": "strong_binding_required",
+        },
+        "approval_release_directive": {
+            "schema_version": "2.0",
+            "mode": "strong_binding",
+            "required_runtime_profile": "C3",
+            "human_only": True,
+            "single_use": True,
+            "action_binding": "exact",
+            "receipt_requirement": "required_durable",
+            "activation_ref_digest": "sha256:" + "a" * 64,
+            "scope_digest": "sha256:" + "b" * 64,
+            "capability_digest": "sha256:" + "c" * 64,
+            "residual_boundaries": [],
+        },
+    }
+    if drift == "missing-authority":
+        raw.pop("decision_authority")
+    elif drift == "activation":
+        raw["decision_authority"]["activation_ref_digest"] = "sha256:" + "d" * 64
+    else:
+        raw["decision_authority"]["approval_release"] = "forbidden"
+
+    with pytest.raises(
+        ValueError,
+        match="lacks exact V2 authority parity",
+    ):
+        PolicyDecision.model_validate(raw)
 
 
 def test_consume_client_retries_same_bytes_and_returns_only_non_secret_ids(
@@ -904,10 +976,7 @@ def test_post_consume_boundary_failure_retains_ids_and_never_invokes(
     ][-1]
     assert terminal["evidence"]["execution"]["status"] == "not_invoked"
     assert terminal["evidence"]["enforcement"]["gate_state"] == expected_gate
-    assert (
-        terminal["evidence"]["enforcement"]["lease_consume_outcome"]
-        == "consumed"
-    )
+    assert terminal["evidence"]["enforcement"]["lease_consume_outcome"] == "consumed"
     assert expected_reason in terminal["evidence"]["enforcement"]["reason_codes"]
     assert terminal["links"]["lease_id"] == "lease_strong"
     assert terminal["links"]["consumption_id"] == "consume_strong"

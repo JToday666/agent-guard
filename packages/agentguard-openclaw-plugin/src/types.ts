@@ -172,6 +172,39 @@ export type GuardEvaluationResponse = {
   approval: EvaluationApproval | null;
   policy_audit_id?: string | null;
   enforcement_binding?: EnforcementBinding | InvalidEnforcementBinding;
+  decision_authority?: DecisionAuthorityProjection;
+  approval_release_directive?: ApprovalReleaseDirectiveV2;
+};
+
+export type DecisionAuthorityProjection = {
+  source: "current" | "v21";
+  mode: "shadow" | "limited_enable" | "active";
+  selection_basis: "current" | "path_allowlist" | "profile_all";
+  matched_path_ids: string[];
+  legacy_floor_applied: boolean;
+  activation_ref_digest: string;
+  approval_release:
+    | "not_applicable"
+    | "strong_binding_required"
+    | "forbidden";
+};
+
+export type ApprovalReleaseDirectiveV2 = {
+  schema_version: "2.0";
+  mode:
+    | "not_applicable"
+    | "forbidden"
+    | "strong_binding"
+    | "restricted_allow_once";
+  required_runtime_profile: "C1" | "C3" | null;
+  human_only: true;
+  single_use: true;
+  action_binding: "exact" | "best_effort_host" | "none";
+  receipt_requirement: "not_applicable" | "required_durable";
+  activation_ref_digest: string;
+  scope_digest: string;
+  capability_digest: string;
+  residual_boundaries: string[];
 };
 
 /** Local fail-closed sentinel; never serialized or persisted. */

@@ -297,6 +297,10 @@ def _decision_with_top_level_approval(
         enriched["context_plan"] = response.get("context_plan")
     if "decision_authority" in response:
         enriched["decision_authority"] = response.get("decision_authority")
+    if "approval_release_directive" in response:
+        enriched["approval_release_directive"] = response.get(
+            "approval_release_directive"
+        )
     return enriched
 
 

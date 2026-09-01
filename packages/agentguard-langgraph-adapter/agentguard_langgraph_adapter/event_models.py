@@ -193,6 +193,48 @@ class DecisionAuthority(BaseModel):
     approval_release: Literal["not_applicable", "strong_binding_required", "forbidden"]
 
 
+class ApprovalReleaseDirectiveV2(BaseModel):
+    """Typed Product release sibling retained only for runtime enforcement."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["2.0"] = "2.0"
+    mode: Literal[
+        "not_applicable", "forbidden", "strong_binding", "restricted_allow_once"
+    ]
+    required_runtime_profile: Literal["C1", "C3"] | None
+    human_only: Literal[True]
+    single_use: Literal[True]
+    action_binding: Literal["exact", "best_effort_host", "none"]
+    receipt_requirement: Literal["not_applicable", "required_durable"]
+    activation_ref_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    scope_digest: str = Field(pattern=r"^(?:sha256|hmac-sha256):[0-9a-f]{64}$")
+    capability_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    residual_boundaries: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_release_shape(self) -> "ApprovalReleaseDirectiveV2":
+        expected = {
+            "not_applicable": (None, "none", "not_applicable"),
+            "forbidden": (None, "none", "not_applicable"),
+            "strong_binding": ("C3", "exact", "required_durable"),
+            "restricted_allow_once": (
+                "C1",
+                "best_effort_host",
+                "required_durable",
+            ),
+        }[self.mode]
+        if (
+            self.required_runtime_profile,
+            self.action_binding,
+            self.receipt_requirement,
+        ) != expected:
+            raise ValueError("approval release fields do not match mode")
+        if self.mode != "restricted_allow_once" and self.residual_boundaries:
+            raise ValueError("only restricted release may carry residual boundaries")
+        return self
+
+
 class PolicyDecision(BaseModel):
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
@@ -221,6 +263,48 @@ class PolicyDecision(BaseModel):
         exclude=True,
         repr=False,
     )
+    approval_release_directive: ApprovalReleaseDirectiveV2 | None = Field(
+        default=None,
+        exclude=True,
+        repr=False,
+    )
+
+    @model_validator(mode="after")
+    def validate_product_release_authority(self) -> "PolicyDecision":
+        directive = self.approval_release_directive
+        if directive is None:
+            return self
+        authority = self.decision_authority
+        legacy_projection = {
+            "not_applicable": "not_applicable",
+            "forbidden": "forbidden",
+            "strong_binding": "strong_binding_required",
+            "restricted_allow_once": "forbidden",
+        }[directive.mode]
+        if authority is None or not all(
+            (
+                authority.source == "v21",
+                authority.mode == "active",
+                authority.selection_basis == "profile_all",
+                authority.activation_ref_digest == directive.activation_ref_digest,
+                authority.approval_release == legacy_projection,
+            )
+        ):
+            raise ValueError(
+                "Product release directive lacks exact V2 authority parity"
+            )
+        releasable = directive.mode in {
+            "strong_binding",
+            "restricted_allow_once",
+        }
+        if self.decision == "ask":
+            if releasable != (self.approval is not None):
+                raise ValueError(
+                    "Product ASK approval does not match its release directive"
+                )
+        elif directive.mode != "not_applicable" or self.approval is not None:
+            raise ValueError("non-ASK Product decision requires not_applicable release")
+        return self
 
     @property
     def blocked(self) -> bool:

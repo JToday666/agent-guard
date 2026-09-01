@@ -7,12 +7,13 @@ from typing import NoReturn
 
 from agentguard_core import (
     ActionCriticReview,
+    ApprovalReleaseDirectiveV2,
     AuditEvent,
     DecisionAuthority,
-    DecisionAuthorityEvidenceV1,
     GuardDecision,
     GuardEvent,
     PolicyBundle,
+    ProductDecisionAuthorityEvidenceV1,
     RuntimeOutcomeReceipt,
 )
 from pydantic import ValidationError
@@ -35,6 +36,7 @@ from .context_manifest import (
 )
 from .competition import (
     CriticalDecisionEvidenceError,
+    parse_decision_authority_evidence_payload,
     strict_decision_authority_envelope,
 )
 from .evidence import build_audit_event
@@ -611,8 +613,8 @@ class AuditService:
         )
         return persisted
 
-    @staticmethod
     def _validate_decision_authority_commit(
+        self,
         persisted: AuditEvent,
         *,
         expected_envelope: dict[str, object],
@@ -634,9 +636,11 @@ class AuditService:
             raise CriticalDecisionEvidenceError(
                 "persisted authority evidence differs from the selected result"
             )
-        payload = DecisionAuthorityEvidenceV1.model_validate(
-            actual["decision_authority"]["payload"]  # type: ignore[index]
-        )
+        # Both frozen authority evidence versions expose the same decision and
+        # authority truth fields.  Parsing remains version-exact above; the
+        # commit/readback parity checks below deliberately share one semantic
+        # path so Product cannot receive weaker persistence guarantees.
+        payload = parse_decision_authority_evidence_payload(actual)
         raw_top = (persisted.model_extra or {}).get("decision_authority")
         try:
             top = DecisionAuthority.model_validate(raw_top)
@@ -693,6 +697,91 @@ class AuditService:
         ):
             raise CriticalDecisionEvidenceError(
                 "selected decision, authority, and audit projections lack exact parity"
+            )
+        if isinstance(payload, ProductDecisionAuthorityEvidenceV1):
+            if not all(
+                (
+                    payload.runtime == persisted.runtime,
+                    payload.event_type == persisted.event_type,
+                    payload.event_id == persisted.links.get("event_id"),
+                    payload.assessment_id == decision_evidence.assessment_id,
+                    payload.assessment_digest == decision_evidence.assessment_digest,
+                    payload.snapshot_id == decision_evidence.snapshot_id,
+                    payload.snapshot_digest == decision_evidence.snapshot_digest,
+                    payload.state_version == decision_evidence.state_version,
+                    payload.policy_digest == persisted.metadata.get("policy_digest"),
+                )
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "Product authority evidence is not bound to the persisted audit"
+                )
+            self._validate_product_approval_release_commit(persisted, payload)
+
+    def _validate_product_approval_release_commit(
+        self,
+        persisted: AuditEvent,
+        payload: ProductDecisionAuthorityEvidenceV1,
+    ) -> None:
+        """Bind Product release authority to the exact approval and audit action."""
+
+        directive = payload.approval_release_directive
+        approval_id = persisted.links.get("approval_id")
+        releasable = directive.mode in {
+            "strong_binding",
+            "restricted_allow_once",
+        }
+        if not releasable:
+            if approval_id is not None:
+                raise CriticalDecisionEvidenceError(
+                    "unreleasable Product authority carries an approval"
+                )
+            return
+        if approval_id is None:
+            raise CriticalDecisionEvidenceError(
+                "releasable Product authority lacks an approval"
+            )
+        approval = self.store.get_approval(approval_id)
+        if approval is None:
+            raise CriticalDecisionEvidenceError(
+                "Product approval referenced by the audit is unavailable"
+            )
+        approval_evidence = approval.evidence
+        try:
+            approval_directive = ApprovalReleaseDirectiveV2.model_validate(
+                approval_evidence.get("approval_release_directive")
+            )
+            approval_authority = DecisionAuthority.model_validate(
+                approval_evidence.get("decision_authority")
+            )
+        except (TypeError, ValueError) as exc:
+            raise CriticalDecisionEvidenceError(
+                "Product approval release evidence is invalid"
+            ) from exc
+        raw_event = approval_evidence.get("event")
+        raw_decision = approval_evidence.get("decision")
+        if not isinstance(raw_event, dict) or not isinstance(raw_decision, dict):
+            raise CriticalDecisionEvidenceError(
+                "Product approval identity evidence is invalid"
+            )
+        if not all(
+            (
+                approval.approval_id == approval_id,
+                approval.trace_id == persisted.trace_id,
+                approval.runtime == persisted.runtime,
+                approval.action_id == persisted.links.get("action_id"),
+                raw_event.get("event_id") == payload.event_id,
+                raw_event.get("event_type") == payload.event_type,
+                raw_event.get("trace_id") == persisted.trace_id,
+                raw_event.get("runtime") == payload.runtime,
+                raw_decision.get("decision_id")
+                == payload.selected_decision.decision_id,
+                raw_decision.get("decision") == payload.selected_decision.decision,
+                approval_directive == directive,
+                approval_authority == payload.decision_authority,
+            )
+        ):
+            raise CriticalDecisionEvidenceError(
+                "Product approval release is not bound to the persisted authority"
             )
 
     def repair_provenance(self, event: AuditEvent) -> None:
