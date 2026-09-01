@@ -31,6 +31,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from agentguard_core import (
+    ActivationAckV1,
     ActionCriticReview,
     AuditEvent,
     ConfigAuditEvent,
@@ -58,9 +59,11 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.runtime_status import (
+    ProductActivationAckRecordV1,
     ProductRuntime,
     ProductRuntimeStatusIdentityV1,
     ProductRuntimeStatusV2,
+    activation_ack_matches_runtime_status,
 )
 from guard_api.storage.base import (
     ApprovalExecutionLeaseExpiredError,
@@ -143,6 +146,7 @@ from guard_api.storage.sqlalchemy_models import (
     policy_snapshot_history,
     policy_snapshots,
     product_runtime_statuses_v2,
+    product_activation_acks_v1,
     provenance_edges,
     provenance_nodes,
     task_facts,
@@ -1276,9 +1280,40 @@ class PostgresControlPlaneStore:
         }
 
     def save_product_runtime_status(
-        self, status: ProductRuntimeStatusV2 | dict[str, Any]
+        self,
+        status: ProductRuntimeStatusV2 | dict[str, Any],
+        *,
+        activation_ack: ActivationAckV1 | dict[str, Any] | None = None,
+        revoke_activation_acks_for: (
+            ProductRuntimeStatusIdentityV1 | dict[str, Any] | None
+        ) = None,
+        revoked_at: str | None = None,
     ) -> ProductRuntimeStatusV2:
         record = ProductRuntimeStatusV2.model_validate(status)
+        ack = (
+            None
+            if activation_ack is None
+            else ActivationAckV1.model_validate(activation_ack)
+        )
+        if ack is not None and not activation_ack_matches_runtime_status(ack, record):
+            raise ValueError("activation ACK does not match runtime status")
+        issuance = (
+            None
+            if ack is None
+            else ProductActivationAckRecordV1.from_ack(
+                ack,
+                principal_id=record.principal_id,
+            )
+        )
+        revoke_identity = (
+            None
+            if revoke_activation_acks_for is None
+            else ProductRuntimeStatusIdentityV1.model_validate(
+                revoke_activation_acks_for
+            )
+        )
+        if (revoke_identity is None) != (revoked_at is None):
+            raise ValueError("ACK revocation identity and timestamp must be paired")
         payload = record.model_dump(mode="json")
         # Round-trip through the serialized form so callers cannot mutate the
         # instance retained for persistence and all nested values are typed.
@@ -1324,6 +1359,54 @@ class PostgresControlPlaneStore:
                 },
             )
             session.execute(stmt)
+            if revoke_identity is not None and revoked_at is not None:
+                session.execute(
+                    update(product_activation_acks_v1)
+                    .where(
+                        product_activation_acks_v1.c.runtime
+                        == revoke_identity.runtime,
+                        product_activation_acks_v1.c.agent_id
+                        == revoke_identity.agent_id,
+                        product_activation_acks_v1.c.runtime_binding_id
+                        == revoke_identity.runtime_binding_id,
+                        product_activation_acks_v1.c.profile_id
+                        == revoke_identity.profile_id,
+                        product_activation_acks_v1.c.revoked_at.is_(None),
+                    )
+                    .values(revoked_at=_database_datetime(revoked_at))
+                )
+            if issuance is not None:
+                claims = issuance.unsigned_ack()
+                ack_insert = (
+                    pg_insert(product_activation_acks_v1)
+                    .values(
+                        token_digest=issuance.token_digest,
+                        runtime=claims.runtime,
+                        agent_id=claims.agent_id,
+                        runtime_binding_id=claims.runtime_binding_id,
+                        profile_id=claims.profile_id,
+                        principal_id=issuance.principal_id,
+                        issued_at=_database_datetime(claims.issued_at),
+                        expires_at=_database_datetime(claims.expires_at),
+                        revoked_at=None,
+                        payload_json=issuance.model_dump(mode="json"),
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=[product_activation_acks_v1.c.token_digest]
+                    )
+                )
+                session.execute(ack_insert)
+                persisted_issuance = session.execute(
+                    select(
+                        product_activation_acks_v1.c.payload_json,
+                        product_activation_acks_v1.c.revoked_at,
+                    ).where(
+                        product_activation_acks_v1.c.token_digest
+                        == issuance.token_digest
+                    )
+                ).mappings().one()
+                if _product_activation_ack_from_row(persisted_issuance) != issuance:
+                    raise ValueError("activation ACK digest conflicts with issuance")
             session.execute(
                 _adapter_status_upsert(
                     adapter_id=identity.runtime,
@@ -1332,6 +1415,70 @@ class PostgresControlPlaneStore:
                 )
             )
         return ProductRuntimeStatusV2.model_validate(payload)
+
+    def get_product_activation_ack(
+        self,
+        token_digest: str,
+    ) -> ProductActivationAckRecordV1 | None:
+        stmt = select(
+            product_activation_acks_v1.c.payload_json,
+            product_activation_acks_v1.c.revoked_at,
+        ).where(product_activation_acks_v1.c.token_digest == token_digest)
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        return None if row is None else _product_activation_ack_from_row(row)
+
+    def get_latest_product_activation_ack(
+        self,
+        identity: ProductRuntimeStatusIdentityV1 | dict[str, Any],
+    ) -> ProductActivationAckRecordV1 | None:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        stmt = (
+            select(
+                product_activation_acks_v1.c.payload_json,
+                product_activation_acks_v1.c.revoked_at,
+            )
+            .where(
+                product_activation_acks_v1.c.runtime == exact.runtime,
+                product_activation_acks_v1.c.agent_id == exact.agent_id,
+                product_activation_acks_v1.c.runtime_binding_id
+                == exact.runtime_binding_id,
+                product_activation_acks_v1.c.profile_id == exact.profile_id,
+                product_activation_acks_v1.c.revoked_at.is_(None),
+            )
+            .order_by(
+                desc(product_activation_acks_v1.c.issued_at),
+                desc(product_activation_acks_v1.c.token_digest),
+            )
+            .limit(1)
+        )
+        with self._read_session() as session:
+            row = session.execute(stmt).mappings().one_or_none()
+        return None if row is None else _product_activation_ack_from_row(row)
+
+    def revoke_product_activation_acks(
+        self,
+        identity: ProductRuntimeStatusIdentityV1 | dict[str, Any],
+        *,
+        revoked_at: str,
+    ) -> int:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        stmt = (
+            update(product_activation_acks_v1)
+            .where(
+                product_activation_acks_v1.c.runtime == exact.runtime,
+                product_activation_acks_v1.c.agent_id == exact.agent_id,
+                product_activation_acks_v1.c.runtime_binding_id
+                == exact.runtime_binding_id,
+                product_activation_acks_v1.c.profile_id == exact.profile_id,
+                product_activation_acks_v1.c.revoked_at.is_(None),
+            )
+            .values(revoked_at=_database_datetime(revoked_at))
+        )
+        with self._write_session() as session:
+            _lock_product_runtime_status(session, exact.runtime)
+            result = session.execute(stmt)
+            return int(result.rowcount or 0)
 
     def get_product_runtime_status(
         self, identity: ProductRuntimeStatusIdentityV1 | dict[str, Any]
@@ -3532,6 +3679,15 @@ def _database_datetime(value: str | datetime) -> datetime:
 
 def _database_datetime_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat()
+
+
+def _product_activation_ack_from_row(row: Any) -> ProductActivationAckRecordV1:
+    payload = dict(row["payload_json"])
+    revoked_at = row["revoked_at"]
+    payload["revoked_at"] = (
+        None if revoked_at is None else _database_datetime_iso(revoked_at)
+    )
+    return ProductActivationAckRecordV1.model_validate(payload)
 
 
 def _normalize_database_url(database_url: str) -> str:

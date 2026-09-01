@@ -10,8 +10,10 @@ after authenticating the caller.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 from datetime import datetime, timezone
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -21,7 +23,7 @@ from pydantic import (
     model_validator,
 )
 
-from agentguard_core import RuntimeCapabilityReportV2
+from agentguard_core import ActivationAckV1, RuntimeCapabilityReportV2
 
 from guard_api.models import AdapterStatus, AdapterStatusRecord
 
@@ -48,6 +50,14 @@ def _utc_timestamp(value: str, *, label: str) -> str:
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise ValueError(f"{label} must include a timezone")
     return parsed.astimezone(timezone.utc).isoformat()
+
+
+def activation_ack_token_digest(token: str) -> str:
+    """Return the non-reversible lookup identity for one opaque ACK token."""
+
+    if not isinstance(token, str) or not token:
+        raise ValueError("activation ACK token must be a non-empty string")
+    return "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 class ProductRuntimeStatusIdentityV1(BaseModel):
@@ -255,9 +265,123 @@ class ProductRuntimeStatusV2(ProductRuntimeHeartbeatV2):
         )
 
 
+class ProductActivationAckRecordV1(BaseModel):
+    """Durable server-owned ACK issuance record without the raw token."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal["1.0"] = "1.0"
+    token_digest: Sha256Digest
+    principal_id: str = Field(min_length=1, max_length=128, pattern=_IDENTIFIER)
+    ack_projection: dict[str, Any]
+    revoked_at: str | None = None
+
+    @field_validator("revoked_at")
+    @classmethod
+    def normalize_revoked_at(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _utc_timestamp(value, label="revoked_at")
+
+    @model_validator(mode="after")
+    def validate_record(self) -> Self:
+        placeholder = "hmac-sha256:" + "0" * 64
+        ack = ActivationAckV1.model_validate(
+            {**self.ack_projection, "ack_token": placeholder}
+        )
+        if ack.token_projection() != self.ack_projection:
+            raise ValueError("activation ACK projection must be exact and canonical")
+        if self.revoked_at is not None:
+            revoked = datetime.fromisoformat(self.revoked_at)
+            issued = datetime.fromisoformat(ack.issued_at)
+            if revoked < issued:
+                raise ValueError("activation ACK cannot be revoked before issuance")
+        return self
+
+    @classmethod
+    def from_ack(
+        cls,
+        ack: ActivationAckV1,
+        *,
+        principal_id: str,
+    ) -> "ProductActivationAckRecordV1":
+        return cls(
+            token_digest=activation_ack_token_digest(ack.ack_token),
+            principal_id=principal_id,
+            ack_projection=ack.token_projection(),
+        )
+
+    def rebuild(self, token: str) -> ActivationAckV1:
+        supplied_digest = activation_ack_token_digest(token)
+        if not hmac.compare_digest(self.token_digest, supplied_digest):
+            raise ValueError("activation ACK token does not match issuance")
+        return ActivationAckV1.model_validate(
+            {**self.ack_projection, "ack_token": token}
+        )
+
+    def identity(self) -> ProductRuntimeStatusIdentityV1:
+        ack = self.unsigned_ack()
+        return ProductRuntimeStatusIdentityV1(
+            runtime=ack.runtime,
+            agent_id=ack.agent_id,
+            runtime_binding_id=ack.runtime_binding_id,
+            profile_id=ack.profile_id,
+        )
+
+    def unsigned_ack(self) -> ActivationAckV1:
+        """Return typed non-secret claims using a fixed invalid token value."""
+
+        return ActivationAckV1.model_validate(
+            {
+                **self.ack_projection,
+                "ack_token": "hmac-sha256:" + "0" * 64,
+            }
+        )
+
+
+def activation_ack_matches_runtime_status(
+    ack: ActivationAckV1,
+    status: ProductRuntimeStatusV2,
+    *,
+    require_heartbeat_time: bool = True,
+) -> bool:
+    """Bind one private server ACK to the exact persisted heartbeat facts."""
+
+    report = status.capability_report
+    return bool(
+        status.loaded
+        and status.status == "loaded"
+        and status.enforcement_mode == "enforce"
+        and report is not None
+        and ack.runtime == status.runtime == report.runtime
+        and ack.runtime_version == status.runtime_version
+        and ack.plugin_version == status.plugin_version
+        and ack.agent_id == status.agent_id == report.agent_id
+        and ack.runtime_binding_id
+        == status.runtime_binding_id
+        == report.runtime_binding_id
+        and ack.profile_id == status.profile_id == report.profile_id
+        and ack.activation_ref_digest == status.reported_activation_ref_digest
+        and ack.capability_digest == report.report_digest
+        and ack.host_inventory_digest == status.host_inventory_digest
+        and ack.plugin_inventory_digest == status.plugin_inventory_digest
+        and ack.plugin_order_inventory_digest
+        == status.plugin_order_inventory_digest
+        and ack.tool_inventory_digest == status.tool_inventory_digest
+        and (
+            not require_heartbeat_time
+            or _utc_timestamp(ack.issued_at, label="activation_ack.issued_at")
+            == status.last_heartbeat_at
+        )
+    )
+
+
 __all__ = [
+    "ProductActivationAckRecordV1",
     "ProductRuntime",
     "ProductRuntimeHeartbeatV2",
     "ProductRuntimeStatusIdentityV1",
     "ProductRuntimeStatusV2",
+    "activation_ack_matches_runtime_status",
+    "activation_ack_token_digest",
 ]
