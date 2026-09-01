@@ -173,9 +173,10 @@ def create_app(
         store=store,
         state_service=security_state_service,
     )
-    # V21-09：四段式编排器（D4，shadow-only）。与 V21ShadowService 同一
-    # mode/secret 门控；就绪时 evaluate 编排切换为 pipeline（Phase A
-    # 事务外、Phase B 短事务），Phase A 彻底失败回退 V21-08 逐字节路径。
+    # V21-09：四段式编排器（D4，legacy shadow + Product fail-closed）。
+    # 与 V21ShadowService 同一 mode/secret 门控；兼容路径的 Phase A 失败
+    # 仍回退 V21-08。Product authority fence 已实现，但本批仍由外层
+    # selector fuse 阻断公开 selection，待独立 selector/replay PR 接线。
     competition_active = (
         competition_activation is not None
         and settings.effective_v21_mode() == "active"

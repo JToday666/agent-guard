@@ -34,7 +34,12 @@ from guard_api.services.product_activation import (
     FrozenProductActivation,
     ProductActivePreSelectorFuse,
 )
-from guard_api.services.v21_pipeline import V21OfficialEvaluationUnavailableError
+from guard_api.services.v21_pipeline import (
+    PRODUCT_AUTHORITY_NOT_CURRENT,
+    PRODUCT_CREDENTIAL_NOT_CURRENT,
+    PRODUCT_POLICY_NOT_CURRENT,
+    V21OfficialEvaluationUnavailableError,
+)
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.integrity import canonical_sha256
 from guard_api.storage.memory import MemoryControlPlaneStore
@@ -390,6 +395,42 @@ def test_all_seven_events_are_contained_without_current_fallback() -> None:
     assert store.approvals == {}
     assert store.enforcement_bindings == {}
     assert store.memory_changes == {}
+
+
+@pytest.mark.parametrize(
+    ("code", "message"),
+    [
+        (
+            PRODUCT_POLICY_NOT_CURRENT,
+            "Product V2 policy revision or digest is not current.",
+        ),
+        (
+            PRODUCT_AUTHORITY_NOT_CURRENT,
+            "Product V2 authority changed before the evaluation committed.",
+        ),
+        (
+            PRODUCT_CREDENTIAL_NOT_CURRENT,
+            "Product V2 runtime credential is not current.",
+        ),
+    ],
+)
+def test_product_authority_failures_have_stable_http_503_envelopes(
+    code: str,
+    message: str,
+) -> None:
+    client, store = _client(_BlockingFuse(code=code))
+
+    response = client.post(
+        "/v1/guard/evaluate",
+        headers={"Authorization": "Bearer adapter-secret"},
+        json=_event_payload("tool_call_proposed"),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {"code": code, "message": message, "details": []}
+    }
+    assert store.audit_events == []
 
 
 def test_http_authentication_and_runtime_identity_stay_ahead_of_product_fuse() -> None:

@@ -100,6 +100,10 @@ class PolicySnapshotRecord:
 MAX_REBUILD_INPUT_LIMIT = 1000
 
 
+class ProductAuthorityCredentialUnavailableError(RuntimeError):
+    """The exact Product credential could not be locked before evaluation."""
+
+
 @dataclass(frozen=True, slots=True)
 class SecurityStateRecord:
     """security_states 存储记录：OnlineSecurityState 全量快照（V21-04）。
@@ -697,6 +701,36 @@ class ControlPlaneStore(Protocol):
     def get_policy_evaluation_by_event_id(self, event_id: str) -> AuditEvent | None: ...
 
     def evaluation_transaction(self, event_id: str) -> ContextManager[None]: ...
+
+    def product_evaluation_transaction(
+        self,
+        event_id: str,
+        *,
+        task_id: str,
+        scope_digest: str,
+        runtime_ids: tuple[ProductRuntime, ProductRuntime],
+        credential_id: str,
+        credential_token_hash: str,
+    ) -> ContextManager[None]:
+        """Freeze every persisted Product authority input through commit.
+
+        Implementations must acquire the event, dual-runtime observation,
+        policy, TaskFact, security-state/projection-history, and credential
+        locks before yielding.  All locks remain held until the physical
+        transaction commits or rolls back.  This is an additive Product-only
+        boundary; ``evaluation_transaction`` retains its compatibility
+        semantics for legacy and competition callers.
+        """
+        ...
+
+    def security_state_transaction(self, scope_digest: str) -> ContextManager[None]:
+        """Hold one scope's state/projection writes in one physical commit.
+
+        Product commit→project recovery uses this boundary to reconcile every
+        already-committed projection envelope and update the online state while
+        the same cross-process scope lock remains held.
+        """
+        ...
 
     def memory_change_transaction(self, change_id: str) -> ContextManager[None]:
         """状态转换与转换审计的原子窗口。

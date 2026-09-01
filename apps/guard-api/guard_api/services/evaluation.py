@@ -450,7 +450,18 @@ class EvaluationService:
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
         phase_c_plan: "V21PhaseCPlan | None" = None
-        with self.audit_service.store.evaluation_transaction(event.event_id):
+        product_transaction = bool(
+            materials is not None
+            and self.v21_pipeline is not None
+            and self.v21_pipeline.product_active
+        )
+        transaction = (
+            self.v21_pipeline.authority_transaction(event, materials)
+            if materials is not None and self.v21_pipeline is not None
+            else self.audit_service.store.evaluation_transaction(event.event_id)
+        )
+        created_evaluation = False
+        with transaction:
             existing = self.audit_service.store.get_policy_evaluation_by_event_id(
                 event.event_id
             )
@@ -477,6 +488,27 @@ class EvaluationService:
                     materials=materials,
                     ct_plan=ct_plan,
                     context_manifest=context_manifest,
+                )
+                created_evaluation = True
+            if product_transaction and created_evaluation:
+                assert self.v21_pipeline is not None
+                assert materials is not None
+                assert backfill_audit is not None
+                self.v21_pipeline.finalize_product_commit(
+                    event,
+                    materials,
+                    audit_id=backfill_audit.audit_id,
+                    phase_c_plan=phase_c_plan,
+                    expected_authority_digest=cast(
+                        "str | None",
+                        backfill_audit.metadata.get("product_authority_digest"),
+                    ),
+                    initial_authority_checked_at=cast(
+                        "str | None",
+                        backfill_audit.metadata.get(
+                            "product_authority_initial_checked_at"
+                        ),
+                    ),
                 )
         # D4 commit → project：投影在事务提交**之后**执行，绝不影响
         # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
@@ -602,16 +634,18 @@ class EvaluationService:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
         事务窗口内：legacy 链照常（decision/detections 直接消费 Phase A
-        单跑结果，不双跑检测器）+ Phase B 短事务 revalidate 与证据构建；
-        **无 snapshot/task/policy 全量 I/O**（S8 消除）。legacy 决策与
-        mode off 路径同源同实现（evaluate_with_results 同内核），官方
-        响应不变。
+        单跑结果，不双跑检测器）+ Phase B revalidate 与证据构建。
+        legacy 分支保持轻量标量重读；Product 分支在 store-native lockset
+        内严格重读完整有界 authority，并在所有 staged writes 后做最终
+        precommit revalidation。mode off 路径仍与 legacy 同源同实现。
 
         审计 policy_revision 直接用 ``materials.policy_revision``（Phase A
         冻结值，与 bundle/policy_digest 同源同时点）：事务内重读
         ``current_snapshot_record()`` 会在并发策略滚动时落新 revision，
         与 Phase A 冻结 bundle 的 digest 组成"revision N+1 × digest
-        (bundle N)"矛盾组合（TOCTOU），故删除事务内 policy I/O。
+        (bundle N)"矛盾组合（TOCTOU）。因此 legacy 分支不在此处重读；
+        Product 分支只在 authority fence 中以精确 revision + digest 做
+        相等性校验，绝不替换 Phase A bundle。
         """
         bundle = materials.bundle
         # Phase B and authoritative selection run before every mutating service.
@@ -628,6 +662,7 @@ class EvaluationService:
         # V21-13 Stage 1 shadow：judgment 缺席时恒空表（metadata 键集
         # 逐字节不变）；在场时条件性追加五个确定性引用键。
         semantic_metadata: dict[str, object] = {}
+        product_authority_metadata: dict[str, object] = {}
         if self.v21_pipeline is not None:
             outcome = self.v21_pipeline.build_phase_b(event, materials)
             if outcome is not None:
@@ -706,6 +741,17 @@ class EvaluationService:
                                 outcome.final_decision_digest
                             ),
                         }
+                if outcome.product_authority_digest is not None:
+                    assert outcome.product_authority_initial_checked_at is not None
+                    product_authority_metadata = {
+                        "product_authority_digest": (outcome.product_authority_digest),
+                        # This is the first fenced Phase-B capture, not the
+                        # final precommit instant.  The latter is the exact
+                        # projection reservation ``created_at``.
+                        "product_authority_initial_checked_at": (
+                            outcome.product_authority_initial_checked_at
+                        ),
+                    }
                 semantic_judgment = outcome.materials.semantic_judgment
                 if semantic_judgment is not None:
                     # V21-13 shadow 产物只走审计 metadata 承载（wire
@@ -745,7 +791,8 @@ class EvaluationService:
             requesting_principal_id=requesting_principal_id,
             decision_authority=authority,
         )
-        approval = self.approval_service.auto_review_with_llm(approval)
+        if not (self.v21_pipeline is not None and self.v21_pipeline.product_active):
+            approval = self.approval_service.auto_review_with_llm(approval)
         memory_change = self._record_memory_change(
             event, decision, requesting_principal_id=requesting_principal_id
         )
@@ -771,6 +818,7 @@ class EvaluationService:
                 "policy_digest": canonical_sha256(bundle.model_dump(mode="json")),
                 **finalize_metadata,
                 **semantic_metadata,
+                **product_authority_metadata,
                 **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),

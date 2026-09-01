@@ -43,6 +43,15 @@ _ERROR_MESSAGES = {
     "V21_PRODUCT_SECURITY_STATE_NOT_READY": (
         "Product V2 security state is not ready for a read-only decision."
     ),
+    "V21_PRODUCT_POLICY_NOT_CURRENT": (
+        "Product V2 policy revision or digest is not current."
+    ),
+    "V21_PRODUCT_AUTHORITY_NOT_CURRENT": (
+        "Product V2 authority changed before the evaluation committed."
+    ),
+    "V21_PRODUCT_CREDENTIAL_NOT_CURRENT": (
+        "Product V2 runtime credential is not current."
+    ),
     "V21_PRODUCT_SELECTOR_NOT_WIRED": ("Product V2 authority selector is not wired."),
     "SESSION_INVALID": "Browser session is invalid.",
     "SESSION_EXPIRED": "Browser session has expired.",

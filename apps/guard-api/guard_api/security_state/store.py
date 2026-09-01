@@ -2,9 +2,10 @@
 
 锁纪律（与 postgres 行锁/advisory lock 互补）：
 
-- 锁**仅覆盖内存编排段**（同进程 read-modify-write 串行化），不跨 DB
-  事务持有；postgres 侧由 ``pg_advisory_xact_lock`` + 条件 UPDATE 自行
-  保护，两层保护互不依赖；
+- local scope 锁覆盖同进程 read-modify-write 编排；普通路径不主动扩大
+  DB 事务。Product reservation/reconcile 路径会在此锁内显式进入 backend
+  transaction，并持有至 state/projection 物理提交，从而同时阻止同进程
+  与跨进程交错；
 - 注册表按 scope_digest 分配 ``RLock``（rebuild/snapshot 编排允许同
   scope 嵌套加锁），注册表自身由全局锁保护。
 """
@@ -58,7 +59,13 @@ class SecurityStateStoreAccess:
 
     @contextmanager
     def scope_lock(self, scope_digest: str) -> Iterator[None]:
-        """per-scope 编排锁：只覆盖内存编排段，不跨 DB 事务持有。"""
+        """Hold the in-process scope lock for the caller's orchestration span.
+
+        The lock itself does not open a database transaction.  A caller may
+        deliberately nest :meth:`transaction` inside it (the Product
+        reservation/reconcile path does) and therefore retain this local lock
+        through the backend's physical commit.
+        """
 
         with self._registry_lock:
             lock = self._scope_locks.get(scope_digest)
@@ -97,6 +104,13 @@ class SecurityStateStoreAccess:
         return self._store.cas_security_state(
             scope_digest, expected_state_version, record
         )
+
+    @contextmanager
+    def transaction(self, scope_digest: str) -> Iterator[None]:
+        """Hold the backend's cross-process scope transaction through writes."""
+
+        with self._store.security_state_transaction(scope_digest):
+            yield
 
     def mark_security_state_dirty(self, scope_digest: str, domains: list[str]) -> None:
         self._store.mark_security_state_dirty(scope_digest, domains)

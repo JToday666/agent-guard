@@ -36,7 +36,7 @@ from guard_api.storage.base import (
     StateVersionConflictError,
 )
 
-from .models import ProjectApplyResult
+from .models import ProjectApplyResult, SecurityStateProjectError
 from .projector import CommittedVerifier, SecurityStateProjector
 from .rebuild import DEFAULT_REBUILD_LIMIT, rebuild_locked, state_from_record
 from .snapshot_builder import (
@@ -223,3 +223,26 @@ class SecurityStateService:
                 )
                 return state
             return state_from_record(record)
+
+    def reconcile_projection_history(
+        self,
+        scope_digest: str,
+        *,
+        rebuild_limit: int = DEFAULT_REBUILD_LIMIT,
+    ) -> OnlineSecurityState:
+        """Rebuild every bounded envelope while a scope transaction is held.
+
+        This is the Product commit→project recovery primitive.  The caller
+        holds both the process-local scope lock and the backend transaction;
+        any truncation or invalid history remains a fail-closed projector
+        error rather than a partially accepted online state.
+        """
+
+        state, alert = rebuild_locked(
+            self._access,
+            scope_digest,
+            limit=rebuild_limit,
+        )
+        if alert is not None:
+            raise SecurityStateProjectError(alert)
+        return state
