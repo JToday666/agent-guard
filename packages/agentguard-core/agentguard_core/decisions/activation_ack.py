@@ -119,7 +119,7 @@ class ActivationAckV1(BaseModel):
     tool_inventory_digest: str = Field(pattern=_DIGEST)
     issued_at: str
     expires_at: str
-    ack_token: str = Field(pattern=_SIGNATURE)
+    ack_token: str = Field(pattern=_SIGNATURE, repr=False)
 
     @model_validator(mode="after")
     def validate_ack(self) -> "ActivationAckV1":

@@ -8,12 +8,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from agentguard_core import (
+    ActivationAckV1,
     OPENCLAW_RESIDUAL_BOUNDARIES,
     ProductActivationBundleV1,
     RuntimeActivationEntryV1,
     RuntimeCapabilityReportV2,
     RuntimeEventCapabilityV2,
     build_product_activation_bundle,
+    build_activation_ack,
     build_residual_risk_acceptance,
     build_rollout_admission_record,
     build_runtime_capability_report,
@@ -274,6 +276,46 @@ def product_runtime_status_for_activation(
     )
 
 
+def product_activation_ack_for_status(
+    fixture: ProductActivationFixture,
+    status: ProductRuntimeStatusV2,
+    *,
+    expires_at: datetime | None = None,
+) -> ActivationAckV1:
+    """Mint the exact private ACK paired with one server-timed status fixture."""
+
+    issued = datetime.fromisoformat(status.last_heartbeat_at)
+    entry = fixture.bundle.runtime_entry(status.runtime)
+    bundle_expiry = datetime.fromisoformat(fixture.bundle.expires_at)
+    entry_expiry = datetime.fromisoformat(entry.expires_at)
+    expiry = min(
+        _utc(expires_at) if expires_at is not None else issued + timedelta(seconds=120),
+        bundle_expiry,
+        entry_expiry,
+    )
+    report = status.capability_report
+    assert report is not None
+    assert status.host_inventory_digest is not None
+    assert status.tool_inventory_digest is not None
+    return build_activation_ack(
+        server_secret=fixture.server_secret,
+        runtime=status.runtime,
+        runtime_version=status.runtime_version,
+        plugin_version=status.plugin_version,
+        agent_id=status.agent_id,
+        runtime_binding_id=status.runtime_binding_id,
+        profile_id=status.profile_id,
+        activation_ref_digest=fixture.bundle.activation_ref_digest,
+        capability_digest=report.report_digest,
+        host_inventory_digest=status.host_inventory_digest,
+        plugin_inventory_digest=status.plugin_inventory_digest,
+        plugin_order_inventory_digest=status.plugin_order_inventory_digest,
+        tool_inventory_digest=status.tool_inventory_digest,
+        issued_at=issued.isoformat(),
+        expires_at=expiry.isoformat(),
+    )
+
+
 def write_test_product_activation(
     path: Path,
     fixture: ProductActivationFixture,
@@ -290,6 +332,7 @@ __all__ = [
     "TEST_PRODUCT_ACTIVATION_SIGNER",
     "build_test_product_activation",
     "build_test_runtime_capability",
+    "product_activation_ack_for_status",
     "product_runtime_status_for_activation",
     "write_test_product_activation",
 ]

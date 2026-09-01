@@ -311,6 +311,52 @@ product_runtime_statuses_v2 = Table(
     ),
 )
 
+product_activation_acks_v1 = Table(
+    "product_activation_acks_v1",
+    metadata,
+    Column("token_digest", Text, primary_key=True),
+    Column("runtime", Text, nullable=False),
+    Column("agent_id", Text, nullable=False),
+    Column("runtime_binding_id", Text, nullable=False),
+    Column("profile_id", Text, nullable=False),
+    Column("principal_id", Text, nullable=False),
+    Column("issued_at", DateTime(timezone=True), nullable=False),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    Column("revoked_at", DateTime(timezone=True), nullable=True),
+    Column("payload_json", JSONB, nullable=False),
+    ForeignKeyConstraint(
+        ["runtime", "agent_id", "runtime_binding_id", "profile_id"],
+        [
+            "product_runtime_statuses_v2.runtime",
+            "product_runtime_statuses_v2.agent_id",
+            "product_runtime_statuses_v2.runtime_binding_id",
+            "product_runtime_statuses_v2.profile_id",
+        ],
+        name="fk_product_activation_acks_v1_runtime_status",
+        ondelete="CASCADE",
+    ),
+    CheckConstraint(
+        "token_digest COLLATE \"C\" ~ '^sha256:[0-9a-f]{64}$'",
+        name="ck_product_activation_acks_v1_token_digest",
+    ),
+    CheckConstraint(
+        "expires_at > issued_at",
+        name="ck_product_activation_acks_v1_window",
+    ),
+    CheckConstraint(
+        "revoked_at IS NULL OR revoked_at >= issued_at",
+        name="ck_product_activation_acks_v1_revocation",
+    ),
+    Index(
+        "ix_product_activation_acks_v1_identity_issued",
+        "runtime",
+        "agent_id",
+        "runtime_binding_id",
+        "profile_id",
+        text("issued_at DESC"),
+    ),
+)
+
 credentials = Table(
     "credentials",
     metadata,

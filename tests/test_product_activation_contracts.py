@@ -36,6 +36,7 @@ from agentguard_core import (
     openclaw_event_residual_boundaries,
     select_product_v21_authority,
     verify_activation_ack,
+    verify_activation_ack_token,
     verify_product_activation_bundle,
     verify_residual_risk_acceptance,
     verify_rollout_admission_record,
@@ -387,9 +388,11 @@ def test_activation_ack_is_short_lived_and_binds_inventory() -> None:
     assert verify_activation_ack(
         ack, server_secret=SECRET, now=issued + timedelta(seconds=1)
     )
+    assert verify_activation_ack_token(ack, server_secret=SECRET)
     assert not verify_activation_ack(
         ack, server_secret=SECRET, now=issued + timedelta(seconds=120)
     )
+    assert verify_activation_ack_token(ack, server_secret=SECRET)
     tampered = ActivationAckV1.model_construct(
         **{
             **ack.model_dump(mode="json"),
@@ -399,6 +402,7 @@ def test_activation_ack_is_short_lived_and_binds_inventory() -> None:
     assert not verify_activation_ack(
         tampered, server_secret=SECRET, now=issued + timedelta(seconds=1)
     )
+    assert not verify_activation_ack_token(tampered, server_secret=SECRET)
     with pytest.raises(ValidationError, match="requires profile_id"):
         build_activation_ack(
             server_secret=SECRET,

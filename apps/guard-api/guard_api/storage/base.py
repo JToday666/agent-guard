@@ -8,6 +8,7 @@ from datetime import datetime
 from typing import Any, ContextManager, Protocol
 
 from agentguard_core import (
+    ActivationAckV1,
     AuditEvent,
     ActionCriticReview,
     ConfigAuditEvent,
@@ -33,6 +34,7 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.runtime_status import (
+    ProductActivationAckRecordV1,
     ProductRuntime,
     ProductRuntimeStatusIdentityV1,
     ProductRuntimeStatusV2,
@@ -817,8 +819,28 @@ class ControlPlaneStore(Protocol):
     def list_adapter_statuses(self) -> dict[str, dict]: ...
 
     def save_product_runtime_status(
-        self, status: ProductRuntimeStatusV2 | dict
+        self,
+        status: ProductRuntimeStatusV2 | dict,
+        *,
+        activation_ack: ActivationAckV1 | dict | None = None,
+        revoke_activation_acks_for: ProductRuntimeStatusIdentityV1 | dict | None = None,
+        revoked_at: str | None = None,
     ) -> ProductRuntimeStatusV2: ...
+
+    def get_product_activation_ack(
+        self, token_digest: str
+    ) -> ProductActivationAckRecordV1 | None: ...
+
+    def get_latest_product_activation_ack(
+        self, identity: ProductRuntimeStatusIdentityV1 | dict
+    ) -> ProductActivationAckRecordV1 | None: ...
+
+    def revoke_product_activation_acks(
+        self,
+        identity: ProductRuntimeStatusIdentityV1 | dict,
+        *,
+        revoked_at: str,
+    ) -> int: ...
 
     def get_product_runtime_status(
         self, identity: ProductRuntimeStatusIdentityV1 | dict
