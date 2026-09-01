@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from agentguard_core import (
     ActionCritic,
+    ApprovalReleaseDirectiveV2,
     AuditEvent,
     DecisionAuthority,
     GuardDecision,
@@ -47,7 +48,10 @@ from guard_api.storage.integrity import canonical_sha256
 
 from .approval import ApprovalService
 from .audit import AuditService
-from .competition import CriticalDecisionEvidenceError
+from .competition import (
+    CriticalDecisionEvidenceError,
+    parse_decision_authority_evidence_payload,
+)
 from .context_manifest import (
     ContextManifestPrepared,
     context_manifest_anchor_from_policy,
@@ -790,6 +794,7 @@ class EvaluationService:
             decision,
             requesting_principal_id=requesting_principal_id,
             decision_authority=authority,
+            approval_release_directive=None,
         )
         if not (self.v21_pipeline is not None and self.v21_pipeline.product_active):
             approval = self.approval_service.auto_review_with_llm(approval)
@@ -844,6 +849,7 @@ class EvaluationService:
             requesting_principal_id=requesting_principal_id,
             selected_decision=decision,
             decision_authority=authority,
+            approval_release_directive=None,
         )
         return (
             GuardEvaluationResponse(
@@ -1082,6 +1088,7 @@ class EvaluationService:
             raise EvaluationConflictError(audit.links.get("event_id", ""))
         decision = GuardDecision.model_validate(raw_decision)
         authority: DecisionAuthority | None = None
+        approval_release_directive: ApprovalReleaseDirectiveV2 | None = None
         evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
         raw_authority_envelope = evidence.get("decision_authority")
         raw_top_authority = (audit.model_extra or {}).get("decision_authority")
@@ -1104,6 +1111,14 @@ class EvaluationService:
                     expected_authority=authority,
                     expected_v21_evidence={"decision_v21": raw_v21},
                 )
+                parsed_authority_evidence = parse_decision_authority_evidence_payload(
+                    {"decision_authority": raw_authority_envelope}
+                )
+                approval_release_directive = getattr(
+                    parsed_authority_evidence,
+                    "approval_release_directive",
+                    None,
+                )
             except CriticalDecisionEvidenceError:
                 raise
             except Exception as exc:  # noqa: BLE001 - immutable carrier boundary.
@@ -1122,13 +1137,24 @@ class EvaluationService:
             if stored_binding is not None:
                 binding = self._public_binding(stored_binding)
         if authority is not None and authority.source == "v21":
-            if authority.approval_release == "strong_binding_required" and (
+            release_mode = (
+                approval_release_directive.mode
+                if approval_release_directive is not None
+                else authority.approval_release
+            )
+            if release_mode in {"strong_binding_required", "strong_binding"} and (
                 approval is None or binding is None
             ):
                 raise CriticalDecisionEvidenceError(
                     "historical reviewable V2 ASK lacks approval or binding"
                 )
-            if authority.approval_release == "forbidden" and (
+            if release_mode == "restricted_allow_once" and (
+                approval is None or binding is not None
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "historical restricted V2 ASK has invalid approval binding"
+                )
+            if release_mode in {"forbidden", "not_applicable"} and (
                 approval is not None or binding is not None
             ):
                 raise CriticalDecisionEvidenceError(
@@ -1140,6 +1166,7 @@ class EvaluationService:
             policy_audit_id=audit.audit_id,
             enforcement_binding=binding,
             decision_authority=authority,
+            approval_release_directive=approval_release_directive,
         )
 
     def _save_enforcement_binding(
@@ -1153,21 +1180,80 @@ class EvaluationService:
         requesting_principal_id: str,
         selected_decision: GuardDecision,
         decision_authority: DecisionAuthority | None,
+        approval_release_directive: ApprovalReleaseDirectiveV2 | None = None,
     ) -> EnforcementBinding | None:
         """Persist an eligible ASK ActionIR binding inside the evaluation txn."""
 
+        directive_mode = (
+            approval_release_directive.mode
+            if approval_release_directive is not None
+            else None
+        )
         approval_release = (
             decision_authority.approval_release
             if decision_authority is not None and decision_authority.source == "v21"
             else None
         )
-        if approval_release == "forbidden":
+        if approval_release_directive is not None:
+            try:
+                if decision_authority is None:
+                    raise ValueError("decision authority is absent")
+                typed_authority = DecisionAuthority.model_validate(
+                    (approval.evidence if approval is not None else {}).get(
+                        "decision_authority"
+                    )
+                )
+                typed_directive = ApprovalReleaseDirectiveV2.model_validate(
+                    (approval.evidence if approval is not None else {}).get(
+                        "approval_release_directive"
+                    )
+                )
+            except (TypeError, ValueError) as exc:
+                if directive_mode in {"strong_binding", "restricted_allow_once"}:
+                    raise V21OfficialEvaluationUnavailableError(
+                        "V21_PRODUCT_APPROVAL_RELEASE_EVIDENCE_INVALID"
+                    ) from exc
+                typed_authority = None
+                typed_directive = None
+            if directive_mode in {"strong_binding", "restricted_allow_once"}:
+                if (
+                    approval is None
+                    or approval.approval_id != audit.links.get("approval_id")
+                    or approval.trace_id != audit.trace_id
+                    or approval.runtime != event.runtime
+                    or approval.action_id != audit.links.get("action_id")
+                    or typed_authority != decision_authority
+                    or typed_directive != approval_release_directive
+                ):
+                    raise V21OfficialEvaluationUnavailableError(
+                        "V21_PRODUCT_APPROVAL_RELEASE_IDENTITY_MISMATCH"
+                    )
+        release_forbidden = bool(
+            directive_mode in {"forbidden", "not_applicable"}
+            or (directive_mode is None and approval_release == "forbidden")
+        )
+        if release_forbidden:
             if approval is not None:
                 raise V21OfficialEvaluationUnavailableError(
                     "V21_OFFICIAL_FORBIDDEN_ASK_CREATED_APPROVAL"
                 )
             return None
-        binding_required = approval_release == "strong_binding_required"
+        if directive_mode == "restricted_allow_once":
+            if approval is None:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_RESTRICTED_ASK_APPROVAL_MISSING"
+                )
+            # C1 best-effort Host binding is not the C3 exact
+            # ``EnforcementBinding`` contract.  The restricted lease/spool
+            # hand-off is wired by the OpenClaw runtime batch; this layer only
+            # preserves the signed release directive and human approval.
+            return None
+        binding_required = bool(
+            directive_mode == "strong_binding"
+            or (
+                directive_mode is None and approval_release == "strong_binding_required"
+            )
+        )
         if not self.approval_service.settings.rte05_strong_binding_enabled:
             if binding_required:
                 raise V21OfficialEvaluationUnavailableError(

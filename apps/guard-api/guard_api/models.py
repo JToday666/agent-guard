@@ -8,6 +8,7 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from agentguard_core import (
+    ApprovalReleaseDirectiveV2,
     ConfigAuditFinding,
     DecisionAuthority,
     GuardDecision,
@@ -198,6 +199,14 @@ class GuardEvaluationResponse(BaseModel):
     # integrated.  The optional wire key preserves every pre-competition
     # response shape when no committed authority evidence exists.
     decision_authority: DecisionAuthority | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    # Product V2 readers consume the typed release authority directly.  The
+    # sibling is absent for legacy/competition responses so their frozen wire
+    # keyset remains unchanged; OpenClaw's legacy authority projection stays
+    # deliberately ``forbidden`` and can never be mistaken for this directive.
+    approval_release_directive: ApprovalReleaseDirectiveV2 | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )

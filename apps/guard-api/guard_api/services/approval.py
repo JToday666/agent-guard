@@ -30,7 +30,14 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from agentguard_core import AuditEvent, GuardDecision, GuardEvent
+from agentguard_core import (
+    ApprovalReleaseDirectiveV2,
+    AuditEvent,
+    DecisionAuthority,
+    GuardDecision,
+    GuardEvent,
+    legacy_approval_release_projection,
+)
 from agentguard_core.actions.canonical_json import (
     canonical_json_bytes,
     canonical_sha256,
@@ -120,7 +127,63 @@ class ApprovalService:
         *,
         requesting_principal_id: str,
         decision_authority: Any | None = None,
+        approval_release_directive: ApprovalReleaseDirectiveV2 | None = None,
     ) -> ApprovalRequest | None:
+        raw_authority: dict[str, Any] | None = None
+        if decision_authority is not None:
+            candidate = (
+                decision_authority.model_dump(mode="json")
+                if hasattr(decision_authority, "model_dump")
+                else decision_authority
+            )
+            if not isinstance(candidate, dict):
+                raise ValueError("decision authority must be a typed projection")
+            raw_authority = dict(candidate)
+        if approval_release_directive is not None:
+            releasable = approval_release_directive.mode in {
+                "strong_binding",
+                "restricted_allow_once",
+            }
+            if releasable and (
+                decision.decision != "ask" or decision.approval_intent is None
+            ):
+                raise ValueError(
+                    "a releasable Product directive requires an ASK intent"
+                )
+            if not releasable and decision.approval_intent is not None:
+                raise ValueError(
+                    "an unreleasable Product directive cannot carry an ASK intent"
+                )
+            if decision.decision != "ask" and (
+                approval_release_directive.mode != "not_applicable"
+            ):
+                raise ValueError(
+                    "a non-ASK Product decision requires not_applicable release"
+                )
+            try:
+                typed_authority = DecisionAuthority.model_validate(raw_authority)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(
+                    "a Product release directive requires typed V2 authority"
+                ) from exc
+            if not all(
+                (
+                    typed_authority.source == "v21",
+                    typed_authority.mode == "active",
+                    typed_authority.selection_basis == "profile_all",
+                    hmac_module.compare_digest(
+                        typed_authority.activation_ref_digest,
+                        approval_release_directive.activation_ref_digest,
+                    ),
+                    typed_authority.approval_release
+                    == legacy_approval_release_projection(approval_release_directive),
+                )
+            ):
+                raise ValueError(
+                    "Product release directive and decision authority are inconsistent"
+                )
+            if not releasable:
+                return None
         if decision.decision != "ask" or decision.approval_intent is None:
             return None
         description = describe_guard_event(event)
@@ -132,15 +195,12 @@ class ApprovalService:
             scrub_text(description.action_name), SUMMARY_TEXT_LIMIT
         )
         approval_evidence = _approval_evidence(event, decision, description)
-        if decision_authority is not None:
-            raw_authority = (
-                decision_authority.model_dump(mode="json")
-                if hasattr(decision_authority, "model_dump")
-                else decision_authority
+        if raw_authority is not None:
+            approval_evidence["decision_authority"] = raw_authority
+        if approval_release_directive is not None:
+            approval_evidence["approval_release_directive"] = (
+                approval_release_directive.model_dump(mode="json")
             )
-            if not isinstance(raw_authority, dict):
-                raise ValueError("decision authority must be a typed projection")
-            approval_evidence["decision_authority"] = dict(raw_authority)
         approval = ApprovalRequest(
             trace_id=event.trace_id,
             subject_id=description.subject_id,

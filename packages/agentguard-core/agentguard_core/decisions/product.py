@@ -1140,6 +1140,10 @@ class ProductDecisionAuthorityEvidenceV1(BaseModel):
 
     @model_validator(mode="after")
     def validate_parity(self) -> "ProductDecisionAuthorityEvidenceV1":
+        if self.profile_id != _RUNTIME_PROFILE_IDS[self.runtime]:
+            raise ValueError(
+                "product authority evidence profile does not match runtime"
+            )
         decisions = (
             (self.current_decision, self.current_decision_digest, "current"),
             (self.raw_v21_decision, self.raw_v21_decision_digest, "raw_v21"),

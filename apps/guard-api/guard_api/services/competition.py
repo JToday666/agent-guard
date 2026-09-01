@@ -12,6 +12,7 @@ from typing import Any
 from agentguard_core import (
     CompetitionActivationManifestV1,
     DecisionAuthorityEvidenceV1,
+    ProductDecisionAuthorityEvidenceV1,
     verify_competition_activation_manifest,
 )
 
@@ -26,7 +27,12 @@ class CriticalDecisionEvidenceError(RuntimeError):
 
 
 def strict_decision_authority_envelope(value: object) -> dict[str, Any]:
-    """Validate and normalize the critical sibling without truncation/drop."""
+    """Validate and normalize either frozen critical sibling version.
+
+    The envelope version is the discriminator.  Each version is parsed only by
+    its corresponding ``extra=forbid`` Core model, so a payload cannot select a
+    looser model by forging either the outer or inner ``schema_version``.
+    """
 
     if not isinstance(value, dict) or set(value) != {"decision_authority"}:
         raise CriticalDecisionEvidenceError(
@@ -40,24 +46,43 @@ def strict_decision_authority_envelope(value: object) -> dict[str, Any]:
         raise CriticalDecisionEvidenceError(
             "decision authority evidence envelope is malformed"
         )
-    if raw_envelope.get("schema_version") != "1.0":
+    schema_version = raw_envelope.get("schema_version")
+    if not isinstance(schema_version, str) or schema_version not in {"1.0", "2.0"}:
         raise CriticalDecisionEvidenceError(
             "decision authority evidence schema version is unsupported"
         )
     try:
-        payload = DecisionAuthorityEvidenceV1.model_validate(
-            raw_envelope.get("payload")
+        payload_model = (
+            DecisionAuthorityEvidenceV1
+            if schema_version == "1.0"
+            else ProductDecisionAuthorityEvidenceV1
         )
-    except ValueError as exc:
+        payload = payload_model.model_validate(raw_envelope.get("payload"))
+    except (TypeError, ValueError) as exc:
         raise CriticalDecisionEvidenceError(
             "decision authority evidence payload is invalid"
         ) from exc
     return {
         "decision_authority": {
-            "schema_version": "1.0",
+            "schema_version": schema_version,
             "payload": payload.model_dump(mode="json"),
         }
     }
+
+
+def parse_decision_authority_evidence_payload(
+    envelope: object,
+) -> DecisionAuthorityEvidenceV1 | ProductDecisionAuthorityEvidenceV1:
+    """Return the exact typed payload after strict envelope dispatch."""
+
+    strict = strict_decision_authority_envelope(envelope)
+    raw = strict["decision_authority"]
+    payload_model = (
+        DecisionAuthorityEvidenceV1
+        if raw["schema_version"] == "1.0"
+        else ProductDecisionAuthorityEvidenceV1
+    )
+    return payload_model.model_validate(raw["payload"])
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,5 +191,6 @@ __all__ = [
     "CriticalDecisionEvidenceError",
     "FrozenCompetitionActivation",
     "load_frozen_competition_activation",
+    "parse_decision_authority_evidence_payload",
     "strict_decision_authority_envelope",
 ]

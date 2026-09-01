@@ -824,6 +824,10 @@ export async function decisionToToolResult(
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { block: true, blockReason: blockedDecisionMessage(response) };
   }
+  if (mustBlockV2AskWithoutRuntimeRelease(response)) {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
+    return { block: true, blockReason: blockedDecisionMessage(response) };
+  }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return {
@@ -867,6 +871,10 @@ export async function decisionToMessageResult(
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return { cancel: true, cancelReason: blockedDecisionMessage(response) };
   }
+  if (mustBlockV2AskWithoutRuntimeRelease(response)) {
+    onOutcome?.({ kind: "pre_execution_deny", approval: null });
+    return { cancel: true, cancelReason: blockedDecisionMessage(response) };
+  }
   if (response.approval === null || waiter.waitForApproval === undefined) {
     onOutcome?.({ kind: "pre_execution_deny", approval: null });
     return {
@@ -896,6 +904,27 @@ export async function decisionToMessageResult(
       approval,
     ),
   };
+}
+
+/**
+ * Compatibility reader safety: generic C1 approval waiting is never release
+ * authority for a V2 ASK. Product restricted release is consumed only by the
+ * explicit restricted runtime path; until that path is enabled, the legacy
+ * projection (`forbidden`) and even a malformed/orphan directive block.
+ */
+function mustBlockV2AskWithoutRuntimeRelease(
+  response: GuardEvaluationResponse,
+): boolean {
+  if (response.approval_release_directive !== undefined) {
+    return true;
+  }
+  const authority: unknown = response.decision_authority;
+  return (
+    typeof authority === "object" &&
+    authority !== null &&
+    "source" in authority &&
+    authority.source === "v21"
+  );
 }
 
 /** 把审批等待结果映射为 §9.8 evidence 稳定状态（timeout→expired）。 */

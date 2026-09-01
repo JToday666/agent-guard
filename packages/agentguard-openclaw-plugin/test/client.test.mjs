@@ -355,6 +355,51 @@ test("decision adapters enforce allow deny ask and fail-closed results", async (
   });
 });
 
+test("legacy reader blocks every V2 ASK without an explicit runtime release path", async () => {
+  let waitCalls = 0;
+  const waiter = {
+    waitForApproval: async () => {
+      waitCalls += 1;
+      return { status: "resolved", decision: "allow_once" };
+    },
+  };
+  const restrictedAsk = {
+    ...askDecision,
+    decision_authority: {
+      source: "v21",
+      mode: "active",
+      selection_basis: "profile_all",
+      matched_path_ids: [],
+      legacy_floor_applied: false,
+      activation_ref_digest: `sha256:${"a".repeat(64)}`,
+      approval_release: "forbidden",
+    },
+    approval_release_directive: {
+      schema_version: "2.0",
+      mode: "restricted_allow_once",
+      required_runtime_profile: "C1",
+      human_only: true,
+      single_use: true,
+      action_binding: "best_effort_host",
+      receipt_requirement: "required_durable",
+      activation_ref_digest: `sha256:${"a".repeat(64)}`,
+      scope_digest: `sha256:${"b".repeat(64)}`,
+      capability_digest: `sha256:${"c".repeat(64)}`,
+      residual_boundaries: [],
+    },
+  };
+
+  assert.deepEqual(await decisionToToolResult(restrictedAsk, waiter), {
+    block: true,
+    blockReason: `needs review ${BLOCKED_ACTION_GUIDANCE}`,
+  });
+  assert.deepEqual(await decisionToMessageResult(restrictedAsk, waiter), {
+    cancel: true,
+    cancelReason: `needs review ${BLOCKED_ACTION_GUIDANCE}`,
+  });
+  assert.equal(waitCalls, 0);
+});
+
 test("GuardApiClient caps approval polling by the single approval timeout", async () => {
   let waitCalls = 0;
   const client = new GuardApiClient({

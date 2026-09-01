@@ -59,4 +59,6 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             dumped.pop("context_plan", None)
         if response.decision_authority is None:
             dumped.pop("decision_authority", None)
+        if response.approval_release_directive is None:
+            dumped.pop("approval_release_directive", None)
         return dumped
