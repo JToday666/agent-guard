@@ -40,6 +40,7 @@ from guard_api.services.competition import (
 )
 from guard_api.services.evaluation import EvaluationService
 from guard_api.services.policy import PolicyService
+from guard_api.services.v21_pipeline import V21OfficialEvaluationUnavailableError
 from guard_api.settings import GuardApiSettings
 from guard_api.storage.memory import MemoryControlPlaneStore
 from tests.support.product_activation import build_test_product_activation
@@ -419,6 +420,42 @@ def test_product_v2_authority_rejects_unknown_or_spoofed_shapes(mutate) -> None:
         strict_decision_authority_envelope(envelope)
 
 
+@pytest.mark.parametrize("deny_only_source", ["current", "raw_v21"])
+def test_releasable_product_evidence_rejects_deny_only_authority_input(
+    deny_only_source: str,
+) -> None:
+    authority_evidence, _ = _restricted_authority_fixture()
+    payload = authority_evidence.model_dump(mode="json")
+    decision_key = f"{deny_only_source}_decision"
+    digest_key = f"{deny_only_source}_decision_digest"
+    deny_only = GuardDecision.model_validate(payload[decision_key]).model_copy(
+        update={
+            "decision": "ask",
+            "approval_intent": ApprovalIntent(
+                options=["deny"],
+                resource="action:deny-only-authority-input",
+            ),
+        }
+    )
+    payload[decision_key] = deny_only.model_dump(mode="json")
+    payload[digest_key] = canonical_sha256(deny_only.model_dump(mode="json"))
+
+    with pytest.raises(
+        ValueError,
+        match="cannot override an explicit deny-only intent",
+    ):
+        ProductDecisionAuthorityEvidenceV1.model_validate(payload)
+
+    envelope = {
+        "decision_authority": {
+            "schema_version": "2.0",
+            "payload": payload,
+        }
+    }
+    with pytest.raises(CriticalDecisionEvidenceError):
+        strict_decision_authority_envelope(envelope)
+
+
 def test_authority_version_dispatch_rejects_cross_version_payload_spoofing() -> None:
     authority_evidence, _ = _product_authority_fixture()
     product = product_decision_authority_envelope(authority_evidence)
@@ -513,6 +550,34 @@ def test_unreleasable_product_directives_create_no_approval() -> None:
     assert store.approvals == {}
 
 
+def test_approval_service_rejects_releasable_deny_only_product_intent() -> None:
+    restricted, _ = _restricted_authority_fixture()
+    store = MemoryControlPlaneStore()
+    approvals = ApprovalService(
+        store=store,
+        settings=GuardApiSettings(storage_backend="memory"),
+    )
+    deny_only = restricted.selected_decision.model_copy(
+        update={
+            "approval_intent": ApprovalIntent(
+                options=["deny"],
+                resource="action:deny-only-direct-call",
+            )
+        }
+    )
+
+    with pytest.raises(ValueError, match="must include allow_once"):
+        approvals.create_for_decision(
+            _restricted_event(),
+            deny_only,
+            requesting_principal_id="principal:openclaw",
+            decision_authority=restricted.decision_authority,
+            approval_release_directive=restricted.approval_release_directive,
+        )
+
+    assert store.approvals == {}
+
+
 def test_restricted_directive_survives_approval_audit_and_response_rebuild() -> None:
     authority_evidence, decision_evidence = _restricted_authority_fixture()
     store = MemoryControlPlaneStore()
@@ -565,7 +630,7 @@ def test_restricted_directive_survives_approval_audit_and_response_rebuild() -> 
     )
 
 
-def test_restricted_directive_never_creates_c3_enforcement_binding() -> None:
+def test_restricted_directive_fails_closed_without_verified_materials_or_c3() -> None:
     authority_evidence, decision_evidence = _restricted_authority_fixture()
     store = MemoryControlPlaneStore()
     settings = GuardApiSettings(
@@ -603,19 +668,20 @@ def test_restricted_directive_never_creates_c3_enforcement_binding() -> None:
         approval_service=approvals,
     )
 
-    binding = service._save_enforcement_binding(  # noqa: SLF001
-        event,
-        approval=approval,
-        audit=persisted,
-        materials=cast(Any, object()),
-        phase_b_outcome=None,
-        requesting_principal_id="principal:openclaw",
-        selected_decision=authority_evidence.selected_decision,
-        decision_authority=authority_evidence.decision_authority,
-        approval_release_directive=(authority_evidence.approval_release_directive),
-    )
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        service._save_enforcement_binding(  # noqa: SLF001
+            event,
+            approval=approval,
+            audit=persisted,
+            materials=cast(Any, object()),
+            phase_b_outcome=None,
+            requesting_principal_id="principal:openclaw",
+            selected_decision=authority_evidence.selected_decision,
+            decision_authority=authority_evidence.decision_authority,
+            approval_release_directive=(authority_evidence.approval_release_directive),
+        )
 
-    assert binding is None
+    assert raised.value.code == "V21_PRODUCT_RESTRICTED_ASK_MATERIALS_INVALID"
     assert store.enforcement_bindings == {}
 
 

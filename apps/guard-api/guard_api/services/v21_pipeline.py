@@ -66,6 +66,7 @@ from agentguard_core import (
     GuardEngine,
     GuardEvent,
     PolicyBundle,
+    ProductDecisionAuthorityEvidenceV1,
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.models import ActionIR
@@ -94,6 +95,7 @@ from agentguard_core.decisions.shadow import (
 )
 from agentguard_core.security_context.snapshot import SecuritySnapshot
 from agentguard_core.security_context import (
+    OnlineSecurityState,
     PROJECTOR_VERSION,
     CommittedRecord,
     ProjectionRecordIdentity,
@@ -131,6 +133,8 @@ from .v21_shadow import (
 if TYPE_CHECKING:
     from agentguard_core.security_context import AssessmentTransientFacts
     from agentguard_core.semantic.models import SemanticJudgment
+
+    from .product_activation import FrozenProductActivation
 
 logger = logging.getLogger(__name__)
 
@@ -327,6 +331,7 @@ class V21PhaseBOutcome:
     # instant is persisted as the projection reservation ``created_at``.
     product_authority_digest: str | None = None
     product_authority_initial_checked_at: str | None = None
+    product_replay_authority_digest: str | None = None
 
 
 @dataclass(frozen=True)
@@ -366,7 +371,53 @@ class _ProductAuthorityCapture:
     policy_digest: str
     snapshot_digest: str
     authority_digest: str
+    replay_authority_digest: str
     checked_at: datetime
+
+
+def _product_replay_authority_digest(
+    *,
+    event_digest: str,
+    activation_content_digest: str,
+    activation_projection: dict[str, Any],
+    runtime_binding: ResolvedRuntimeBinding,
+    runtime_observation_digest: str,
+    credential_projection: dict[str, Any],
+    policy_revision: int,
+    policy_digest: str,
+    task_authority_projection: dict[str, Any],
+) -> str:
+    """Bind replay-stable Product authority while excluding mutable state.
+
+    The runtime observation projection intentionally excludes only the
+    heartbeat timestamp. State/snapshot inputs are absent because the committed
+    Product projection is expected to advance them before an exact replay.
+    """
+
+    return canonical_sha256(
+        {
+            "schema_version": "product-replay-authority-anchor/1.0",
+            "event_digest": event_digest,
+            "activation": {
+                "content_digest": activation_content_digest,
+                **activation_projection,
+            },
+            "runtime_binding": {
+                "runtime": runtime_binding.runtime,
+                "principal_id": runtime_binding.principal_id,
+                "agent_id": runtime_binding.agent_id,
+                "runtime_binding_id": runtime_binding.runtime_binding_id,
+                "actor_principal_id": runtime_binding.actor_principal_id,
+                "activation_ref_digest": runtime_binding.activation_ref_digest,
+                "source": runtime_binding.source,
+            },
+            "runtime_observation_digest": runtime_observation_digest,
+            "credential_digest": canonical_sha256(credential_projection),
+            "policy_revision": policy_revision,
+            "policy_digest": policy_digest,
+            "task_authority_digest": canonical_sha256(task_authority_projection),
+        }
+    )
 
 
 def _phase_a_payload_digest(
@@ -541,8 +592,9 @@ class V21PipelineService:
     复用 ``AGENTGUARD_V21_MODE`` 与 server secret 配置）；mode off 时
     ``run_phase_a`` 仅一次布尔判断返回 None，零 I/O。兼容路径继续把
     异常收敛为 shadow 旁路；加载 Product activation 时，完整 authority
-    fence、最终 precommit 复核和 reservation 为强制 503 边界。本批次
-    仍保留外层 Product selector fuse，正式 selection 在后续批次接线。
+    fence、最终 precommit 复核和 reservation 为强制 503 边界。内部
+    Product selector/replay 已接入；公开 composition root 仍保留外层
+    fuse，直到 ACK/freshness 批次完成后才原子移除。
     """
 
     def __init__(
@@ -630,6 +682,17 @@ class V21PipelineService:
 
         return self._runtime_binding_resolver.product_active
 
+    @property
+    def product_activation(self) -> "FrozenProductActivation | None":
+        """Return the one process-frozen Product activation used by the fence.
+
+        Authority selection must consume the same verified object as runtime
+        binding and Phase-B revalidation. In particular, callers must not use
+        the temporary public pre-selector fuse as an activation data source.
+        """
+
+        return self._runtime_binding_resolver.product_activation
+
     @contextmanager
     def authority_transaction(
         self,
@@ -682,6 +745,425 @@ class V21PipelineService:
                 raise V21OfficialEvaluationUnavailableError(
                     PRODUCT_CREDENTIAL_NOT_CURRENT
                 ) from exc
+            except RuntimeBindingResolutionError as exc:
+                self._raise_runtime_binding_error(exc)
+
+    @contextmanager
+    def product_replay_transaction(
+        self,
+        event: GuardEvent,
+        audit: AuditEvent,
+        auth_context: AuthContext | None,
+    ) -> Iterator[AuditEvent]:
+        """Repair and expose one exact Product replay under its full fence.
+
+        This path deliberately never runs Phase A or Core assessment.  It
+        validates replay-stable authority, repairs the exact committed
+        reservation/state in the existing Product transaction, validates
+        authority a second time, and only then yields so the caller may repair
+        provenance and rebuild the immutable response before commit.
+        """
+
+        activation = self.product_activation
+        task_id = _task_claim(event)
+        audit_task_id = audit.metadata.get("task_id")
+        if (
+            not self.active
+            or activation is None
+            or task_id is None
+            or audit_task_id != task_id
+            or auth_context is None
+            or auth_context.credential_id is None
+            or auth_context.credential_token_hash is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        task_record = self._store.get_task_fact(task_id)
+        if task_record is None:
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        scope_digest = task_record.task_fact.scope_digest
+        runtime_ids: tuple[ProductRuntime, ProductRuntime] = (
+            activation.bundle.runtimes[0].runtime,
+            activation.bundle.runtimes[1].runtime,
+        )
+        if runtime_ids != ("langgraph", "openclaw"):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+
+        with self._state_service.store_access.scope_lock(scope_digest):
+            try:
+                with self._store.product_evaluation_transaction(
+                    event.event_id,
+                    task_id=task_id,
+                    scope_digest=scope_digest,
+                    runtime_ids=runtime_ids,
+                    credential_id=auth_context.credential_id,
+                    credential_token_hash=auth_context.credential_token_hash,
+                ):
+                    locked = self._store.get_policy_evaluation_by_event_id(
+                        event.event_id
+                    )
+                    if locked is None or locked.model_dump(
+                        mode="json"
+                    ) != audit.model_dump(mode="json"):
+                        raise V21OfficialEvaluationUnavailableError(
+                            PRODUCT_AUTHORITY_NOT_CURRENT
+                        )
+                    self.repair_product_replay_locked(
+                        event,
+                        locked,
+                        auth_context=auth_context,
+                        task_id=task_id,
+                        scope_digest=scope_digest,
+                    )
+                    yield locked
+            except ProductAuthorityCredentialUnavailableError as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    PRODUCT_CREDENTIAL_NOT_CURRENT
+                ) from exc
+            except RuntimeBindingResolutionError as exc:
+                self._raise_runtime_binding_error(exc)
+
+    def repair_product_replay_locked(
+        self,
+        event: GuardEvent,
+        audit: AuditEvent,
+        *,
+        auth_context: AuthContext,
+        task_id: str,
+        scope_digest: str,
+    ) -> None:
+        """Validate, repair, then revalidate a replay in an existing fence."""
+
+        evidence = self._revalidate_product_replay_authority(
+            event,
+            audit,
+            auth_context=auth_context,
+            task_id=task_id,
+            scope_digest=scope_digest,
+        )
+        self._repair_product_replay_projection_locked(
+            audit,
+            evidence=evidence,
+            scope_digest=scope_digest,
+        )
+        # Re-sample time validity and every non-state authority input after
+        # reconciliation, before provenance becomes mutable.
+        self._revalidate_product_replay_authority(
+            event,
+            audit,
+            auth_context=auth_context,
+            task_id=task_id,
+            scope_digest=scope_digest,
+        )
+
+    def _revalidate_product_replay_authority(
+        self,
+        event: GuardEvent,
+        audit: AuditEvent,
+        *,
+        auth_context: AuthContext,
+        task_id: str,
+        scope_digest: str,
+    ) -> ProductDecisionAuthorityEvidenceV1:
+        """Re-capture replay-stable Product authority without reassessment."""
+
+        activation = self.product_activation
+        if activation is None:
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        try:
+            sampled = self._runtime_binding_resolver.clock()
+            if sampled.tzinfo is None or sampled.utcoffset() is None:
+                raise ValueError("authority clock must be timezone-aware")
+            checked_at = sampled.astimezone(timezone.utc)
+            activation.assert_unchanged()
+            if not activation.bundle.valid_at(checked_at):
+                raise ValueError("Product activation is not current")
+            raw_envelope = (
+                audit.evidence.get("decision_authority")
+                if isinstance(audit.evidence, dict)
+                else None
+            )
+            from .competition import (  # noqa: PLC0415
+                parse_decision_authority_evidence_payload,
+            )
+
+            parsed = parse_decision_authority_evidence_payload(
+                {"decision_authority": raw_envelope}
+            )
+            if not isinstance(parsed, ProductDecisionAuthorityEvidenceV1):
+                raise ValueError("historical authority is not Product schema 2.0")
+            runtime_entry = activation.bundle.runtime_entry(parsed.runtime)
+        except V21OfficialEvaluationUnavailableError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - stable Product replay boundary.
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_AUTHORITY_NOT_CURRENT
+            ) from exc
+
+        task_record = self._store.get_task_fact(task_id)
+        if task_record is None:
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
+        task = task_record.task_fact
+        scope = SecurityStateScope(
+            principal_id=runtime_entry.principal_id,
+            runtime=runtime_entry.runtime,
+            runtime_binding_id=runtime_entry.runtime_binding_id,
+            trace_id=event.trace_id,
+            session_id=event.security_context.session_id,
+            scope_digest=scope_digest,
+        )
+        try:
+            compile_task_authority(
+                task,
+                scope,
+                server_keys=self._task_scope_keyring,
+            )
+        except TaskAuthorityError as exc:
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID) from exc
+        if (
+            task.status != "active"
+            or task.task_id != task_id
+            or task.scope_digest != scope_digest
+            or canonical_sha256(task_record.canonical_payload)
+            != canonical_sha256(task.model_dump(mode="json"))
+            or task_record.expected_revision != task.revision - 1
+        ):
+            raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
+
+        binding = self._runtime_binding_resolver.resolve_evaluation(
+            auth_context,
+            event=event,
+            task_principal_id=task.principal_id,
+            reference_time=checked_at,
+        )
+        self._runtime_binding_resolver.revalidate(
+            binding,
+            reference_time=checked_at,
+        )
+        if not all(
+            (
+                parsed.event_id == event.event_id,
+                parsed.event_type == event.event_type,
+                parsed.runtime == event.runtime == runtime_entry.runtime,
+                parsed.profile_id == runtime_entry.profile_id,
+                parsed.profile_digest == runtime_entry.profile_digest,
+                parsed.dataset_digest == activation.bundle.dataset_digest,
+                parsed.policy_digest == activation.bundle.policy_digest,
+                parsed.decision_authority.activation_ref_digest
+                == activation.bundle.activation_ref_digest,
+                parsed.approval_release_directive.activation_ref_digest
+                == activation.bundle.activation_ref_digest,
+                parsed.approval_release_directive.scope_digest == scope_digest,
+                parsed.approval_release_directive.capability_digest
+                == runtime_entry.capability_report_digest,
+                binding.runtime_binding_id == runtime_entry.runtime_binding_id,
+                binding.principal_id == runtime_entry.principal_id,
+                binding.agent_id == runtime_entry.agent_id,
+            )
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+
+        from .product_activation import (  # noqa: PLC0415
+            RUNTIME_OBSERVATION_MISMATCH,
+            reconcile_product_runtime_observations,
+        )
+
+        observations = reconcile_product_runtime_observations(
+            activation,
+            self._store,
+        )
+        if (
+            not observations.matched
+            or observations.authority_observation_digest is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(RUNTIME_OBSERVATION_MISMATCH)
+
+        if (
+            auth_context.auth_method != "bearer"
+            or auth_context.credential_id is None
+            or auth_context.credential_token_hash is None
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_CREDENTIAL_NOT_CURRENT)
+        credential = self._store.get_credential_by_token_hash(
+            auth_context.credential_token_hash
+        )
+        if credential is None or not all(
+            (
+                credential.credential_id == auth_context.credential_id,
+                credential.token_hash == auth_context.credential_token_hash,
+                credential.principal_type == auth_context.principal_type,
+                credential.principal_id == auth_context.principal_id,
+                credential.role == auth_context.role,
+                sorted(credential.scopes) == sorted(auth_context.scopes),
+                credential.runtime == auth_context.runtime,
+                credential.agent_id == auth_context.agent_id,
+                credential.revoked_at is None,
+                "event:evaluate" in credential.scopes,
+            )
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_CREDENTIAL_NOT_CURRENT)
+        if credential.expires_at is not None:
+            try:
+                credential_expiry = datetime.fromisoformat(
+                    credential.expires_at.replace("Z", "+00:00")
+                )
+                if (
+                    credential_expiry.tzinfo is None
+                    or credential_expiry.utcoffset() is None
+                    or checked_at >= credential_expiry.astimezone(timezone.utc)
+                ):
+                    raise ValueError("credential expired")
+            except (TypeError, ValueError) as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    PRODUCT_CREDENTIAL_NOT_CURRENT
+                ) from exc
+
+        policy_record = self._store.get_policy_snapshot_record()
+        policy_evidence = (
+            audit.evidence.get("policy") if isinstance(audit.evidence, dict) else None
+        )
+        policy_digest = (
+            canonical_sha256(policy_record.policy_bundle.model_dump(mode="json"))
+            if policy_record is not None
+            else None
+        )
+        if (
+            policy_record is None
+            or not isinstance(policy_evidence, dict)
+            or policy_evidence.get("revision") != policy_record.revision
+            or policy_evidence.get("canonical_digest") != policy_digest
+            or policy_digest != activation.bundle.policy_digest
+            or parsed.policy_digest != policy_digest
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_POLICY_NOT_CURRENT)
+        assert policy_digest is not None
+
+        activation_projection = {
+            "activation_ref_digest": activation.bundle.activation_ref_digest,
+            "signer_key_id": activation.bundle.signer_key_id,
+            "candidate_artifact_manifest_digest": (
+                activation.bundle.candidate_artifact_manifest_digest
+            ),
+            "policy_digest": activation.bundle.policy_digest,
+            "dataset_digest": activation.bundle.dataset_digest,
+            "contract_digest": activation.bundle.contract_digest,
+        }
+        task_projection = {
+            "task_fact": task.model_dump(mode="json"),
+            "canonical_payload": task_record.canonical_payload,
+            "request_digest": task_record.request_digest,
+            "expected_revision": task_record.expected_revision,
+        }
+        replay_digest = _product_replay_authority_digest(
+            event_digest=canonical_sha256(event.model_dump(mode="json")),
+            activation_content_digest=activation.content_digest,
+            activation_projection=activation_projection,
+            runtime_binding=binding,
+            runtime_observation_digest=(observations.authority_observation_digest),
+            credential_projection=credential.model_dump(mode="json"),
+            policy_revision=policy_record.revision,
+            policy_digest=policy_digest,
+            task_authority_projection=task_projection,
+        )
+        if audit.metadata.get("product_replay_authority_digest") != replay_digest:
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        return parsed
+
+    def _repair_product_replay_projection_locked(
+        self,
+        audit: AuditEvent,
+        *,
+        evidence: ProductDecisionAuthorityEvidenceV1,
+        scope_digest: str,
+    ) -> None:
+        """Strictly reconcile one Product reservation in the active transaction."""
+
+        try:
+            raw_delta = (
+                audit.evidence.get("state_delta_v21")
+                if isinstance(audit.evidence, dict)
+                else None
+            )
+            if (
+                not isinstance(raw_delta, dict)
+                or set(raw_delta) != {"schema_version", "payload"}
+                or raw_delta.get("schema_version") != "2.1"
+                or not isinstance(raw_delta.get("payload"), dict)
+            ):
+                raise ValueError("Product replay state delta envelope is invalid")
+            delta = build_evaluation_delta(
+                scope_digest=scope_digest,
+                audit_id=audit.audit_id,
+                base_state_version=evidence.state_version,
+            )
+            expected_reference = {
+                "projection_id": delta.projection_id,
+                "delta_digest": delta.delta_digest,
+                "source_record_type": delta.source.source_record_type,
+                "source_record_id": delta.source.source_record_id,
+                "source_revision": delta.source.source_revision,
+            }
+            if raw_delta.get("payload") != expected_reference:
+                raise ValueError("Product replay state delta reference drifted")
+
+            def projection_ready() -> bool:
+                projection = self._store.get_projection(
+                    scope_digest,
+                    delta.source.source_record_type,
+                    delta.source.source_record_id,
+                    delta.source.source_revision,
+                    delta.projector_version,
+                )
+                state_record = self._store.get_security_state(scope_digest)
+                if (
+                    projection is None
+                    or state_record is None
+                    or state_record.dirty
+                    or state_record.projector_version != PROJECTOR_VERSION
+                    or state_record.state_version < delta.new_state_version
+                    or projection.delta_digest != delta.delta_digest
+                    or projection.delta_payload != delta.model_dump(mode="json")
+                    or projection.applied_state_version != delta.new_state_version
+                ):
+                    return False
+                state = OnlineSecurityState.model_validate(
+                    state_record.canonical_payload
+                )
+                expected_key = projection_identity_key(
+                    scope_digest,
+                    delta.source.source_record_type,
+                    delta.source.source_record_id,
+                    delta.source.source_revision,
+                    delta.projector_version,
+                )
+                return any(
+                    item.projection_key == expected_key
+                    and item.delta_digest == delta.delta_digest
+                    for item in state.applied_projections
+                )
+
+            if projection_ready():
+                return
+            reservation = ProjectionIdentityRecord(
+                scope_digest=scope_digest,
+                source_record_type=delta.source.source_record_type,
+                source_record_id=delta.source.source_record_id,
+                source_revision=delta.source.source_revision,
+                projector_version=delta.projector_version,
+                delta_digest=delta.delta_digest,
+                delta_payload=delta.model_dump(mode="json"),
+                applied_state_version=delta.new_state_version,
+                created_at=audit.timestamp,
+            )
+            self._store.record_projection(reservation)
+            self._state_service.reconcile_projection_history(scope_digest)
+            if not projection_ready():
+                raise ValueError("Product replay projection is not reflected")
+        except V21OfficialEvaluationUnavailableError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - strict rollback boundary.
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_SECURITY_STATE_NOT_READY
+            ) from exc
 
     def _raise_if_active(self, code: str, exc: Exception) -> None:
         if self.active:
@@ -1238,7 +1720,11 @@ class V21PipelineService:
             activation,
             self._store,
         )
-        if not observations.matched or observations.observation_digest is None:
+        if (
+            not observations.matched
+            or observations.observation_digest is None
+            or observations.authority_observation_digest is None
+        ):
             raise V21OfficialEvaluationUnavailableError(RUNTIME_OBSERVATION_MISMATCH)
 
         auth = materials.auth_context
@@ -1346,20 +1832,29 @@ class V21PipelineService:
                 PRODUCT_SECURITY_STATE_NOT_READY
             )
 
+        activation_projection = {
+            "activation_ref_digest": activation.bundle.activation_ref_digest,
+            "signer_key_id": activation.bundle.signer_key_id,
+            "candidate_artifact_manifest_digest": (
+                activation.bundle.candidate_artifact_manifest_digest
+            ),
+            "policy_digest": activation.bundle.policy_digest,
+            "dataset_digest": activation.bundle.dataset_digest,
+            "contract_digest": activation.bundle.contract_digest,
+        }
+        task_authority_projection = {
+            "task_fact": current_task.model_dump(mode="json"),
+            "canonical_payload": task_record.canonical_payload,
+            "request_digest": task_record.request_digest,
+            "expected_revision": task_record.expected_revision,
+        }
         authority_digest = canonical_sha256(
             {
                 "schema_version": "product-authority-anchor/1.0",
                 "event_digest": materials.event_digest,
                 "activation": {
                     "content_digest": activation.content_digest,
-                    "activation_ref_digest": activation.bundle.activation_ref_digest,
-                    "signer_key_id": activation.bundle.signer_key_id,
-                    "candidate_artifact_manifest_digest": (
-                        activation.bundle.candidate_artifact_manifest_digest
-                    ),
-                    "policy_digest": activation.bundle.policy_digest,
-                    "dataset_digest": activation.bundle.dataset_digest,
-                    "contract_digest": activation.bundle.contract_digest,
+                    **activation_projection,
                 },
                 "runtime_binding": {
                     "runtime": binding.runtime,
@@ -1376,14 +1871,7 @@ class V21PipelineService:
                 ),
                 "policy_revision": policy_record.revision,
                 "policy_digest": policy_digest,
-                "task_authority_digest": canonical_sha256(
-                    {
-                        "task_fact": current_task.model_dump(mode="json"),
-                        "canonical_payload": task_record.canonical_payload,
-                        "request_digest": task_record.request_digest,
-                        "expected_revision": task_record.expected_revision,
-                    }
-                ),
+                "task_authority_digest": canonical_sha256(task_authority_projection),
                 "state_authority_digest": state_authority_digest,
                 "snapshot_digest": current_snapshot.snapshot_digest,
                 "revoked_grant_ids": current_revoked,
@@ -1395,6 +1883,17 @@ class V21PipelineService:
             policy_digest=policy_digest,
             snapshot_digest=current_snapshot.snapshot_digest,
             authority_digest=authority_digest,
+            replay_authority_digest=_product_replay_authority_digest(
+                event_digest=materials.event_digest,
+                activation_content_digest=activation.content_digest,
+                activation_projection=activation_projection,
+                runtime_binding=binding,
+                runtime_observation_digest=(observations.authority_observation_digest),
+                credential_projection=credential.model_dump(mode="json"),
+                policy_revision=policy_record.revision,
+                policy_digest=policy_digest,
+                task_authority_projection=task_authority_projection,
+            ),
             checked_at=checked_at,
         )
 
@@ -1625,6 +2124,11 @@ class V21PipelineService:
                 if product_capture is not None
                 else None
             ),
+            product_replay_authority_digest=(
+                product_capture.replay_authority_digest
+                if product_capture is not None
+                else None
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -1736,6 +2240,8 @@ class V21PipelineService:
             audit is None
             or audit.record_type != "policy_evaluation"
             or audit.links.get("event_id") != event.event_id
+            or audit.metadata.get("product_replay_authority_digest")
+            != capture.replay_authority_digest
         ):
             raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
 

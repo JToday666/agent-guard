@@ -52,6 +52,21 @@ _ERROR_MESSAGES = {
     "V21_PRODUCT_CREDENTIAL_NOT_CURRENT": (
         "Product V2 runtime credential is not current."
     ),
+    "V21_PRODUCT_SELECTOR_UNAVAILABLE": (
+        "Product V2 authority selector could not establish an active decision."
+    ),
+    "V21_PRODUCT_REPLAY_UNAVAILABLE": (
+        "Product V2 evaluation cannot be replayed under the current authority."
+    ),
+    "V21_PRODUCT_CONTEXT_REPLAY_UNAVAILABLE": (
+        "Product V2 context cannot be reconstructed from complete immutable evidence."
+    ),
+    "V21_PRODUCT_RESTRICTED_ASK_APPROVAL_MISSING": (
+        "Product V2 restricted release is missing its approval record."
+    ),
+    "V21_PRODUCT_RESTRICTED_ASK_MATERIALS_INVALID": (
+        "Product V2 restricted release materials are not current or complete."
+    ),
     "V21_PRODUCT_SELECTOR_NOT_WIRED": ("Product V2 authority selector is not wired."),
     "SESSION_INVALID": "Browser session is invalid.",
     "SESSION_EXPIRED": "Browser session has expired.",
