@@ -175,8 +175,9 @@ def create_app(
     )
     # V21-09：四段式编排器（D4，legacy shadow + Product fail-closed）。
     # 与 V21ShadowService 同一 mode/secret 门控；兼容路径的 Phase A 失败
-    # 仍回退 V21-08。Product authority fence 已实现，但本批仍由外层
-    # selector fuse 阻断公开 selection，待独立 selector/replay PR 接线。
+    # 仍回退 V21-08。Product authority fence 与内部 selector/replay 已
+    # 实现，但公开 composition root 仍由外层 fuse 阻断，待 ACK/freshness
+    # 批次原子接线后才移除。
     competition_active = (
         competition_activation is not None
         and settings.effective_v21_mode() == "active"

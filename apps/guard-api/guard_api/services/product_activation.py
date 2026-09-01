@@ -1,11 +1,12 @@
 """Process-frozen Product V2 activation and pre-selector safety checks.
 
-This module deliberately stops before authority selection.  A valid signed
-bundle and matching runtime observations are necessary inputs, but are not by
-themselves permission to evaluate or release an action.  Until the Product V2
-selector is wired, :class:`ProductActivePreSelectorFuse` therefore terminates
-every request with a stable 503 reason code after completing the read-only
-checks below.
+This module owns activation loading and the temporary public exposure fuse, not
+authority selection itself.  A valid signed bundle and matching runtime
+observations are necessary inputs, but are not by themselves permission to
+evaluate or release an action.  Until signed ACK/freshness authority is wired,
+:class:`ProductActivePreSelectorFuse` therefore terminates every request built
+by the public composition root with a stable 503 reason code after completing
+the read-only checks below.
 """
 
 from __future__ import annotations
@@ -77,6 +78,7 @@ class ProductRuntimeObservationReconciliation:
     matched: bool
     reason_codes: tuple[str, ...]
     observation_digest: str | None = None
+    authority_observation_digest: str | None = None
 
 
 def _now_utc() -> datetime:
@@ -320,6 +322,7 @@ def reconcile_product_runtime_observations(
     try:
         activation.assert_unchanged()
         observations: list[dict[str, object]] = []
+        authority_observations: list[dict[str, object]] = []
         for runtime in _PRODUCT_RUNTIMES:
             entry = activation.bundle.runtime_entry(runtime)  # type: ignore[arg-type]
             identity = ProductRuntimeStatusIdentityV1(
@@ -346,7 +349,18 @@ def reconcile_product_runtime_observations(
                     matched=False,
                     reason_codes=(RUNTIME_OBSERVATION_MISMATCH,),
                 )
-            observations.append(status.model_dump(mode="json"))
+            status_dump = status.model_dump(mode="json")
+            observations.append(status_dump)
+            # Heartbeat freshness becomes signed ACK authority in 01d.  For the
+            # 01c2 exact-replay anchor, the timestamp may advance while every
+            # identity/capability/inventory field must remain byte-exact.
+            authority_observations.append(
+                {
+                    key: value
+                    for key, value in status_dump.items()
+                    if key != "last_heartbeat_at"
+                }
+            )
     except Exception:
         return ProductRuntimeObservationReconciliation(
             matched=False,
@@ -361,12 +375,18 @@ def reconcile_product_runtime_observations(
                 "observations": observations,
             }
         ),
+        authority_observation_digest=canonical_sha256(
+            {
+                "activation_ref_digest": activation.bundle.activation_ref_digest,
+                "observations": authority_observations,
+            }
+        ),
     )
 
 
 @dataclass(frozen=True, slots=True)
 class ProductActivePreSelectorFuse:
-    """Read-only top-of-evaluate fuse for the not-yet-wired Product selector."""
+    """Read-only top-of-evaluate fuse for Product authority not yet public."""
 
     activation: FrozenProductActivation
     store: ControlPlaneStore

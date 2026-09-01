@@ -19,7 +19,10 @@ from agentguard_core import (
     V21SelectionEligibility,
     V21SelectionResult,
     build_decision_authority_evidence,
+    build_product_decision_authority_evidence,
     decision_authority_envelope,
+    product_decision_authority_envelope,
+    select_product_v21_authority,
     select_v21_authority,
 )
 from agentguard_core.decisions.evidence_builder import (
@@ -62,6 +65,7 @@ from .context_manifest import (
 )
 from .memory import MemoryGuardService
 from .policy import PolicyService
+from .runtime_binding import PRODUCT_ACTIVATION_NOT_CURRENT
 from .v21_pipeline import V21OfficialEvaluationUnavailableError
 
 if TYPE_CHECKING:
@@ -204,6 +208,30 @@ def _stored_request_digest(audit: AuditEvent) -> object:
     return audit.metadata.get("request_digest")
 
 
+def _stored_product_evaluation(audit: AuditEvent | None) -> bool:
+    """Conservatively identify an immutable Product authority evaluation.
+
+    A schema-2 carrier, or either Product precommit/replay anchor, permanently
+    opts the event into authority-aware Product replay.  Runtime configuration
+    changes must never route that historical decision through legacy replay.
+    """
+
+    if audit is None:
+        return False
+    evidence = audit.evidence if isinstance(audit.evidence, dict) else {}
+    authority_envelope = evidence.get("decision_authority")
+    schema_version = (
+        authority_envelope.get("schema_version")
+        if isinstance(authority_envelope, dict)
+        else None
+    )
+    return bool(
+        schema_version == "2.0"
+        or "product_authority_digest" in audit.metadata
+        or "product_replay_authority_digest" in audit.metadata
+    )
+
+
 def _stored_decision_dump(audit: AuditEvent) -> object:
     """Return the canonical decision snapshot from the 0.4 audit contract."""
 
@@ -287,6 +315,9 @@ class EvaluationService:
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
         request_digest = canonical_sha256(canonical_request_dump(event))
+        existing_evaluation = (
+            self.audit_service.store.get_policy_evaluation_by_event_id(event.event_id)
+        )
         # V21-09 D4/D9：pipeline Phase A 在 evaluation_transaction 之前
         # 执行（事务外只读）；replay 不重算 assess——已存在幂等评估
         # 时直接走事务内 replay 检查，不跑 Phase A。
@@ -298,10 +329,53 @@ class EvaluationService:
             and self.context_builder_service.enabled
             and event.event_type == "context_assembled"
         )
-        if self.v21_pipeline is not None and self.v21_pipeline.enabled:
-            existing = self.audit_service.store.get_policy_evaluation_by_event_id(
-                event.event_id
+        if _stored_product_evaluation(existing_evaluation):
+            assert existing_evaluation is not None
+            if _stored_request_digest(existing_evaluation) != request_digest:
+                raise EvaluationConflictError(event.event_id)
+            pipeline = self.v21_pipeline
+            if (
+                pipeline is None
+                or not pipeline.enabled
+                or not pipeline.active
+                or not pipeline.product_active
+            ):
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_REPLAY_UNAVAILABLE"
+                )
+            replay_plan = self._product_context_plan_for_replay(
+                existing_evaluation,
+                event=event,
+                context_requested=context_requested,
             )
+            replayed = self._replay_product_or_conflict(
+                existing_evaluation,
+                event=event,
+                request_digest=request_digest,
+                auth_context=auth_context,
+            ).model_copy(update={"context_plan": replay_plan})
+            if self.ct_projection_service is not None:
+                self.ct_projection_service.backfill(existing_evaluation)
+            return replayed
+        if self.v21_pipeline is not None and self.v21_pipeline.enabled:
+            existing = existing_evaluation
+            if existing is not None and self.v21_pipeline.product_active:
+                if _stored_request_digest(existing) != request_digest:
+                    raise EvaluationConflictError(event.event_id)
+                replay_plan = self._product_context_plan_for_replay(
+                    existing,
+                    event=event,
+                    context_requested=context_requested,
+                )
+                replayed = self._replay_product_or_conflict(
+                    existing,
+                    event=event,
+                    request_digest=request_digest,
+                    auth_context=auth_context,
+                ).model_copy(update={"context_plan": replay_plan})
+                if self.ct_projection_service is not None:
+                    self.ct_projection_service.backfill(existing)
+                return replayed
             if existing is not None and not context_requested:
                 replayed = self._replay_or_conflict(
                     existing, request_digest, event.event_id
@@ -454,9 +528,11 @@ class EvaluationService:
         # 同 event_id 在事务开始时串行化，失败时不得遗留任何部分状态。
         backfill_audit: AuditEvent | None = None
         phase_c_plan: "V21PhaseCPlan | None" = None
+        product_replay_completed = False
         product_transaction = bool(
             materials is not None
             and self.v21_pipeline is not None
+            and self.v21_pipeline.active
             and self.v21_pipeline.product_active
         )
         transaction = (
@@ -469,18 +545,62 @@ class EvaluationService:
             existing = self.audit_service.store.get_policy_evaluation_by_event_id(
                 event.event_id
             )
-            replayed = self._replay_or_conflict(
-                existing,
-                request_digest,
-                event.event_id,
-            )
+            if existing is not None and product_transaction:
+                if _stored_request_digest(existing) != request_digest:
+                    raise EvaluationConflictError(event.event_id)
+                # Validate the immutable carrier before repairing state. Any
+                # later failure rolls the surrounding Product transaction back.
+                replayed = self._rebuild_response(existing)
+                assert self.v21_pipeline is not None
+                assert materials is not None
+                assert materials.auth_context is not None
+                assert materials.task_id is not None
+                assert materials.scope_digest is not None
+                self.v21_pipeline.repair_product_replay_locked(
+                    event,
+                    existing,
+                    auth_context=materials.auth_context,
+                    task_id=materials.task_id,
+                    scope_digest=materials.scope_digest,
+                )
+                replayed = self._rebuild_response(existing)
+                self.audit_service.repair_provenance(existing)
+                product_replay_completed = True
+            elif _stored_product_evaluation(existing):
+                assert existing is not None
+                if _stored_request_digest(existing) != request_digest:
+                    raise EvaluationConflictError(event.event_id)
+                # A Product evaluation that appears after the initial lookup
+                # may never cross into legacy replay merely because this
+                # process lacks current Product authority.
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_REPLAY_UNAVAILABLE"
+                )
+            else:
+                replayed = self._replay_or_conflict(
+                    existing,
+                    request_digest,
+                    event.event_id,
+                )
             if replayed is not None:
                 assert existing is not None
-                replay_plan = self._context_plan_for_replay(
-                    existing,
-                    context_manifest,
-                    context_requested=context_requested,
-                )
+                if product_transaction:
+                    # A concurrent winner may commit after this request's
+                    # initial lookup but before the authority transaction. The
+                    # loser must replay only the winner's immutable, complete
+                    # Product manifest; its freshly prepared Phase-A/context
+                    # candidate is not authoritative and may be truncated.
+                    replay_plan = self._product_context_plan_for_replay(
+                        existing,
+                        event=event,
+                        context_requested=context_requested,
+                    )
+                else:
+                    replay_plan = self._context_plan_for_replay(
+                        existing,
+                        context_manifest,
+                        context_requested=context_requested,
+                    )
                 response = replayed.model_copy(update={"context_plan": replay_plan})
                 backfill_audit = existing
                 ct_plan = None  # replay：无新 commit，走 D9 同构 backfill。
@@ -520,7 +640,7 @@ class EvaluationService:
         if self.v21_pipeline is not None:
             if phase_c_plan is not None:
                 self.v21_pipeline.run_phase_c(phase_c_plan)
-            elif backfill_audit is not None:
+            elif backfill_audit is not None and not product_replay_completed:
                 self.v21_pipeline.backfill_projection(backfill_audit)
         # CT-PR-03b：新评估 → 事务退出后投影；重放 → backfill 补投影。
         if self.ct_projection_service is not None:
@@ -660,6 +780,7 @@ class EvaluationService:
         state_delta_evidence = None
         authority: DecisionAuthority | None = None
         authority_evidence: dict[str, object] | None = None
+        approval_release_directive: ApprovalReleaseDirectiveV2 | None = None
         phase_c_plan: "V21PhaseCPlan | None" = None
         phase_b_outcome: "V21PhaseBOutcome | None" = None
         finalize_metadata: dict[str, str] = {}
@@ -672,33 +793,61 @@ class EvaluationService:
             if outcome is not None:
                 phase_b_outcome = outcome
                 v21_evidence = outcome.envelope
-                selection = self._select_competition_authority(
+                product_selection = self._select_product_authority(
                     event,
                     materials=materials,
                     outcome=outcome,
                 )
+                if product_selection is not None:
+                    selection, approval_release_directive = product_selection
+                else:
+                    selection = self._select_competition_authority(
+                        event,
+                        materials=materials,
+                        outcome=outcome,
+                    )
                 if selection is not None:
                     decision = selection.selected_decision
                     authority = selection.authority
-                    activation = self.competition_activation
-                    assert activation is not None
                     snapshot_id = (
                         materials.snapshot.snapshot_id
                         if materials.snapshot is not None
                         else ABSENT_SNAPSHOT_ID
                     )
-                    evidence = build_decision_authority_evidence(
-                        result=selection,
-                        assessment=materials.assessment,
-                        activation=activation.manifest,
-                        snapshot_id=snapshot_id,
-                        state_version=(
-                            materials.state_version
-                            if materials.snapshot is not None
-                            else 0
-                        ),
+                    selected_state_version = (
+                        materials.state_version if materials.snapshot is not None else 0
                     )
-                    authority_evidence = decision_authority_envelope(evidence)
+                    if approval_release_directive is not None:
+                        assert self.v21_pipeline is not None
+                        product_activation = self.v21_pipeline.product_activation
+                        assert product_activation is not None
+                        runtime_entry = product_activation.bundle.runtime_entry(
+                            event.runtime  # type: ignore[arg-type]
+                        )
+                        product_evidence = build_product_decision_authority_evidence(
+                            result=selection,
+                            directive=approval_release_directive,
+                            assessment=materials.assessment,
+                            activation=product_activation.bundle,
+                            runtime_entry=runtime_entry,
+                            event_type=event.event_type,
+                            snapshot_id=snapshot_id,
+                            state_version=selected_state_version,
+                        )
+                        authority_evidence = product_decision_authority_envelope(
+                            product_evidence
+                        )
+                    else:
+                        activation = self.competition_activation
+                        assert activation is not None
+                        evidence = build_decision_authority_evidence(
+                            result=selection,
+                            assessment=materials.assessment,
+                            activation=activation.manifest,
+                            snapshot_id=snapshot_id,
+                            state_version=selected_state_version,
+                        )
+                        authority_evidence = decision_authority_envelope(evidence)
                     stale_codes = (
                         list(outcome.revalidation.reason_codes)
                         if outcome.revalidation.status == "stale"
@@ -747,8 +896,12 @@ class EvaluationService:
                         }
                 if outcome.product_authority_digest is not None:
                     assert outcome.product_authority_initial_checked_at is not None
+                    assert outcome.product_replay_authority_digest is not None
                     product_authority_metadata = {
                         "product_authority_digest": (outcome.product_authority_digest),
+                        "product_replay_authority_digest": (
+                            outcome.product_replay_authority_digest
+                        ),
                         # This is the first fenced Phase-B capture, not the
                         # final precommit instant.  The latter is the exact
                         # projection reservation ``created_at``.
@@ -777,7 +930,10 @@ class EvaluationService:
                         "v21_semantic_binding_valid": (outcome.semantic_binding_valid),
                     }
         if (
-            self.competition_activation is not None
+            (
+                self.competition_activation is not None
+                or (self.v21_pipeline is not None and self.v21_pipeline.product_active)
+            )
             and self.v21_pipeline is not None
             and self.v21_pipeline.active
             and authority is None
@@ -794,7 +950,7 @@ class EvaluationService:
             decision,
             requesting_principal_id=requesting_principal_id,
             decision_authority=authority,
-            approval_release_directive=None,
+            approval_release_directive=approval_release_directive,
         )
         if not (self.v21_pipeline is not None and self.v21_pipeline.product_active):
             approval = self.approval_service.auto_review_with_llm(approval)
@@ -849,7 +1005,7 @@ class EvaluationService:
             requesting_principal_id=requesting_principal_id,
             selected_decision=decision,
             decision_authority=authority,
-            approval_release_directive=None,
+            approval_release_directive=approval_release_directive,
         )
         return (
             GuardEvaluationResponse(
@@ -859,10 +1015,150 @@ class EvaluationService:
                 enforcement_binding=binding,
                 context_plan=committed_context_plan,
                 decision_authority=authority,
+                approval_release_directive=approval_release_directive,
             ),
             audit_event,
             phase_c_plan,
         )
+
+    def _select_product_authority(
+        self,
+        event: GuardEvent,
+        *,
+        materials: "V21PipelineMaterials",
+        outcome: "V21PhaseBOutcome",
+    ) -> tuple[V21SelectionResult, ApprovalReleaseDirectiveV2] | None:
+        """Select the sole Product Active decision from fenced Phase-B inputs."""
+
+        pipeline = self.v21_pipeline
+        if pipeline is None or not pipeline.product_active:
+            return None
+        if not pipeline.active:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+            )
+        activation = pipeline.product_activation
+        if activation is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+            )
+        try:
+            activation.assert_unchanged()
+        except ValueError as exc:
+            raise V21OfficialEvaluationUnavailableError(
+                PRODUCT_ACTIVATION_NOT_CURRENT
+            ) from exc
+        try:
+            runtime_entry = activation.bundle.runtime_entry(
+                event.runtime  # type: ignore[arg-type]
+            )
+        except (KeyError, TypeError) as exc:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+            ) from exc
+
+        auth = materials.auth_context
+        binding = materials.runtime_binding
+        scope = materials.snapshot.scope if materials.snapshot is not None else None
+        trusted_identity_valid = bool(
+            auth is not None
+            and binding is not None
+            and auth.principal_id == runtime_entry.principal_id
+            and auth.runtime == runtime_entry.runtime == event.runtime
+            and auth.agent_id == runtime_entry.agent_id
+            and event.security_context.agent_id == runtime_entry.agent_id
+            and binding.runtime == runtime_entry.runtime
+            and binding.principal_id == runtime_entry.principal_id
+            and binding.agent_id == runtime_entry.agent_id
+            and binding.runtime_binding_id == runtime_entry.runtime_binding_id
+            and binding.activation_ref_digest == activation.bundle.activation_ref_digest
+            and binding.source == "product_activation"
+            and scope is not None
+            and scope.principal_id == runtime_entry.principal_id
+            and scope.runtime == runtime_entry.runtime
+            and scope.runtime_binding_id == runtime_entry.runtime_binding_id
+            and scope.scope_digest == materials.scope_digest
+        )
+        action_ir = materials.action_ir
+        snapshot_task = (
+            materials.snapshot.task if materials.snapshot is not None else None
+        )
+        action_ir_consistent = bool(
+            snapshot_task is not None
+            and action_ir is not None
+            and action_ir.event_id == event.event_id
+            and action_ir.action_id == materials.assessment.action_id
+            and action_ir.authorization_fingerprint
+            == materials.assessment.authorization_fingerprint
+            and action_ir.audit_fingerprint == materials.assessment.audit_fingerprint
+            and action_ir.trace_id == event.trace_id
+            and action_ir.task_id == materials.task_id
+            and action_ir.task_revision == snapshot_task.revision
+            and action_ir.runtime == runtime_entry.runtime
+            and action_ir.principal_id == runtime_entry.principal_id
+            and action_ir.runtime_binding_id == runtime_entry.runtime_binding_id
+            and action_ir.agent_id == runtime_entry.agent_id
+            and action_ir.scope_digest == materials.scope_digest
+        )
+        eligibility = V21SelectionEligibility(
+            activation_valid=True,
+            trusted_identity_valid=trusted_identity_valid,
+            profile_valid=bool(
+                runtime_entry.profile_id
+                in {
+                    "agentguard-langgraph-v2",
+                    "agentguard-openclaw-v2-restricted",
+                }
+                and event.event_type in runtime_entry.event_types
+            ),
+            revalidation_valid=outcome.revalidation.status == "valid",
+            pipeline_complete=bool(
+                outcome.raw_v21_decision is not None
+                and materials.degraded_kind != "component_failure"
+                and materials.snapshot is not None
+                and action_ir_consistent
+            ),
+            ownership_valid=bool(trusted_identity_valid and action_ir_consistent),
+            action_ir_complete=action_ir_consistent,
+            task_fact_present=bool(
+                materials.task_id is not None
+                and materials.snapshot is not None
+                and materials.snapshot.task is not None
+            ),
+            approval_binding_eligible=bool(
+                event.pre_execution is True
+                and event.event_type in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
+            ),
+        )
+        if materials.snapshot is None or materials.scope_digest is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+            )
+        try:
+            return select_product_v21_authority(
+                event_id=event.event_id,
+                current_decision=materials.decision,
+                raw_v21_decision=outcome.raw_v21_decision,
+                assessment=materials.assessment,
+                coverage=materials.coverage,
+                activation=activation.bundle,
+                runtime_entry=runtime_entry,
+                eligibility=eligibility,
+                snapshot_id=materials.snapshot.snapshot_id,
+                state_version=materials.state_version,
+                scope_digest=materials.scope_digest,
+                event_type=event.event_type,
+                residual_boundaries=runtime_entry.residual_boundaries,
+            )
+        except V21AuthoritySelectionError as exc:
+            logger.warning(
+                "Product V2 selector rejected event %s: core_code=%s",
+                event.event_id,
+                exc.code,
+            )
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+            ) from exc
 
     def _select_competition_authority(
         self,
@@ -1067,6 +1363,76 @@ class EvaluationService:
             raise EvaluationConflictError(anchor.event_id)
         return prepared.plan
 
+    def _product_context_plan_for_replay(
+        self,
+        policy_audit: AuditEvent,
+        *,
+        event: GuardEvent,
+        context_requested: bool,
+    ) -> "ContextAssemblyPlan | None":
+        """Rebuild a complete Product context plan from its immutable manifest.
+
+        Product replay may not run Phase A or the Context Builder again. A full
+        non-truncated manifest contains the bounded semantic plan; display-only
+        previews are cleared before its original plan digest is revalidated.
+        Partial/budget-dropped manifests fail closed because they cannot prove
+        the exact runtime plan.
+        """
+
+        if not context_requested:
+            return None
+        try:
+            anchor = context_manifest_anchor_from_policy(policy_audit)
+            if anchor is None:
+                return None
+            persisted = self.audit_service.store.get_audit_event(anchor.audit_id)
+            if persisted is None:
+                raise ValueError("context manifest is missing")
+            strict = validate_context_manifest_audit_event(persisted)
+            from agentguard_core.security_context import (  # noqa: PLC0415
+                ContextAssemblyPlan,
+                compute_context_plan_digest,
+            )
+
+            from .context_manifest import ContextManifestEnvelope  # noqa: PLC0415
+
+            manifest = strict.evidence.context_manifest
+            if not isinstance(manifest, ContextManifestEnvelope) or (
+                manifest.completeness.status != "complete"
+                or manifest.completeness.truncated
+            ):
+                raise ValueError("context manifest is not complete")
+            candidate = ContextAssemblyPlan(
+                plan_id=manifest.plan_id,
+                event_id=manifest.event_id,
+                scope_digest=manifest.scope_digest,
+                runtime=manifest.runtime,
+                context_ref=manifest.context_ref,
+                chunks=tuple(
+                    chunk.model_copy(update={"content_preview": None})
+                    for chunk in manifest.chunks
+                ),
+                transformations=manifest.transformations,
+                excluded_chunk_ids=manifest.excluded_chunk_ids,
+                reason_codes=manifest.reason_codes,
+                evidence_refs=manifest.evidence_refs,
+                plan_digest=manifest.plan_digest,
+            )
+            if compute_context_plan_digest(candidate) != candidate.plan_digest:
+                raise ValueError("reconstructed context plan digest mismatches")
+            prepared = prepare_context_manifest(event, candidate)
+            return self._context_plan_for_replay(
+                policy_audit,
+                prepared,
+                context_requested=True,
+            )
+        except V21OfficialEvaluationUnavailableError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - exact Product replay boundary.
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_CONTEXT_REPLAY_UNAVAILABLE"
+            ) from exc
+
     def _replay_or_conflict(
         self,
         existing: AuditEvent | None,
@@ -1081,6 +1447,36 @@ class EvaluationService:
             self.audit_service.repair_provenance(existing)
             return self._rebuild_response(existing)
         raise EvaluationConflictError(event_id)
+
+    def _replay_product_or_conflict(
+        self,
+        existing: AuditEvent,
+        *,
+        event: GuardEvent,
+        request_digest: str,
+        auth_context: AuthContext | None,
+    ) -> GuardEvaluationResponse:
+        """Return an exact Product replay only after authority/state recovery."""
+
+        if _stored_request_digest(existing) != request_digest:
+            raise EvaluationConflictError(event.event_id)
+        pipeline = self.v21_pipeline
+        if pipeline is None or not pipeline.active or not pipeline.product_active:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_REPLAY_UNAVAILABLE"
+            )
+        # Strictly validate the immutable authority/approval/binding carrier
+        # before any recovery write. It is validated again inside the locked
+        # transaction so concurrent storage drift cannot cross the boundary.
+        self._rebuild_response(existing)
+        with pipeline.product_replay_transaction(
+            event,
+            existing,
+            auth_context,
+        ) as locked:
+            response = self._rebuild_response(locked)
+            self.audit_service.repair_provenance(locked)
+            return response
 
     def _rebuild_response(self, audit: AuditEvent) -> GuardEvaluationResponse:
         raw_decision = _stored_decision_dump(audit)
@@ -1242,6 +1638,62 @@ class EvaluationService:
             if approval is None:
                 raise V21OfficialEvaluationUnavailableError(
                     "V21_PRODUCT_RESTRICTED_ASK_APPROVAL_MISSING"
+                )
+            assert approval_release_directive is not None
+            activation = (
+                self.v21_pipeline.product_activation
+                if self.v21_pipeline is not None
+                else None
+            )
+            try:
+                runtime_entry = (
+                    None
+                    if activation is None
+                    else activation.bundle.runtime_entry(
+                        event.runtime  # type: ignore[arg-type]
+                    )
+                )
+            except (KeyError, TypeError):
+                runtime_entry = None
+            snapshot = getattr(materials, "snapshot", None)
+            scope = snapshot.scope if snapshot is not None else None
+            assessment = getattr(materials, "assessment", None)
+            material_scope_digest = getattr(materials, "scope_digest", None)
+            degraded_kind = getattr(materials, "degraded_kind", "invalid")
+            revalidation = getattr(phase_b_outcome, "revalidation", None)
+            restricted_eligible = bool(
+                selected_decision.decision == "ask"
+                and selected_decision.approval_intent is not None
+                and "allow_once" in selected_decision.approval_intent.options
+                and "allow_once" in approval.decision_options
+                and event.pre_execution is True
+                and event.event_type in _STRONG_BINDING_PRE_EXECUTION_EVENT_TYPES
+                and getattr(revalidation, "status", None) == "valid"
+                and snapshot is not None
+                and scope is not None
+                and assessment is not None
+                and material_scope_digest is not None
+                and degraded_kind is None
+                and directive_mode == "restricted_allow_once"
+                and approval.approval_id == audit.links.get("approval_id")
+                and approval.action_id == assessment.action_id
+                and approval.requesting_principal_id == requesting_principal_id
+                and approval.runtime == event.runtime == scope.runtime
+                and approval.agent_id == event.security_context.agent_id
+                and scope.principal_id == requesting_principal_id
+                and scope.scope_digest == material_scope_digest
+                and scope.scope_digest == approval_release_directive.scope_digest
+                and runtime_entry is not None
+                and runtime_entry.runtime == event.runtime
+                and runtime_entry.principal_id == requesting_principal_id
+                and runtime_entry.agent_id == approval.agent_id
+                and runtime_entry.runtime_binding_id == scope.runtime_binding_id
+                and runtime_entry.capability_report_digest
+                == approval_release_directive.capability_digest
+            )
+            if not restricted_eligible:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_RESTRICTED_ASK_MATERIALS_INVALID"
                 )
             # C1 best-effort Host binding is not the C3 exact
             # ``EnforcementBinding`` contract.  The restricted lease/spool

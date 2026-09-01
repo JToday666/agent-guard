@@ -150,6 +150,13 @@ class ApprovalService:
                 raise ValueError(
                     "a releasable Product directive requires an ASK intent"
                 )
+            if releasable and (
+                decision.approval_intent is None
+                or "allow_once" not in decision.approval_intent.options
+            ):
+                raise ValueError(
+                    "a releasable Product ASK intent must include allow_once"
+                )
             if not releasable and decision.approval_intent is not None:
                 raise ValueError(
                     "an unreleasable Product directive cannot carry an ASK intent"

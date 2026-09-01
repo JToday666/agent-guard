@@ -1171,9 +1171,23 @@ class ProductDecisionAuthorityEvidenceV1(BaseModel):
             raise ValueError("legacy approval release projection is unsafe")
         if self.selected_decision.decision == "ask":
             release = self.approval_release_directive.mode
-            has_intent = self.selected_decision.approval_intent is not None
-            if has_intent != (release in {"strong_binding", "restricted_allow_once"}):
+            intent = self.selected_decision.approval_intent
+            releasable = release in {"strong_binding", "restricted_allow_once"}
+            if (intent is not None) != releasable:
                 raise ValueError("ASK approval intent does not match release directive")
+            if releasable and (intent is None or "allow_once" not in intent.options):
+                raise ValueError(
+                    "releasable ASK approval intent must include allow_once"
+                )
+            if releasable and any(
+                decision.decision == "ask"
+                and decision.approval_intent is not None
+                and "allow_once" not in decision.approval_intent.options
+                for decision in (self.current_decision, self.raw_v21_decision)
+            ):
+                raise ValueError(
+                    "releasable ASK cannot override an explicit deny-only intent"
+                )
         elif self.approval_release_directive.mode != "not_applicable":
             raise ValueError("non-ASK decision requires not_applicable release")
         if self.runtime == "langgraph" and (
@@ -1575,10 +1589,29 @@ def select_product_v21_authority(
     directive_residual_boundaries: Sequence[str] = ()
     if runtime_entry.runtime == "openclaw":
         directive_residual_boundaries = runtime_entry.residual_boundaries
+    # A pre-existing ASK intent may deliberately be deny-only.  Product Active
+    # must never advertise a human allow-once release that either same-rank ASK
+    # explicitly forbids merely because the raw V2 object wins the tie. Missing
+    # intent is safe to synthesize only when neither authority input carries an
+    # explicit deny-only intent.
+    explicit_deny_only_ask = any(
+        decision.decision == "ask"
+        and decision.approval_intent is not None
+        and "allow_once" not in decision.approval_intent.options
+        for decision in (current_decision, raw_v21_decision)
+    )
+    intent_allows_once = bool(
+        not explicit_deny_only_ask
+        and (
+            base.approval_intent is None or "allow_once" in base.approval_intent.options
+        )
+    )
     directive = build_approval_release_directive(
         runtime=runtime_entry.runtime,
         decision=base.decision,
-        reviewable=_reviewable(assessment, coverage, eligibility),
+        reviewable=(
+            _reviewable(assessment, coverage, eligibility) and intent_allows_once
+        ),
         activation_ref_digest=activation.activation_ref_digest,
         scope_digest=scope_digest,
         capability_digest=runtime_entry.capability_report_digest,
