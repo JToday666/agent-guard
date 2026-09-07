@@ -11,11 +11,14 @@ from .event_models import AuditEvent, ToolExecutionResult, new_id, utc_now_iso
 from .langgraph_adapter import blocked_result
 from .runtime_receipts import (
     ExecutionStatus,
+    ReceiptSubmissionResult,
     ResultDisposition,
     build_runtime_outcome,
     build_tool_started_observation,
     runtime_receipts_enabled,
-    submit_runtime_receipt,
+    runtime_receipt_preflight_error,
+    runtime_receipts_required,
+    submit_runtime_receipt_result,
 )
 from .strong_binding import (
     ApprovalResolutionValidationError,
@@ -29,6 +32,13 @@ from .strong_binding import (
     validate_strong_release_for_invocation,
 )
 from .tool_compat import tool_result_with_compatibility
+
+
+@dataclass(frozen=True, slots=True)
+class _ReceiptContext:
+    event: Any
+    decision: Any
+    required: bool
 
 
 @dataclass(slots=True)
@@ -81,6 +91,19 @@ class GuardedToolGateway:
         )
         if compatibility is not None:
             event.metadata["compatibility"] = dict(compatibility)
+        required_receipts = runtime_receipts_required(self.guard_adapter, decision)
+        prerequisite_error = runtime_receipt_preflight_error(
+            self.guard_adapter, decision, required=required_receipts
+        )
+        if prerequisite_error is not None:
+            return _receipt_prerequisite_failure(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                decision=decision,
+                error=prerequisite_error,
+                compatibility=compatibility or _compatibility_from_event(event),
+            )
         # Guard API 模式下策略审计由 evaluate writer 唯一写入，adapter 不再
         # 重复提交（契约 §12.1/§22.1）；仅 legacy Core 保留自提交路径。
         audit_event: AuditEvent | None = None
@@ -123,6 +146,7 @@ class GuardedToolGateway:
                     audit_event=audit_event,
                     compatibility=compatibility or _compatibility_from_event(event),
                     failure=failure,
+                    required_receipts=required_receipts,
                 )
         if strong_release is not None:
             approval_blocked = False
@@ -139,10 +163,11 @@ class GuardedToolGateway:
                 decision=decision,
                 audit_event=audit_event,
             )
-            result.runtime_receipt_error = _submit_runtime_outcome(
+            submission = _submit_runtime_outcome(
                 self.guard_adapter,
                 event,
                 decision,
+                required=required_receipts,
                 execution_status="not_invoked",
                 approval_resolution=approval_resolution,
                 intervention_type=(
@@ -156,6 +181,7 @@ class GuardedToolGateway:
                     else "The action did not receive an approval that released it for execution."
                 ),
             )
+            _apply_receipt_submission(result, submission)
             return ToolExecutionResult.model_validate(
                 tool_result_with_compatibility(
                     result.model_dump(),
@@ -174,6 +200,7 @@ class GuardedToolGateway:
                 compatibility=compatibility or _compatibility_from_event(event),
                 approval_timeout=self.approval_timeout,
                 approval_poll_interval=self.approval_poll_interval,
+                required_receipts=required_receipts,
             )
         )
         if memory_gate is not None:
@@ -191,17 +218,19 @@ class GuardedToolGateway:
                     audit_event=audit_event,
                     compatibility=compatibility or _compatibility_from_event(event),
                     failure=failure,
-                    receipt_event=memory_receipt_context[0],
-                    receipt_decision=memory_receipt_context[1],
+                    receipt_event=memory_receipt_context.event,
+                    receipt_decision=memory_receipt_context.decision,
+                    required_receipts=required_receipts
+                    or memory_receipt_context.required,
                 )
             strong_release = memory_release
             approval_resolution = memory_release.approval_resolution
 
-        receipt_event, receipt_decision = (
-            memory_receipt_context
-            if memory_release is not None and memory_receipt_context is not None
-            else (event, decision)
-        )
+        receipt_event, receipt_decision = event, decision
+        if memory_receipt_context is not None:
+            receipt_event = memory_receipt_context.event
+            receipt_decision = memory_receipt_context.decision
+            required_receipts = required_receipts or memory_receipt_context.required
         (
             message_gate,
             message_release,
@@ -217,6 +246,7 @@ class GuardedToolGateway:
             compatibility=compatibility or _compatibility_from_event(event),
             approval_timeout=self.approval_timeout,
             approval_poll_interval=self.approval_poll_interval,
+            required_receipts=required_receipts,
         )
         if message_gate is not None:
             return message_gate
@@ -233,15 +263,38 @@ class GuardedToolGateway:
                     audit_event=audit_event,
                     compatibility=compatibility or _compatibility_from_event(event),
                     failure=failure,
-                    receipt_event=message_receipt_context[0],
-                    receipt_decision=message_receipt_context[1],
+                    receipt_event=message_receipt_context.event,
+                    receipt_decision=message_receipt_context.decision,
+                    required_receipts=required_receipts
+                    or message_receipt_context.required,
                 )
             strong_release = message_release
             assert message_receipt_context is not None
         if message_receipt_context is not None:
-            assert message_approval_resolution is not None
-            receipt_event, receipt_decision = message_receipt_context
+            receipt_event = message_receipt_context.event
+            receipt_decision = message_receipt_context.decision
+            required_receipts = required_receipts or message_receipt_context.required
             approval_resolution = message_approval_resolution
+
+        required_receipts = required_receipts or runtime_receipts_required(
+            self.guard_adapter, receipt_decision
+        )
+        prerequisite_error = runtime_receipt_preflight_error(
+            self.guard_adapter, receipt_decision, required=required_receipts
+        )
+        if prerequisite_error is not None:
+            result = _receipt_prerequisite_failure(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=receipt_event,
+                decision=receipt_decision,
+                error=prerequisite_error,
+                compatibility=compatibility or _compatibility_from_event(event),
+            )
+            if strong_release is not None:
+                result.lease_id = strong_release.lease.lease_id
+                result.consumption_id = strong_release.lease.consumption_id
+            return result
 
         lease_id = strong_release.lease.lease_id if strong_release is not None else None
         consumption_id = (
@@ -270,11 +323,14 @@ class GuardedToolGateway:
                     failure=failure,
                     receipt_event=receipt_event,
                     receipt_decision=receipt_decision,
+                    required_receipts=required_receipts,
                 )
 
         invoked_at = utc_now_iso()
         start_audit_id: str | None = None
-        if _supports_runtime_outcome(self.guard_adapter, receipt_decision):
+        if required_receipts or _supports_runtime_outcome(
+            self.guard_adapter, receipt_decision
+        ):
             started = build_tool_started_observation(
                 receipt_event,
                 receipt_decision,
@@ -284,16 +340,22 @@ class GuardedToolGateway:
                 lease_id=lease_id,
                 consumption_id=consumption_id,
             )
-            start_error = submit_runtime_receipt(self.guard_adapter, started)
-            if start_error is not None:
+            start_submission = submit_runtime_receipt_result(
+                self.guard_adapter, started, required=required_receipts
+            )
+            if start_submission.status != "recorded":
+                start_error = (
+                    start_submission.error or "Runtime start receipt was not recorded."
+                )
                 # Lease consumption already happened, but the invocation
                 # boundary was never entered.  Best-effort a terminal fact with
                 # the same non-secret IDs so the consumed authorization is not
                 # left uncorrelated.
-                terminal_error = _submit_runtime_outcome(
+                terminal_submission = _submit_runtime_outcome(
                     self.guard_adapter,
                     receipt_event,
                     receipt_decision,
+                    required=required_receipts,
                     execution_status="not_invoked",
                     approval_resolution=approval_resolution,
                     intervention_type="runtime_receipt_failure",
@@ -315,7 +377,8 @@ class GuardedToolGateway:
                     "receipt could not be recorded."
                 )
                 result.error = start_error
-                result.runtime_receipt_error = terminal_error or start_error
+                result.runtime_receipt_error = terminal_submission.error or start_error
+                result.runtime_receipt_status = "failed"
                 result.block_semantics = "runtime_receipt_failure"
                 result.counts_as_effective_block = False
                 result.lease_id = lease_id
@@ -387,12 +450,14 @@ class GuardedToolGateway:
                 enforcement=enforcement,
                 lease_id=lease_id,
                 consumption_id=consumption_id,
+                required_receipts=required_receipts,
             )
             if not result_outcome_attempted:
-                payload.runtime_receipt_error = _submit_runtime_outcome(
+                submission = _submit_runtime_outcome(
                     self.guard_adapter,
                     receipt_event,
                     receipt_decision,
+                    required=required_receipts,
                     execution_status="executed",
                     approval_resolution=approval_resolution,
                     invoked_at=invoked_at,
@@ -403,6 +468,7 @@ class GuardedToolGateway:
                     lease_id=lease_id,
                     consumption_id=consumption_id,
                 )
+                _apply_receipt_submission(payload, submission)
             return ToolExecutionResult.model_validate(
                 tool_result_with_compatibility(
                     payload.model_dump(),
@@ -446,20 +512,23 @@ class GuardedToolGateway:
                     else None
                 ),
                 tool_executed_after_approval=strong_release is not None,
-                runtime_receipt_error=_submit_runtime_outcome(
-                    self.guard_adapter,
-                    receipt_event,
-                    receipt_decision,
-                    execution_status="failed",
-                    approval_resolution=approval_resolution,
-                    invoked_at=invoked_at,
-                    error=str(exc),
-                    side_effects=side_effects,
-                    side_effects_measured=side_effects_measured,
-                    parent_audit_id=start_audit_id,
-                    enforcement=enforcement,
-                    lease_id=lease_id,
-                    consumption_id=consumption_id,
+                **_receipt_fields(
+                    _submit_runtime_outcome(
+                        self.guard_adapter,
+                        receipt_event,
+                        receipt_decision,
+                        required=required_receipts,
+                        execution_status="failed",
+                        approval_resolution=approval_resolution,
+                        invoked_at=invoked_at,
+                        error=str(exc),
+                        side_effects=side_effects,
+                        side_effects_measured=side_effects_measured,
+                        parent_audit_id=start_audit_id,
+                        enforcement=enforcement,
+                        lease_id=lease_id,
+                        consumption_id=consumption_id,
+                    )
                 ),
                 lease_id=lease_id,
                 consumption_id=consumption_id,
@@ -499,10 +568,11 @@ def _evaluate_memory_write_gate(
     compatibility: dict[str, Any],
     approval_timeout: float,
     approval_poll_interval: float,
+    required_receipts: bool = False,
 ) -> tuple[
     ToolExecutionResult | None,
     StrongBindingRelease | None,
-    tuple[Any, Any] | None,
+    _ReceiptContext | None,
 ]:
     if tool_name != "memory_write" or not hasattr(
         guard_adapter, "evaluate_memory_write"
@@ -513,6 +583,25 @@ def _evaluate_memory_write_gate(
         security=security,
         trace_id=trace_id,
     )
+    required_receipts = required_receipts or runtime_receipts_required(
+        guard_adapter, decision
+    )
+    prerequisite_error = runtime_receipt_preflight_error(
+        guard_adapter, decision, required=required_receipts
+    )
+    if prerequisite_error is not None:
+        return (
+            _receipt_prerequisite_failure(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                decision=decision,
+                error=prerequisite_error,
+                compatibility=compatibility,
+            ),
+            None,
+            None,
+        )
     audit_event: AuditEvent | None = None
     if adapter_submits_policy_audit(guard_adapter):
         audit_event = guard_adapter.build_audit_event(event, decision)
@@ -554,6 +643,7 @@ def _evaluate_memory_write_gate(
                     audit_event=audit_event,
                     compatibility=compatibility,
                     failure=failure,
+                    required_receipts=required_receipts,
                 ),
                 None,
                 None,
@@ -569,7 +659,11 @@ def _evaluate_memory_write_gate(
         return (
             None,
             strong_release,
-            (event, decision) if strong_release is not None else None,
+            (
+                _ReceiptContext(event, decision, required_receipts)
+                if strong_release is not None or required_receipts
+                else None
+            ),
         )
     payload = ToolExecutionResult(
         tool_name=tool_name,
@@ -586,18 +680,21 @@ def _evaluate_memory_write_gate(
         audit_event=_dump_audit_event(audit_event),
         block_semantics=_block_semantics(decision),
         counts_as_effective_block=decision.decision == "deny",
-        runtime_receipt_error=_submit_runtime_outcome(
-            guard_adapter,
-            event,
-            decision,
-            execution_status="not_invoked",
-            approval_resolution=approval_resolution,
-            intervention_type=(
-                "policy_deny"
-                if decision.decision == "deny"
-                else "approval_not_obtained"
-            ),
-            intervention_reason="The memory write gate stopped the action before the runtime was invoked.",
+        **_receipt_fields(
+            _submit_runtime_outcome(
+                guard_adapter,
+                event,
+                decision,
+                execution_status="not_invoked",
+                approval_resolution=approval_resolution,
+                intervention_type=(
+                    "policy_deny"
+                    if decision.decision == "deny"
+                    else "approval_not_obtained"
+                ),
+                intervention_reason="The memory write gate stopped the action before the runtime was invoked.",
+                required=required_receipts,
+            )
         ),
     )
     return (
@@ -620,10 +717,11 @@ def _evaluate_message_send_gate(
     compatibility: dict[str, Any],
     approval_timeout: float,
     approval_poll_interval: float,
+    required_receipts: bool = False,
 ) -> tuple[
     ToolExecutionResult | None,
     StrongBindingRelease | None,
-    tuple[Any, Any] | None,
+    _ReceiptContext | None,
     dict[str, Any] | None,
 ]:
     if tool_name != "send_email" or not hasattr(guard_adapter, "evaluate_message_send"):
@@ -634,6 +732,26 @@ def _evaluate_message_send_gate(
         trace_id=trace_id,
         call_id=call_id,
     )
+    required_receipts = required_receipts or runtime_receipts_required(
+        guard_adapter, decision
+    )
+    prerequisite_error = runtime_receipt_preflight_error(
+        guard_adapter, decision, required=required_receipts
+    )
+    if prerequisite_error is not None:
+        return (
+            _receipt_prerequisite_failure(
+                tool_name=tool_name,
+                call_id=call_id,
+                event=event,
+                decision=decision,
+                error=prerequisite_error,
+                compatibility=compatibility,
+            ),
+            None,
+            None,
+            None,
+        )
     audit_event: AuditEvent | None = None
     if adapter_submits_policy_audit(guard_adapter):
         audit_event = guard_adapter.build_audit_event(event, decision)
@@ -676,6 +794,7 @@ def _evaluate_message_send_gate(
                     audit_event=audit_event,
                     compatibility=compatibility,
                     failure=failure,
+                    required_receipts=required_receipts,
                 ),
                 None,
                 None,
@@ -693,8 +812,10 @@ def _evaluate_message_send_gate(
         )
     if decision.decision != "deny" and not approval_blocked:
         receipt_context = (
-            (event, decision)
-            if strong_release is not None or approval_resolution is not None
+            _ReceiptContext(event, decision, required_receipts)
+            if strong_release is not None
+            or approval_resolution is not None
+            or required_receipts
             else None
         )
         return (
@@ -718,18 +839,21 @@ def _evaluate_message_send_gate(
         audit_event=_dump_audit_event(audit_event),
         block_semantics=_block_semantics(decision),
         counts_as_effective_block=decision.decision == "deny",
-        runtime_receipt_error=_submit_runtime_outcome(
-            guard_adapter,
-            event,
-            decision,
-            execution_status="not_invoked",
-            approval_resolution=approval_resolution,
-            intervention_type=(
-                "policy_deny"
-                if decision.decision == "deny"
-                else "approval_not_obtained"
-            ),
-            intervention_reason="The message gate stopped outbound delivery before the runtime was invoked.",
+        **_receipt_fields(
+            _submit_runtime_outcome(
+                guard_adapter,
+                event,
+                decision,
+                execution_status="not_invoked",
+                approval_resolution=approval_resolution,
+                intervention_type=(
+                    "policy_deny"
+                    if decision.decision == "deny"
+                    else "approval_not_obtained"
+                ),
+                intervention_reason="The message gate stopped outbound delivery before the runtime was invoked.",
+                required=required_receipts,
+            )
         ),
     )
     return (
@@ -778,6 +902,7 @@ def _apply_tool_result_guard(
     enforcement: Any | None,
     lease_id: str | None,
     consumption_id: str | None,
+    required_receipts: bool = False,
 ) -> tuple[ToolExecutionResult, bool]:
     if not hasattr(guard_adapter, "evaluate_tool_result"):
         return payload, False
@@ -815,7 +940,6 @@ def _apply_tool_result_guard(
         # terminal action receipt. Let the caller retain the original
         # tool-call policy identity when it records execution completion.
         return payload, False
-    outcome_attempted = _supports_runtime_outcome(guard_adapter, decision)
     payload.blocked = True
     payload.decision = decision.decision
     payload.status = "quarantined"
@@ -829,10 +953,11 @@ def _apply_tool_result_guard(
     payload.quarantine_applied = True
     payload.counts_as_effective_block = decision.decision == "deny"
     payload.block_semantics = _block_semantics(decision)
-    payload.runtime_receipt_error = _submit_runtime_outcome(
+    submission = _submit_runtime_outcome(
         guard_adapter,
         receipt_event if enforcement is not None else event,
         receipt_decision if enforcement is not None else decision,
+        required=required_receipts,
         execution_status="executed",
         approval_resolution=(
             approval_resolution
@@ -850,11 +975,10 @@ def _apply_tool_result_guard(
         lease_id=lease_id,
         consumption_id=consumption_id,
     )
-    return payload, (
-        _supports_runtime_outcome(guard_adapter, receipt_decision)
-        if enforcement is not None
-        else outcome_attempted
-    )
+    _apply_receipt_submission(payload, submission)
+    # A failed/disabled quarantine receipt must not be overwritten by a
+    # successful passed-through receipt for the original tool action.
+    return payload, True
 
 
 def _tool_result_will_persist(
@@ -1070,6 +1194,50 @@ def _should_attempt_strong_binding(decision: Any) -> bool:
     return binding_present
 
 
+def _receipt_fields(submission: ReceiptSubmissionResult) -> dict[str, Any]:
+    return {
+        "runtime_receipt_status": submission.status,
+        "runtime_receipt_error": submission.error,
+    }
+
+
+def _apply_receipt_submission(
+    result: ToolExecutionResult, submission: ReceiptSubmissionResult
+) -> None:
+    result.runtime_receipt_status = submission.status
+    result.runtime_receipt_error = submission.error
+
+
+def _receipt_prerequisite_failure(
+    *,
+    tool_name: str,
+    call_id: str,
+    event: Any,
+    decision: Any,
+    error: str,
+    compatibility: dict[str, Any] | None = None,
+) -> ToolExecutionResult:
+    result = blocked_result(
+        tool_name=tool_name,
+        call_id=call_id,
+        event=event,
+        decision=decision,
+        audit_event=None,
+    )
+    result.status = "audit_error"
+    result.error = error
+    result.safe_message = (
+        "The action was not invoked because required runtime receipts are unavailable."
+    )
+    result.runtime_receipt_status = "failed"
+    result.runtime_receipt_error = error
+    result.block_semantics = "runtime_receipt_failure"
+    result.counts_as_effective_block = False
+    return ToolExecutionResult.model_validate(
+        tool_result_with_compatibility(result.model_dump(), compatibility or {})
+    )
+
+
 def _supports_runtime_outcome(guard_adapter: Any, decision: Any) -> bool:
     return bool(
         runtime_receipts_enabled(guard_adapter)
@@ -1082,6 +1250,7 @@ def _submit_runtime_outcome(
     event: Any,
     decision: Any,
     *,
+    required: bool = False,
     execution_status: ExecutionStatus,
     approval_resolution: dict[str, Any] | None = None,
     invoked_at: str | None = None,
@@ -1096,28 +1265,44 @@ def _submit_runtime_outcome(
     enforcement: Any | None = None,
     lease_id: str | None = None,
     consumption_id: str | None = None,
-) -> str | None:
-    if not _supports_runtime_outcome(guard_adapter, decision):
-        return None
-    receipt = build_runtime_outcome(
-        event,
-        decision,
-        execution_status=execution_status,
-        approval_resolution=approval_resolution,
-        invoked_at=invoked_at,
-        error=error,
-        side_effects=side_effects,
-        side_effects_measured=side_effects_measured,
-        result_disposition=result_disposition,
-        result_sanitized=result_sanitized,
-        parent_audit_id=parent_audit_id,
-        intervention_type=intervention_type,
-        intervention_reason=intervention_reason,
-        enforcement=enforcement,
-        lease_id=lease_id,
-        consumption_id=consumption_id,
+) -> ReceiptSubmissionResult:
+    prerequisite_error = runtime_receipt_preflight_error(
+        guard_adapter, decision, required=required
     )
-    return submit_runtime_receipt(guard_adapter, receipt)
+    if prerequisite_error is not None:
+        return ReceiptSubmissionResult(status="failed", error=prerequisite_error)
+    if not _supports_runtime_outcome(guard_adapter, decision):
+        return ReceiptSubmissionResult(status="disabled")
+    try:
+        receipt = build_runtime_outcome(
+            event,
+            decision,
+            execution_status=execution_status,
+            approval_resolution=approval_resolution,
+            invoked_at=invoked_at,
+            error=error,
+            side_effects=side_effects,
+            side_effects_measured=side_effects_measured,
+            result_disposition=result_disposition,
+            result_sanitized=result_sanitized,
+            parent_audit_id=parent_audit_id,
+            intervention_type=intervention_type,
+            intervention_reason=intervention_reason,
+            enforcement=enforcement,
+            lease_id=lease_id,
+            consumption_id=consumption_id,
+        )
+    except Exception:
+        # Serialization failure after Host invocation cannot rewrite an
+        # executed fact as an execution failure or trigger another tool call.
+        return ReceiptSubmissionResult(
+            status="failed", error="Runtime receipt could not be constructed."
+        )
+    return submit_runtime_receipt_result(
+        guard_adapter,
+        receipt,
+        required=required or runtime_receipts_required(guard_adapter, decision),
+    )
 
 
 def _strong_binding_failure_result(
@@ -1130,6 +1315,7 @@ def _strong_binding_failure_result(
     audit_event: AuditEvent | None,
     compatibility: dict[str, Any],
     failure: StrongBindingFailure,
+    required_receipts: bool = False,
     receipt_event: Any | None = None,
     receipt_decision: Any | None = None,
     parent_audit_id: str | None = None,
@@ -1172,10 +1358,11 @@ def _strong_binding_failure_result(
         result.approval_consumed = (
             failure.approval_resolution.get("status") == "resolved"
         )
-    result.runtime_receipt_error = _submit_runtime_outcome(
+    submission = _submit_runtime_outcome(
         guard_adapter,
         binding_event,
         binding_decision,
+        required=required_receipts,
         execution_status="not_invoked",
         approval_resolution=failure.approval_resolution,
         intervention_type="approval_not_obtained",
@@ -1185,6 +1372,7 @@ def _strong_binding_failure_result(
         lease_id=lease_id,
         consumption_id=consumption_id,
     )
+    _apply_receipt_submission(result, submission)
     return ToolExecutionResult.model_validate(
         tool_result_with_compatibility(result.model_dump(), compatibility)
     )

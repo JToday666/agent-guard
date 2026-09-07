@@ -35,11 +35,15 @@ from .langgraph_adapter import (
 )
 from .secure_tool_node import GuardedToolNode, SecureToolNode
 from .runtime_receipts import (
+    ReceiptSubmissionResult,
     build_runtime_outcome,
     build_tool_started_observation,
     build_trace_lifecycle_observation,
     runtime_receipts_enabled,
+    runtime_receipts_required,
+    runtime_receipt_preflight_error,
     submit_runtime_receipt,
+    submit_runtime_receipt_result,
 )
 from .tool_gateway import GuardedToolGateway
 from .tool_compat import (
@@ -69,11 +73,15 @@ __all__ = [
     "PolicyDecision",
     "RuntimeGuardEvent",
     "RuntimeOutcomeReceipt",
+    "ReceiptSubmissionResult",
     "build_runtime_outcome",
     "build_tool_started_observation",
     "build_trace_lifecycle_observation",
     "runtime_receipts_enabled",
+    "runtime_receipts_required",
+    "runtime_receipt_preflight_error",
     "submit_runtime_receipt",
+    "submit_runtime_receipt_result",
     "SecureToolNode",
     "ToolCallEvent",
     "ToolExecutionResult",

@@ -10,9 +10,14 @@ from .endpoint_policy import validate_guard_api_base_url
 
 ApiMode = Literal["guard-api-v0.3", "legacy"]
 ContextIsolationMode = Literal["off", "required"]
+RuntimeReceiptMode = Literal["best_effort", "required"]
 SUPPORTED_API_MODES: tuple[ApiMode, ...] = ("guard-api-v0.3", "legacy")
 SUPPORTED_CONTEXT_ISOLATION_MODES: tuple[ContextIsolationMode, ...] = (
     "off",
+    "required",
+)
+SUPPORTED_RUNTIME_RECEIPT_MODES: tuple[RuntimeReceiptMode, ...] = (
+    "best_effort",
     "required",
 )
 DEFAULT_API_MODE: ApiMode = "guard-api-v0.3"
@@ -46,6 +51,16 @@ def validate_context_isolation_mode(value: object) -> ContextIsolationMode:
     return mode  # type: ignore[return-value]
 
 
+def validate_runtime_receipt_mode(value: object) -> RuntimeReceiptMode:
+    mode = str(value).strip().lower()
+    if mode not in SUPPORTED_RUNTIME_RECEIPT_MODES:
+        supported = ", ".join(SUPPORTED_RUNTIME_RECEIPT_MODES)
+        raise ValueError(
+            "runtime_receipt_mode must be one of: " f"{supported}; got {value!r}"
+        )
+    return mode  # type: ignore[return-value]
+
+
 @dataclass(slots=True)
 class AgentGuardLangGraphConfig:
     core_base_url: str = "http://127.0.0.1:8088"
@@ -62,12 +77,18 @@ class AgentGuardLangGraphConfig:
     # ``required`` binds every model input to a Guard API ContextAssemblyPlan.
     # The default remains off for wire-compatible, opt-in rollout.
     context_isolation_mode: ContextIsolationMode = "off"
+    # Product Active and required-durable decisions always require receipts,
+    # independently of this opt-in compatibility default.
+    runtime_receipt_mode: RuntimeReceiptMode = "best_effort"
 
     def __post_init__(self) -> None:
         self.core_base_url = validate_guard_api_base_url(self.core_base_url)
         self.api_mode = validate_api_mode(self.api_mode)
         self.context_isolation_mode = validate_context_isolation_mode(
             self.context_isolation_mode
+        )
+        self.runtime_receipt_mode = validate_runtime_receipt_mode(
+            self.runtime_receipt_mode
         )
         warn_if_legacy_api_mode(self.api_mode)
         if self.timeout <= 0:

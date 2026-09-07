@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+import re
 from typing import Any, Literal
 
 from .event_models import (
@@ -25,6 +27,20 @@ TraceLifecycleState = Literal[
 # 契约 02 §9：execution.error 上限 2000 字符，截断时省略号计入上限，
 # 与 OpenClaw 插件 boundedTerminalError 语义一致（RTE-04 CF-07 硬化）。
 MAX_TERMINAL_ERROR_CHARS = 2_000
+MAX_RECEIPT_ERROR_CHARS = 500
+_RUNTIME_RECEIPT_SECRET = re.compile(
+    r"(?:hmac-sha256|lease-v1):[0-9a-f]+", re.IGNORECASE
+)
+_BEARER_SECRET = re.compile(r"\bBearer\s+[^\s,;\"']+", re.IGNORECASE)
+
+
+@dataclass(frozen=True, slots=True)
+class ReceiptSubmissionResult:
+    """The observed submission fact, not an assertion about tool execution."""
+
+    status: Literal["recorded", "disabled", "failed"]
+    audit_id: str | None = None
+    error: str | None = None
 
 
 def bounded_terminal_error(error: str | None) -> str | None:
@@ -50,22 +66,128 @@ def runtime_receipts_enabled(guard_adapter: Any) -> bool:
     )
 
 
-def submit_runtime_receipt(
-    guard_adapter: Any, receipt: AuditEvent | RuntimeOutcomeReceipt
-) -> str | None:
-    """Submit a receipt and return a bounded diagnostic instead of raising."""
+def _receipt_field(value: Any, name: str) -> Any:
+    return value.get(name) if isinstance(value, dict) else getattr(value, name, None)
 
-    if not runtime_receipts_enabled(guard_adapter):
+
+def runtime_receipts_required(guard_adapter: Any, decision: Any = None) -> bool:
+    """Keep Product authority and durable directives above local configuration."""
+
+    config = getattr(guard_adapter, "config", None)
+    if getattr(config, "runtime_receipt_mode", None) == "required":
+        return True
+    directive = _receipt_field(decision, "approval_release_directive")
+    if _receipt_field(directive, "receipt_requirement") == "required_durable":
+        return True
+    authority = _receipt_field(decision, "decision_authority")
+    return (
+        _receipt_field(authority, "source") == "v21"
+        and _receipt_field(authority, "mode") == "active"
+        and _receipt_field(authority, "selection_basis") == "profile_all"
+    )
+
+
+def runtime_receipt_preflight_error(
+    guard_adapter: Any, decision: Any, *, required: bool = False
+) -> str | None:
+    """Check required receipt prerequisites without submitting or invoking."""
+
+    if not (required or runtime_receipts_required(guard_adapter, decision)):
         return None
+    if not callable(getattr(guard_adapter, "submit_audit_event", None)):
+        return (
+            "Required runtime receipt unavailable: submit_audit_event is not callable"
+        )
+    if not runtime_receipts_enabled(guard_adapter):
+        return "Required runtime receipt unavailable: runtime receipts are disabled"
+    policy_audit_id = _receipt_field(decision, "policy_audit_id")
+    if not isinstance(policy_audit_id, str) or not policy_audit_id.strip():
+        return "Required runtime receipt unavailable: policy_audit_id is missing"
+    return None
+
+
+def _receipt_submission_error(guard_adapter: Any, detail: Any) -> str:
+    # Remote errors may echo transient authorization material. Redact before
+    # bounding, so a credential crossing the truncation edge cannot leak.
+    diagnostic = str(detail) if detail else "unknown error"
+    diagnostic = _RUNTIME_RECEIPT_SECRET.sub("[redacted]", diagnostic)
+    diagnostic = _BEARER_SECRET.sub("Bearer [redacted]", diagnostic)
+    token = getattr(getattr(guard_adapter, "config", None), "token", None)
+    if isinstance(token, str) and token:
+        diagnostic = diagnostic.replace(token, "[redacted]")
+    return f"Runtime receipt submission failed: {diagnostic}"[:MAX_RECEIPT_ERROR_CHARS]
+
+
+def submit_runtime_receipt_result(
+    guard_adapter: Any,
+    receipt: AuditEvent | RuntimeOutcomeReceipt,
+    *,
+    required: bool = False,
+) -> ReceiptSubmissionResult:
+    """Submit once and distinguish acknowledgement, disablement and failure.
+
+    Required mode accepts only an explicit positive acknowledgement correlated
+    to this receipt. The compatibility mode accepts older positive responses
+    without an audit ID, but never treats malformed or skipped replies as a
+    recorded receipt.
+    """
+
+    required = required or runtime_receipts_required(guard_adapter)
+    if not runtime_receipts_enabled(guard_adapter):
+        if not required:
+            return ReceiptSubmissionResult(status="disabled")
+        return ReceiptSubmissionResult(
+            status="failed",
+            error=_receipt_submission_error(
+                guard_adapter, "runtime receipts are disabled"
+            ),
+        )
     try:
         response = guard_adapter.submit_audit_event(receipt)
     except Exception as exc:
-        return f"Runtime receipt submission failed: {exc}"[:500]
-    if isinstance(response, dict) and response.get("ok") is False:
-        return f"Runtime receipt submission failed: {response.get('error') or 'unknown error'}"[
-            :500
-        ]
-    return None
+        return ReceiptSubmissionResult(
+            status="failed", error=_receipt_submission_error(guard_adapter, exc)
+        )
+    if not isinstance(response, dict) or response.get("ok") is not True:
+        detail = (
+            response.get("error")
+            or (
+                "unknown error"
+                if response.get("ok") is False
+                else "invalid acknowledgement"
+            )
+            if isinstance(response, dict)
+            else "invalid acknowledgement"
+        )
+        return ReceiptSubmissionResult(
+            status="failed", error=_receipt_submission_error(guard_adapter, detail)
+        )
+    if "skipped" in response:
+        if not required:
+            return ReceiptSubmissionResult(status="disabled")
+        return ReceiptSubmissionResult(
+            status="failed",
+            error=_receipt_submission_error(guard_adapter, "receipt was skipped"),
+        )
+    audit_id = response.get("audit_id")
+    if (required or audit_id is not None) and (
+        not isinstance(audit_id, str) or not audit_id or audit_id != receipt.audit_id
+    ):
+        return ReceiptSubmissionResult(
+            status="failed",
+            error=_receipt_submission_error(
+                guard_adapter, "audit_id acknowledgement mismatch"
+            ),
+        )
+    return ReceiptSubmissionResult(status="recorded", audit_id=audit_id)
+
+
+def submit_runtime_receipt(
+    guard_adapter: Any, receipt: AuditEvent | RuntimeOutcomeReceipt
+) -> str | None:
+    """Compatibility projection of the single structured submission path."""
+
+    return submit_runtime_receipt_result(guard_adapter, receipt).error
 
 
 def build_tool_started_observation(
