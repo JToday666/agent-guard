@@ -107,6 +107,10 @@ test("buildPluginConfig uses safe defaults with a resolved SecretRef token", () 
   assert.equal(config.approvalPollIntervalMs, 1000);
   assert.equal(config.approvalTimeoutMs, 25000);
   assert.equal(config.strongApprovalBindingEnabled, false);
+  assert.equal(config.officialProfileId, "");
+  assert.equal(config.officialProfileDigest, "");
+  assert.equal(config.restrictedAskReleaseEnabled, false);
+  assert.equal(config.activationAckMaxAgeMs, 120000);
   assert.equal(config.runtimeBindingId, "");
   assert.equal(config.diagnosticLogging, false);
   assert.equal(config.agentId, "main");
@@ -129,6 +133,197 @@ test("buildPluginConfig accepts the canonical public options", () => {
   assert.equal(config.diagnosticLogging, true);
   assert.equal(config.agentId, "openclaw-main");
   assert.equal(config.enforcementMode, "observe");
+});
+
+const officialProfileConfig = {
+  adapterToken: "resolved-token",
+  officialProfileId: "agentguard-openclaw-v2-restricted",
+  officialProfileDigest: `sha256:${"a".repeat(64)}`,
+  runtimeBindingId: "binding:openclaw:main",
+  enforcementMode: "enforce",
+};
+
+test("buildPluginConfig refuses an official profile until runtime consumers are wired", () => {
+  assert.throws(
+    () =>
+      buildPluginConfig({
+        ...officialProfileConfig,
+        restrictedAskReleaseEnabled: false,
+        activationAckMaxAgeMs: 60000,
+      }),
+    /officialProfileId activation is not available/,
+  );
+});
+
+test("buildPluginConfig rejects every explicit legacy/new configuration mix", () => {
+  const newFields = {
+    officialProfileId: officialProfileConfig.officialProfileId,
+    officialProfileDigest: officialProfileConfig.officialProfileDigest,
+    restrictedAskReleaseEnabled: false,
+    activationAckMaxAgeMs: 120000,
+  };
+  for (const legacyValue of [false, true]) {
+    for (const [field, value] of Object.entries(newFields)) {
+      assert.throws(
+        () =>
+          buildPluginConfig({
+            adapterToken: "resolved-token",
+            strongApprovalBindingEnabled: legacyValue,
+            [field]: value,
+          }),
+        /strongApprovalBindingEnabled/,
+        `explicit legacy ${legacyValue} must conflict with ${field}`,
+      );
+    }
+  }
+});
+
+test("buildPluginConfig validates the official profile ID without coercion", () => {
+  for (const value of [
+    "",
+    " ",
+    "agentguard-openclaw-v2-strong",
+    ` ${officialProfileConfig.officialProfileId}`,
+    null,
+    undefined,
+    1,
+    false,
+    [],
+    {},
+  ]) {
+    assert.throws(
+      () =>
+        buildPluginConfig({
+          ...officialProfileConfig,
+          officialProfileId: value,
+        }),
+      /officialProfileId/,
+      `invalid officialProfileId: ${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test("buildPluginConfig requires a canonical lowercase SHA-256 profile digest", () => {
+  for (const value of [
+    "",
+    " ",
+    `sha256:${"a".repeat(63)}`,
+    `sha256:${"a".repeat(65)}`,
+    `sha256:${"A".repeat(64)}`,
+    `SHA256:${"a".repeat(64)}`,
+    `sha256:${"g".repeat(64)}`,
+    `${officialProfileConfig.officialProfileDigest} `,
+    null,
+    undefined,
+    1,
+    false,
+    [],
+    {},
+  ]) {
+    assert.throws(
+      () =>
+        buildPluginConfig({
+          ...officialProfileConfig,
+          officialProfileDigest: value,
+        }),
+      /officialProfileDigest/,
+      `invalid officialProfileDigest: ${JSON.stringify(value)}`,
+    );
+  }
+});
+
+test("buildPluginConfig requires the profile pair, binding and enforce mode", () => {
+  for (const omitted of ["officialProfileId", "officialProfileDigest"]) {
+    const input = { ...officialProfileConfig };
+    delete input[omitted];
+    assert.throws(() => buildPluginConfig(input), /officialProfile/);
+  }
+  for (const runtimeBindingId of [undefined, null, "", " "]) {
+    assert.throws(
+      () => buildPluginConfig({ ...officialProfileConfig, runtimeBindingId }),
+      /runtimeBindingId/,
+    );
+  }
+  for (const enforcementMode of ["observe", "disabled"]) {
+    assert.throws(
+      () => buildPluginConfig({ ...officialProfileConfig, enforcementMode }),
+      /enforcementMode/,
+    );
+  }
+  assert.throws(
+    () => buildPluginConfig({ ...officialProfileConfig }),
+    /officialProfileId activation is not available/,
+  );
+});
+
+test("buildPluginConfig strictly bounds activation ACK max age", () => {
+  for (const activationAckMaxAgeMs of [1, 120000]) {
+    const config = buildPluginConfig({
+      adapterToken: "resolved-token",
+      activationAckMaxAgeMs,
+    });
+    assert.equal(config.activationAckMaxAgeMs, activationAckMaxAgeMs);
+  }
+  for (const activationAckMaxAgeMs of [
+    -1,
+    0,
+    120001,
+    1.5,
+    Number.NaN,
+    Number.POSITIVE_INFINITY,
+    "120000",
+    null,
+    undefined,
+    true,
+    [],
+    {},
+  ]) {
+    assert.throws(
+      () =>
+        buildPluginConfig({
+          adapterToken: "resolved-token",
+          activationAckMaxAgeMs,
+        }),
+      /activationAckMaxAgeMs/,
+    );
+  }
+});
+
+test("buildPluginConfig keeps restricted ASK unavailable and rejects coercion", () => {
+  assert.equal(
+    buildPluginConfig({
+      adapterToken: "resolved-token",
+      restrictedAskReleaseEnabled: false,
+    }).restrictedAskReleaseEnabled,
+    false,
+  );
+  assert.throws(
+    () =>
+      buildPluginConfig({
+        ...officialProfileConfig,
+        restrictedAskReleaseEnabled: true,
+      }),
+    /not available/,
+  );
+  for (const restrictedAskReleaseEnabled of [
+    "true",
+    "false",
+    0,
+    1,
+    null,
+    undefined,
+    [],
+    {},
+  ]) {
+    assert.throws(
+      () =>
+        buildPluginConfig({
+          ...officialProfileConfig,
+          restrictedAskReleaseEnabled,
+        }),
+      /restrictedAskReleaseEnabled/,
+    );
+  }
 });
 
 test("buildPluginConfig rejects an untrusted runtime binding identifier", () => {

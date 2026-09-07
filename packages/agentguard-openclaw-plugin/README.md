@@ -75,7 +75,24 @@ OpenClaw plugin config 示例：
 
 `adapterToken` 只接受 OpenClaw SecretRef，OpenClaw 在插件注册前把它解析为字符串；明文 token 和插件内环境变量回退均不再支持。SecretRef provider 需在 OpenClaw 的 `secrets.providers` 中配置。仓库开发安装脚本会把根 `.env` 中的 token 写入权限为 `0600` 的 `.openclaw-dev/secrets/openclaw-adapter-token`，并配置 file SecretRef，token 不进入 OpenClaw 主配置。
 
-`agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`runtimeBindingId` 是与该 credential principal 一起可信下发的 `binding:<principal_id>`，不得从 evaluate 响应或工具参数学习；服务端一旦声明 execution lease，缺失或不匹配会在等待/consume 前 fail closed。`strongApprovalBindingEnabled` 默认 `false`，启用 canary strong-binding 处理，但当前 OpenClaw hook API 无法在最终调用边界原子地 replace-and-seal 参数/消息，因此 heartbeat 的 C3 始终保持 false。插件会在 consume 前后复验完整 action snapshot，在成功时返回批准内容的深拷贝，并以最低安全整数优先级尽量成为最后修改 hook；同优先级或更低优先级的其他插件仍是明确的残余信任边界。`approvalTimeoutMs` 是审批等待与 consume 重试共享的唯一 deadline；每个 Guard API 请求的 `requestTimeoutMs` 同时覆盖 headers 和有界 body 读取/解析，JSON 响应最大 1 MiB，停滞、超限或无效响应均在插件内安全分类。409/410 不重试，网络、429、5xx/503 仅以完全相同请求在 deadline 内有界重试。插件只保留 lease/consumption ID，明文 lease token 在响应解析栈内验证后丢弃。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
+`agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`runtimeBindingId` 是与该 credential principal 一起可信下发的 `binding:<principal_id>`，不得从 evaluate 响应或工具参数学习；服务端一旦声明 execution lease，缺失或不匹配会在等待/consume 前 fail closed。`strongApprovalBindingEnabled` 已弃用，保留旧配置兼容，默认 `false`；它仅启用历史 canary 处理，不代表 Strong Binding。当前 OpenClaw hook API 无法在最终调用边界原子地 replace-and-seal 参数/消息，因此 heartbeat 的 C3 始终保持 false。插件会在 consume 前后复验完整 action snapshot，在成功时返回批准内容的深拷贝，并以最低安全整数优先级尽量成为最后修改 hook；同优先级或更低优先级的其他插件仍是明确的残余信任边界。`approvalTimeoutMs` 是审批等待与 consume 重试共享的唯一 deadline；每个 Guard API 请求的 `requestTimeoutMs` 同时覆盖 headers 和有界 body 读取/解析，JSON 响应最大 1 MiB，停滞、超限或无效响应均在插件内安全分类。409/410 不重试，网络、429、5xx/503 仅以完全相同请求在 deadline 内有界重试。插件只保留 lease/consumption ID，明文 lease token 在响应解析栈内验证后丢弃。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
+
+### P0 V2 配置迁移与 ACK reader（尚未运行时接线）
+
+本批仅提供配置校验与纯 `ActivationAckV1` reader，尚未接入 heartbeat、evaluate、lease 或 receipt。显式配置 official profile 会在插件注册前以 `officialProfileId activation is not available in this build` 拒绝，避免静默使用旧决策链；不能用这些字段提前开启 V2。包版本仍为 `0.1.0-beta.1`，不构成真实 Host / Internal RC 证据。
+
+| 字段 | 默认与约束 |
+| --- | --- |
+| `officialProfileId` | 未配置为空；schema 仅接受 `agentguard-openclaw-v2-restricted`，本构建尚不允许启用 |
+| `officialProfileDigest` | 未配置为空；必须与 profile ID 成对配置，接受小写 `sha256:` + 64 位摘要 |
+| `restrictedAskReleaseEnabled` | 默认 `false`；本构建配置 `true` 直接拒绝插件注册，不能打开未完成的放行链 |
+| `activationAckMaxAgeMs` | 默认 `120000`；仅接受 `1..120000` 的整数，不延长服务端 expiry |
+
+profile 还要求可信、非空的 `runtimeBindingId` 和 `enforcementMode=enforce`。旧 `strongApprovalBindingEnabled` 与上述任一新字段同时显式出现都会配置失败，包括 `false` 与 `false`。迁移时先删除旧字段，不要在旧示例上直接追加新字段。Host 会自动填入 schema defaults，因此这五个迁移字段均不在 schema 设置 `default`，而由插件配置构建器补齐默认值，避免 Host 制造虚假的配置冲突。
+
+`src/runtime/activation-ack.ts` 仅检查精确 16 字段、由调用方独立提供的 11 项可信身份/清单值和时间窗口；ACK Host pin 为 `2026.7.1-2`、候选插件 pin 为 `0.1.0-rc.1`。时间检查保留亚毫秒精度，最大有效期 120 秒，过期时刻不包含在有效窗口内。它不持有服务端密钥、不验证 HMAC 真伪；服务端仍须验证回传 token。返回的冻结对象包含原始 token，仅供后续内存传输，不得写入日志、状态或普通 spool；读取错误只包含固定错误码。Python/TS golden vectors 的通过只证明契约一致，不证明运行时接线完成。
+
+后续必须原子接入可信 inventory/profile handshake、ACK 生命周期和 required receipt carrier，再配合 durable spool 与 breaker 才能移除 restricted release fuse。OpenClaw 的 C3 仍为 false、CF-13 仍为 `NOT_SUPPORTED`。
 
 ## Windows 支持
 

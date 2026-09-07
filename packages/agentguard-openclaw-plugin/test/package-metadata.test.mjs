@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { validateJsonSchemaValue } from "openclaw/plugin-sdk/json-schema-runtime";
+import { buildPluginConfig } from "../dist/guard-api-client.js";
 import {
   OPENCLAW_ENFORCEMENT_HOOKS,
   OPENCLAW_FAIL_CLOSED_HOOKS,
@@ -33,6 +35,7 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
   const properties = manifest.configSchema.properties;
 
   assert.deepEqual(Object.keys(properties).sort(), [
+    "activationAckMaxAgeMs",
     "adapterToken",
     "agentId",
     "approvalPollIntervalMs",
@@ -40,7 +43,10 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "diagnosticLogging",
     "enforcementMode",
     "guardApiBaseUrl",
+    "officialProfileDigest",
+    "officialProfileId",
     "requestTimeoutMs",
+    "restrictedAskReleaseEnabled",
     "runtimeBindingId",
     "strongApprovalBindingEnabled",
   ]);
@@ -71,22 +77,158 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     { path: "adapterToken", expected: "string" },
   ]);
   assert.equal("approvalWaitBudgetMs" in properties, false);
-  assert.deepEqual(properties.strongApprovalBindingEnabled, {
-    type: "boolean",
-    default: false,
-    description:
-      "Enable canary strong-binding processing. Server-declared execution leases are always enforced, but current OpenClaw cannot atomically replace and seal the final action, so heartbeat C3 remains false.",
-  });
-  assert.equal(
-    manifest.uiHints.strongApprovalBindingEnabled.help,
-    "Enables canary processing; current OpenClaw lacks atomic replace-and-seal, so C3 is not advertised. Server-declared execution leases still fail closed.",
+  assert.equal(properties.strongApprovalBindingEnabled.type, "boolean");
+  assert.equal(properties.strongApprovalBindingEnabled.deprecated, true);
+  assert.match(
+    properties.strongApprovalBindingEnabled.description,
+    /deprecated/i,
   );
+  assert.match(
+    properties.strongApprovalBindingEnabled.description,
+    /C3.*false/i,
+  );
+  assert.match(
+    manifest.uiHints.strongApprovalBindingEnabled.help,
+    /deprecated/i,
+  );
+  assert.match(
+    manifest.uiHints.strongApprovalBindingEnabled.help,
+    /C3.*false/i,
+  );
+  assert.equal(properties.officialProfileId.type, "string");
+  assert.deepEqual(properties.officialProfileId.enum, [
+    "agentguard-openclaw-v2-restricted",
+  ]);
+  assert.equal(properties.officialProfileDigest.type, "string");
+  assert.equal(
+    properties.officialProfileDigest.pattern,
+    "^sha256:[0-9a-f]{64}$",
+  );
+  assert.equal(properties.restrictedAskReleaseEnabled.type, "boolean");
+  assert.equal(properties.activationAckMaxAgeMs.type, "integer");
+  assert.equal(properties.activationAckMaxAgeMs.minimum, 1);
+  assert.equal(properties.activationAckMaxAgeMs.maximum, 120000);
+  for (const field of [
+    "strongApprovalBindingEnabled",
+    "officialProfileId",
+    "officialProfileDigest",
+    "restrictedAskReleaseEnabled",
+    "activationAckMaxAgeMs",
+  ]) {
+    assert.equal(
+      Object.hasOwn(properties[field], "default"),
+      false,
+      `${field} must not be injected by Host default hydration`,
+    );
+    assert.ok(
+      properties[field].description.length > 0,
+      `${field} needs a description`,
+    );
+    assert.ok(
+      manifest.uiHints[field].label.length > 0,
+      `${field} needs a label`,
+    );
+    assert.ok(
+      manifest.uiHints[field].help.length > 0,
+      `${field} needs migration help`,
+    );
+  }
+  assert.match(
+    manifest.uiHints.restrictedAskReleaseEnabled.help,
+    /not available/i,
+  );
+  assert.match(manifest.uiHints.activationAckMaxAgeMs.help, /120000/);
   assert.deepEqual(properties.runtimeBindingId, {
     type: "string",
     pattern: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$",
     description:
       "Trusted runtime binding identifier provisioned with this OpenClaw adapter. It must exactly match a server-declared strong binding.",
   });
+});
+
+test("pinned Host schema hydration does not manufacture migration conflicts", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("openclaw.plugin.json", packageRoot), "utf8"),
+  );
+  const migrationFields = [
+    "strongApprovalBindingEnabled",
+    "officialProfileId",
+    "officialProfileDigest",
+    "restrictedAskReleaseEnabled",
+    "activationAckMaxAgeMs",
+  ];
+  const cases = [
+    {},
+    { strongApprovalBindingEnabled: false },
+    { strongApprovalBindingEnabled: true },
+    { restrictedAskReleaseEnabled: false },
+    { activationAckMaxAgeMs: 120000 },
+    {
+      officialProfileId: "agentguard-openclaw-v2-restricted",
+      officialProfileDigest: `sha256:${"a".repeat(64)}`,
+      runtimeBindingId: "binding:openclaw:main",
+      restrictedAskReleaseEnabled: false,
+    },
+  ];
+  for (const value of cases) {
+    const input = { adapterToken: "resolved-token", ...value };
+    const result = validateJsonSchemaValue({
+      schema: manifest.configSchema,
+      cacheKey: "agentguard-p0-config-hydration",
+      value: input,
+      applyDefaults: true,
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    for (const field of migrationFields) {
+      assert.equal(
+        Object.hasOwn(result.value, field),
+        Object.hasOwn(input, field),
+        `Host must preserve the presence of ${field}`,
+      );
+    }
+    if (Object.hasOwn(value, "officialProfileId")) {
+      assert.throws(
+        () => buildPluginConfig(result.value),
+        /officialProfileId activation is not available/,
+      );
+      continue;
+    }
+    const config = buildPluginConfig(result.value);
+    assert.equal(
+      config.strongApprovalBindingEnabled,
+      value.strongApprovalBindingEnabled ?? false,
+    );
+    assert.equal(config.restrictedAskReleaseEnabled, false);
+    assert.equal(config.activationAckMaxAgeMs, 120000);
+  }
+});
+
+test("pinned Host schema rejects malformed new configuration fields", async () => {
+  const manifest = JSON.parse(
+    await readFile(new URL("openclaw.plugin.json", packageRoot), "utf8"),
+  );
+  for (const invalid of [
+    { officialProfileId: "" },
+    { officialProfileId: "another-profile" },
+    { officialProfileId: false },
+    { officialProfileDigest: "" },
+    { officialProfileDigest: `sha256:${"A".repeat(64)}` },
+    { officialProfileDigest: 1 },
+    { restrictedAskReleaseEnabled: "false" },
+    { restrictedAskReleaseEnabled: 0 },
+    { activationAckMaxAgeMs: 0 },
+    { activationAckMaxAgeMs: 120001 },
+    { activationAckMaxAgeMs: 1.5 },
+    { activationAckMaxAgeMs: "120000" },
+  ]) {
+    const result = validateJsonSchemaValue({
+      schema: manifest.configSchema,
+      cacheKey: "agentguard-p0-config-hydration",
+      value: { adapterToken: "resolved-token", ...invalid },
+      applyDefaults: true,
+    });
+    assert.equal(result.ok, false, `Host accepted ${JSON.stringify(invalid)}`);
+  }
 });
 
 test("hook contract uses supported OpenClaw enforcement surfaces", () => {

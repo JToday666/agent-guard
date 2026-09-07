@@ -61,6 +61,10 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   approvalPollIntervalMs: 1000,
   approvalTimeoutMs: 25000,
   strongApprovalBindingEnabled: false,
+  officialProfileId: "",
+  officialProfileDigest: "",
+  restrictedAskReleaseEnabled: false,
+  activationAckMaxAgeMs: 120000,
   runtimeBindingId: "",
   diagnosticLogging: false,
   agentId: "main",
@@ -774,6 +778,65 @@ function diagnosticErrorType(error: unknown): string {
 export function buildPluginConfig(
   input: OpenClawPluginConfigInput,
 ): AgentGuardPluginConfig {
+  // Host schema defaults must not inject these fields: explicit presence is
+  // significant even for false, so legacy/new configurations cannot be mixed.
+  const hasField = (name: string): boolean =>
+    input !== undefined && Object.hasOwn(input, name);
+  const v2Fields = [
+    "officialProfileId",
+    "officialProfileDigest",
+    "restrictedAskReleaseEnabled",
+    "activationAckMaxAgeMs",
+  ];
+  if (hasField("strongApprovalBindingEnabled") && v2Fields.some(hasField)) {
+    throw new GuardApiError(
+      "strongApprovalBindingEnabled is deprecated and cannot be combined with V2 configuration fields",
+    );
+  }
+  const hasProfile =
+    hasField("officialProfileId") || hasField("officialProfileDigest");
+  if (hasProfile) {
+    if (input?.officialProfileId !== "agentguard-openclaw-v2-restricted") {
+      throw new GuardApiError(
+        "officialProfileId must be agentguard-openclaw-v2-restricted",
+      );
+    }
+    if (
+      typeof input?.officialProfileDigest !== "string" ||
+      !/^sha256:[0-9a-f]{64}$/u.test(input.officialProfileDigest)
+    ) {
+      throw new GuardApiError(
+        "officialProfileDigest must be a canonical SHA-256 digest",
+      );
+    }
+    if (hasField("enforcementMode") && input?.enforcementMode !== "enforce") {
+      throw new GuardApiError("officialProfileId requires enforcementMode=enforce");
+    }
+  }
+  if (
+    hasField("restrictedAskReleaseEnabled") &&
+    typeof input?.restrictedAskReleaseEnabled !== "boolean"
+  ) {
+    throw new GuardApiError("restrictedAskReleaseEnabled must be a boolean");
+  }
+  // This reader/config batch deliberately cannot open a half-wired release path.
+  // Remove this fuse only with handshake, durable delivery and breaker consumers.
+  if (input?.restrictedAskReleaseEnabled === true) {
+    throw new GuardApiError(
+      "restrictedAskReleaseEnabled is not available in this build",
+    );
+  }
+  if (
+    hasField("activationAckMaxAgeMs") &&
+    (typeof input?.activationAckMaxAgeMs !== "number" ||
+      !Number.isInteger(input.activationAckMaxAgeMs) ||
+      input.activationAckMaxAgeMs < 1 ||
+      input.activationAckMaxAgeMs > 120000)
+  ) {
+    throw new GuardApiError(
+      "activationAckMaxAgeMs must be an integer from 1 to 120000",
+    );
+  }
   const config: AgentGuardPluginConfig = {
     guardApiBaseUrl: validateGuardApiBaseUrl(
       nonEmptyString(input?.guardApiBaseUrl, DEFAULT_CONFIG.guardApiBaseUrl),
@@ -800,13 +863,30 @@ export function buildPluginConfig(
     ),
     strongApprovalBindingEnabled:
       input?.strongApprovalBindingEnabled === true,
+    officialProfileId:
+      input?.officialProfileId ?? DEFAULT_CONFIG.officialProfileId,
+    officialProfileDigest:
+      input?.officialProfileDigest ?? DEFAULT_CONFIG.officialProfileDigest,
+    restrictedAskReleaseEnabled: false,
+    activationAckMaxAgeMs:
+      input?.activationAckMaxAgeMs ?? DEFAULT_CONFIG.activationAckMaxAgeMs,
     runtimeBindingId: optionalRuntimeBindingId(input?.runtimeBindingId),
     diagnosticLogging: input?.diagnosticLogging === true,
     agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
   };
+  if (hasProfile && !config.runtimeBindingId) {
+    throw new GuardApiError("officialProfileId requires a trusted runtimeBindingId");
+  }
   if (!config.adapterToken) {
     throw new GuardApiError(
       "AgentGuard adapterToken must be configured through an OpenClaw SecretRef",
+    );
+  }
+  if (hasProfile) {
+    // A configured official profile must never silently run the legacy client.
+    // Keep registration closed until ACK/authority/receipt consumers are atomic.
+    throw new GuardApiError(
+      "officialProfileId activation is not available in this build",
     );
   }
   return config;

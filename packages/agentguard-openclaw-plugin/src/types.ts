@@ -7,7 +7,13 @@ export type AgentGuardPluginConfig = {
   requestTimeoutMs: number;
   approvalPollIntervalMs: number;
   approvalTimeoutMs: number;
+  /** @deprecated Legacy canary flag; never advertises C3. Do not mix with V2 options. */
   strongApprovalBindingEnabled: boolean;
+  /** Trusted provisioning metadata; does not activate Product authority by itself. */
+  officialProfileId: string;
+  officialProfileDigest: string;
+  restrictedAskReleaseEnabled: boolean;
+  activationAckMaxAgeMs: number;
   /** Trusted local provisioning value; never learned from Guard API output. */
   runtimeBindingId: string;
   diagnosticLogging: boolean;
@@ -23,7 +29,12 @@ export type OpenClawPluginConfigInput =
       requestTimeoutMs?: number;
       approvalPollIntervalMs?: number;
       approvalTimeoutMs?: number;
+      /** @deprecated Do not mix with the four V2 configuration fields. */
       strongApprovalBindingEnabled?: boolean;
+      officialProfileId?: string;
+      officialProfileDigest?: string;
+      restrictedAskReleaseEnabled?: boolean;
+      activationAckMaxAgeMs?: number;
       runtimeBindingId?: string;
       diagnosticLogging?: boolean;
       agentId?: string;
