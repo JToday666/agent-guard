@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import Event, get_ident
 
 import pytest
-from agentguard_core import PolicyBundle
+from agentguard_core import GuardEvent, PolicyBundle
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.security_context import CommittedRecord
 from sqlalchemy import select
@@ -22,7 +22,10 @@ from guard_api.models import (
 from guard_api.security_state import SecurityStateProjectError, SecurityStateService
 from guard_api.services import ApprovalService, AuditService, EvaluationService
 from guard_api.services.policy import PolicyService
-from guard_api.services.product_activation import load_frozen_product_activation
+from guard_api.services.product_activation import (
+    ProductActivationAuthorityService,
+    load_frozen_product_activation,
+)
 from guard_api.services.runtime_binding import (
     PRODUCT_ACTIVATION_NOT_CURRENT,
     RuntimeBindingResolver,
@@ -41,7 +44,9 @@ from guard_api.storage.base import ProjectionIdentityRecord, TaskFactRecord
 from guard_api.storage import postgres as postgres_storage
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 from tests.support.product_activation import (
+    ProductActivationFixture,
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -72,6 +77,7 @@ _PRODUCT_TRANSACTION_TABLES = (
     postgres_storage.security_states,
     postgres_storage.projection_records,
     postgres_storage.product_runtime_statuses_v2,
+    postgres_storage.product_activation_acks_v1,
     postgres_storage.adapter_statuses,
     postgres_storage.credentials,
 )
@@ -193,6 +199,27 @@ def _invalid_projection(
     )
 
 
+def _activation_ack_token(
+    fixture: ProductActivationFixture,
+    store: PostgresControlPlaneStore,
+) -> str:
+    status = store.list_product_runtime_statuses(runtime="langgraph")[0]
+    return product_activation_ack_for_status(fixture, status).ack_token
+
+
+def _evaluate_with_activation_ack(
+    evaluation: EvaluationService,
+    event: GuardEvent,
+    fixture: ProductActivationFixture,
+    store: PostgresControlPlaneStore,
+):
+    return evaluation.evaluate(
+        event,
+        auth_context=_auth(fixture),
+        activation_ack_token=_activation_ack_token(fixture, store),
+    )
+
+
 @pytest.fixture
 def product_stack(tmp_path: Path):
     database_url = get_test_database_url()
@@ -201,8 +228,9 @@ def product_stack(tmp_path: Path):
     writer = PostgresControlPlaneStore(database_url)
     store.initialize()
     policy = PolicyBundle()
+    now = datetime.now(timezone.utc)
     fixture = build_test_product_activation(
-        now=datetime.now(timezone.utc),
+        now=now,
         policy_digest=canonical_sha256(policy.model_dump(mode="json")),
     )
     activation_path = tmp_path / "product-activation-postgres.json"
@@ -210,8 +238,14 @@ def product_stack(tmp_path: Path):
     settings = _settings(activation_path, fixture)
     store.save_policy_snapshot(policy, expected_revision=0, updated_by="p0-pg-test")
     for runtime in ("langgraph", "openclaw"):
+        status = product_runtime_status_for_activation(
+            fixture,
+            runtime,
+            last_heartbeat_at=now,
+        )
         store.save_product_runtime_status(
-            product_runtime_status_for_activation(fixture, runtime)
+            status,
+            activation_ack=product_activation_ack_for_status(fixture, status),
         )
     entry = fixture.bundle.runtime_entry("langgraph")
     store.create_credential(
@@ -228,7 +262,16 @@ def product_stack(tmp_path: Path):
     )
     activation = load_frozen_product_activation(settings)
     assert activation is not None
-    resolver = RuntimeBindingResolver(product_activation=activation)
+    resolver = RuntimeBindingResolver(
+        product_activation=activation,
+        clock=lambda: now,
+    )
+    product_authority = ProductActivationAuthorityService(
+        activation=activation,
+        store=store,
+        server_secret=fixture.server_secret,
+        clock=lambda: now,
+    )
     control = AuthContext(
         principal_type="cli",
         principal_id="cred_control",
@@ -253,12 +296,14 @@ def product_stack(tmp_path: Path):
         state_service=state_service,
         policy_service=policy_service,
         runtime_binding_resolver=resolver,
+        product_activation_authority=product_authority,
     )
     evaluation = EvaluationService(
         policy_service=policy_service,
         audit_service=AuditService(store=store),
         approval_service=ApprovalService(store=store, settings=settings),
         v21_pipeline=pipeline,
+        product_activation_authority=product_authority,
     )
     try:
         yield (
@@ -280,7 +325,7 @@ def test_postgres_product_evaluation_commits_and_projects(product_stack) -> None
     )
     event = _event(task_id)
 
-    response = evaluation.evaluate(event, auth_context=_auth(fixture))
+    response = _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     state = store.get_security_state(scope_digest)
@@ -335,13 +380,13 @@ def test_postgres_reservation_proves_bounded_rebuild_headroom_before_commit(
     before = _postgres_store_image(store)
 
     if accepted:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate_with_activation_ack(evaluation, event, fixture, store)
         state = store.get_security_state(scope_digest)
         assert state is not None and state.state_version == 999
         assert len(store.list_rebuild_inputs(scope_digest, limit=1000)) == 999
     else:
         with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-            evaluation.evaluate(event, auth_context=_auth(fixture))
+            _evaluate_with_activation_ack(evaluation, event, fixture, store)
         assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
         assert store.get_policy_evaluation_by_event_id(event.event_id) is None
         assert _postgres_store_image(store) == before
@@ -359,7 +404,7 @@ def test_postgres_missing_exact_credential_is_a_zero_write_503(product_stack) ->
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_CREDENTIAL_NOT_CURRENT
     assert store.get_policy_evaluation_by_event_id(event.event_id) is None
@@ -374,7 +419,7 @@ def test_postgres_backfill_applies_existing_unapplied_reservation(
     event = _event(task_id)
     monkeypatch.setattr(pipeline, "run_phase_c", lambda _plan: None)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     pending = store.get_security_state(scope_digest)
@@ -402,7 +447,7 @@ def test_postgres_phase_c_rebuilds_after_other_projector_advances(
 
     monkeypatch.setattr(pipeline, "run_phase_c", interleave_other_projector)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     state = store.get_security_state(scope_digest)
     assert state is not None and state.state_version == 2
@@ -423,7 +468,7 @@ def test_postgres_phase_c_rebuilds_foreign_unapplied_envelope(
 
     monkeypatch.setattr(pipeline, "run_phase_c", interleave_crashed_projector)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     state = store.get_security_state(scope_digest)
     assert state is not None and state.state_version == 2
@@ -449,9 +494,11 @@ def test_postgres_writer_wins_after_phase_a_and_fence_rejects_it(
     monkeypatch.setattr(pipeline, "run_phase_a", hold_after_phase_a)
     with ThreadPoolExecutor(max_workers=1) as executor:
         evaluation_future = executor.submit(
-            evaluation.evaluate,
+            _evaluate_with_activation_ack,
+            evaluation,
             event,
-            auth_context=_auth(fixture),
+            fixture,
+            store,
         )
         assert phase_a_done.wait(timeout=10)
         writer.mark_security_state_dirty(scope_digest, ["behavior"])
@@ -510,9 +557,11 @@ def test_postgres_fence_blocks_scope_writer_until_physical_commit(
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         evaluation_future = executor.submit(
-            evaluation.evaluate,
+            _evaluate_with_activation_ack,
+            evaluation,
             event,
-            auth_context=_auth(fixture),
+            fixture,
+            store,
         )
         assert phase_b_done.wait(timeout=10)
         writer_future = executor.submit(mark_dirty)
@@ -605,9 +654,11 @@ def test_postgres_fence_blocks_each_authority_writer_until_physical_commit(
 
     with ThreadPoolExecutor(max_workers=2) as executor:
         evaluation_future = executor.submit(
-            evaluation.evaluate,
+            _evaluate_with_activation_ack,
+            evaluation,
             event,
-            auth_context=_auth(fixture),
+            fixture,
+            store,
         )
         assert phase_b_done.wait(timeout=10)
         writer_future = executor.submit(mutate_authority)
@@ -670,13 +721,15 @@ def test_postgres_projection_reservation_linearizes_same_scope_events(
 
     with ThreadPoolExecutor(max_workers=1) as executor:
         first_future = executor.submit(
-            evaluation.evaluate,
+            _evaluate_with_activation_ack,
+            evaluation,
             first,
-            auth_context=_auth(fixture),
+            fixture,
+            store,
         )
         assert entered_phase_c.wait(timeout=10)
         with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-            evaluation.evaluate(second, auth_context=_auth(fixture))
+            _evaluate_with_activation_ack(evaluation, second, fixture, store)
         assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
         release_phase_c.set()
         first_response = first_future.result(timeout=10)
@@ -712,9 +765,11 @@ def test_postgres_same_digest_policy_revision_drift_is_503(
     monkeypatch.setattr(pipeline, "run_phase_a", hold_after_phase_a)
     with ThreadPoolExecutor(max_workers=1) as executor:
         evaluation_future = executor.submit(
-            evaluation.evaluate,
+            _evaluate_with_activation_ack,
+            evaluation,
             event,
-            auth_context=_auth(fixture),
+            fixture,
+            store,
         )
         assert phase_a_done.wait(timeout=10)
         writer.save_policy_snapshot(
@@ -753,7 +808,7 @@ def test_postgres_final_activation_drift_rolls_back_audit_and_reservation(
     monkeypatch.setattr(pipeline, "build_phase_b", build_then_mutate_activation)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate_with_activation_ack(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_ACTIVATION_NOT_CURRENT
     assert store.get_policy_evaluation_by_event_id(event.event_id) is None

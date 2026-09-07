@@ -26,7 +26,8 @@ from .metrics import MetricService
 from .policy import PolicyService, PolicyValidationError
 from .product_activation import (
     FrozenProductActivation,
-    ProductActivePreSelectorFuse,
+    ProductActivationAuthorityService,
+    ProductHeartbeatAcceptance,
     ProductRuntimeObservationReconciliation,
     load_frozen_product_activation,
     reconcile_product_runtime_observations,
@@ -69,7 +70,8 @@ __all__ = [
     "PolicyService",
     "PolicyValidationError",
     "FrozenProductActivation",
-    "ProductActivePreSelectorFuse",
+    "ProductActivationAuthorityService",
+    "ProductHeartbeatAcceptance",
     "ProductRuntimeObservationReconciliation",
     "ProvenanceWriter",
     "ResolvedRuntimeBinding",

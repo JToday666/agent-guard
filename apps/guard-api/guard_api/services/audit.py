@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import NoReturn
+from datetime import datetime
+from typing import TYPE_CHECKING, NoReturn
 
 from agentguard_core import (
     ActionCriticReview,
@@ -20,6 +21,7 @@ from pydantic import ValidationError
 from agentguard_core.decisions.evidence import DecisionEvidenceV21
 
 from guard_api.models import ApprovalRequest
+from guard_api.auth import AuthContext
 from guard_api.storage.base import ControlPlaneStore
 from guard_api.storage.integrity import CANONICALIZATION
 
@@ -45,6 +47,9 @@ from .redaction import sanitize_audit_event
 
 _RUNTIME_OUTCOME_AUDIT_ID_PREFIX = "audit_outcome_"
 _BOUND_FAILURE_GATE_STATES = frozenset({"binding_failed", "timed_out", "blocked"})
+
+if TYPE_CHECKING:
+    from .product_activation import ProductActivationAuthorityService
 
 
 class PolicyEvaluationWriteForbiddenError(ValueError):
@@ -76,11 +81,13 @@ class AuditService:
         provenance_writer: ProvenanceWriter | None = None,
         checkpoint_service: AuditCheckpointService | None = None,
         evidence_content_preview_enabled: bool = False,
+        product_activation_authority: "ProductActivationAuthorityService | None" = None,
     ) -> None:
         self.store = store
         self.provenance_writer = provenance_writer or ProvenanceWriter(store=store)
         self.checkpoint_service = checkpoint_service
         self.evidence_content_preview_enabled = evidence_content_preview_enabled
+        self.product_activation_authority = product_activation_authority
 
     def prepare_submission(
         self,
@@ -104,7 +111,12 @@ class AuditService:
         except ValidationError:
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID") from None
 
-    def submit(self, event: AuditEvent) -> dict[str, str | bool]:
+    def submit(
+        self,
+        event: AuditEvent,
+        *,
+        auth_context: AuthContext | None = None,
+    ) -> dict[str, str | bool]:
         # Defense in depth for callers that bypass prepare_submission().  The
         # only authorized path is record_context_manifest() below.
         if is_context_manifest_reserved_payload(event):
@@ -136,6 +148,7 @@ class AuditService:
                 # invalidate evidence already committed to the immutable chain.
                 if self.store.get_audit_event(receipt.audit_id) is None:
                     self._validate_runtime_outcome_authority(receipt, parent)
+                self._validate_product_receipt_ack(receipt, parent, auth_context)
                 event = sanitize_audit_event(
                     AuditEvent.model_validate(receipt.model_dump(mode="json"))
                 )
@@ -217,6 +230,74 @@ class AuditService:
         if actual != expected:
             raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_MISMATCH")
         return parent
+
+    def _validate_product_receipt_ack(
+        self,
+        receipt: RuntimeOutcomeReceipt,
+        parent: AuditEvent,
+        auth_context: AuthContext | None,
+    ) -> None:
+        envelope = (parent.evidence or {}).get("decision_authority")
+        if envelope is None:
+            if "product_replay_authority_digest" in parent.metadata:
+                raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_PARENT_MISMATCH")
+            if receipt.metadata.activation_ack is not None:
+                raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
+            return
+        try:
+            evidence = parse_decision_authority_evidence_payload(
+                {"decision_authority": envelope}
+            )
+        except CriticalDecisionEvidenceError:
+            raise RuntimeOutcomeReceiptError(
+                "RUNTIME_OUTCOME_PARENT_MISMATCH"
+            ) from None
+        if not isinstance(evidence, ProductDecisionAuthorityEvidenceV1):
+            if receipt.metadata.activation_ack is not None:
+                raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
+            return
+        if receipt.metadata.activation_ack is None:
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID")
+        authority = self.product_activation_authority
+        if authority is None:
+            # A missing server verifier is retryable infrastructure failure;
+            # malformed runtime evidence below is permanently invalid (422).
+            from .v21_pipeline import V21OfficialEvaluationUnavailableError
+
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
+            )
+        # This reserved field is written by the fenced Phase-B capture and
+        # records the exact server authority check, before audit construction.
+        reference_time = parent.metadata.get("product_authority_initial_checked_at")
+        if not isinstance(reference_time, str):
+            self._runtime_outcome_authority_mismatch()
+        if receipt.links.lease_id is not None:
+            lease = self.store.get_execution_lease(
+                evidence.approval_release_directive.scope_digest,
+                receipt.links.lease_id,
+            )
+            if lease is None or (
+                lease.consumption_id != receipt.links.consumption_id
+                or lease.approval_id != receipt.links.approval_id
+                or lease.action_id != receipt.links.action_id
+                or receipt.metadata.activation_ack is None
+                or lease.runtime_binding_id
+                != receipt.metadata.activation_ack.runtime_binding_id
+            ):
+                self._runtime_outcome_authority_mismatch()
+            reference_time = lease.issued_at
+        try:
+            authority.enforce_receipt(
+                receipt,
+                auth_context,
+                parent_authority=evidence,
+                reference_time=datetime.fromisoformat(
+                    reference_time.replace("Z", "+00:00")
+                ),
+            )
+        except ValueError:
+            raise RuntimeOutcomeReceiptError("RUNTIME_OUTCOME_INVALID") from None
 
     def _validate_runtime_outcome_authority(
         self,

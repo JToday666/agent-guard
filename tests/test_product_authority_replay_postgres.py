@@ -38,10 +38,7 @@ def _commit_pending_reservation(
     event = harness.event(event_id=event_id)
     original_phase_c = harness.pipeline.run_phase_c
     monkeypatch.setattr(harness.pipeline, "run_phase_c", lambda _plan: None)
-    response = harness.evaluation.evaluate(
-        event,
-        auth_context=harness.auth_context,
-    )
+    response = harness.evaluate(event)
     monkeypatch.setattr(harness.pipeline, "run_phase_c", original_phase_c)
 
     state = harness.store.get_security_state(harness.scope_digest)
@@ -89,10 +86,7 @@ def test_postgres_replay_recovers_pending_reservation_in_product_transaction(
     )
     assert assessment_calls == 1
 
-    replay = replay_harness.evaluation.evaluate(
-        event,
-        auth_context=replay_harness.auth_context,
-    )
+    replay = replay_harness.evaluate(event)
 
     recovered = replay_harness.store.get_security_state(replay_harness.scope_digest)
     persisted = replay_harness.store.get_policy_evaluation_by_event_id(event.event_id)
@@ -139,10 +133,7 @@ def test_postgres_replay_authority_drift_performs_zero_repair(
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        replay_harness.evaluation.evaluate(
-            event,
-            auth_context=replay_harness.auth_context,
-        )
+        replay_harness.evaluate(event)
 
     assert raised.value.code == PRODUCT_POLICY_NOT_CURRENT
     assert repair_calls == 0
@@ -188,10 +179,7 @@ def test_postgres_provenance_failure_rolls_back_replay_state_repair(
         RuntimeError,
         match="injected Product replay provenance failure",
     ):
-        replay_harness.evaluation.evaluate(
-            event,
-            auth_context=replay_harness.auth_context,
-        )
+        replay_harness.evaluate(event)
 
     assert observed_repaired_state is True
     assert replay_harness.store.get_provenance_node(marker.node_id) is None

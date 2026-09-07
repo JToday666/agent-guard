@@ -16,6 +16,7 @@ from guard_api.services import (
     MemoryGuardService,
     MetricService,
     PolicyService,
+    ProductActivationAuthorityService,
     TaskIngressService,
     TraceService,
     V21ShadowService,
@@ -40,6 +41,7 @@ class ApiContext:
     policy_service: PolicyService
     evaluation_service: EvaluationService
     task_ingress_service: TaskIngressService
+    product_activation_authority: ProductActivationAuthorityService | None
     # V21-08：安全状态门面（snapshot 只读入口）与 shadow 旁路编排器
     # （flag 默认关闭；不新增 HTTP 路由，仅供 T5 审计证据接线可达）。
     security_state_service: SecurityStateService

@@ -63,6 +63,7 @@ __all__ = [
     "product_decision_authority_envelope",
     "select_product_v21_authority",
     "verify_activation_ack",
+    "verify_activation_ack_token",
     "verify_product_activation_bundle",
     "verify_residual_risk_acceptance",
     "verify_rollout_admission_record",
@@ -1432,18 +1433,35 @@ def verify_activation_ack(
     server_secret: bytes,
     now: datetime | None = None,
 ) -> bool:
+    if not verify_activation_ack_token(value, server_secret=server_secret):
+        return False
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    issued = _parse_utc(value.issued_at, label="issued_at")
+    expires = _parse_utc(value.expires_at, label="expires_at")
+    return issued <= current < expires
+
+
+def verify_activation_ack_token(
+    value: ActivationAckV1,
+    *,
+    server_secret: bytes,
+) -> bool:
+    """Verify the opaque ACK token without applying wall-clock freshness.
+
+    Authority-bearing requests must use :func:`verify_activation_ack`, which
+    also enforces ``issued_at <= now < expires_at``.  Runtime outcome receipts
+    are durable historical facts and may arrive after that short window; they
+    use this signature-only primitive and separately bind the signed ACK to
+    the receipt, authenticated runtime, and frozen activation.
+    """
+
     if not isinstance(server_secret, bytes) or len(server_secret) < 32:
         return False
     expected = canonical_hmac_sha256(
         server_secret,
         {"domain": ACTIVATION_ACK_SIGNATURE_DOMAIN, "ack": value.token_projection()},
     )
-    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
-    issued = _parse_utc(value.issued_at, label="issued_at")
-    expires = _parse_utc(value.expires_at, label="expires_at")
-    return bool(
-        hmac.compare_digest(expected, value.ack_token) and issued <= current < expires
-    )
+    return hmac.compare_digest(expected, value.ack_token)
 
 
 def legacy_approval_release_projection(

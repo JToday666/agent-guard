@@ -41,7 +41,7 @@ from guard_api.services import (
     MetricService,
     PolicyService,
     PolicyValidationError,
-    ProductActivePreSelectorFuse,
+    ProductActivationAuthorityService,
     ProvenanceWriter,
     RuntimeBindingResolver,
     TaskIngressService,
@@ -96,14 +96,18 @@ def create_app(
         else:
             store = PostgresControlPlaneStore(settings.database_url)
 
-    product_active_fuse = (
-        ProductActivePreSelectorFuse(
+    product_activation_authority = None
+    if product_activation is not None:
+        product_activation_secret = (
+            settings.v21_product_activation_server_secret_bytes()
+        )
+        if product_activation_secret is None:  # startup loader proves this invariant.
+            raise RuntimeError("verified Product activation secret is unavailable")
+        product_activation_authority = ProductActivationAuthorityService(
             activation=product_activation,
             store=store,
+            server_secret=product_activation_secret,
         )
-        if product_activation is not None
-        else None
-    )
     # One process-frozen authority resolver is shared by TaskFact issuance and
     # V2 evaluation. Product mode accepts only the already verified activation
     # wrapper; all other modes preserve the legacy derivation exactly.
@@ -130,6 +134,7 @@ def create_app(
         provenance_writer=provenance_writer,
         checkpoint_service=audit_checkpoint_service,
         evidence_content_preview_enabled=settings.evidence_content_preview_enabled,
+        product_activation_authority=product_activation_authority,
     )
     audit_window_service = AuditWindowService(
         store=store,
@@ -154,6 +159,7 @@ def create_app(
         store,
         settings,
         approval_service,
+        product_activation_authority=product_activation_authority,
     )
     metric_service = MetricService(store=store)
     trace_service = TraceService(
@@ -175,9 +181,8 @@ def create_app(
     )
     # V21-09：四段式编排器（D4，legacy shadow + Product fail-closed）。
     # 与 V21ShadowService 同一 mode/secret 门控；兼容路径的 Phase A 失败
-    # 仍回退 V21-08。Product authority fence 与内部 selector/replay 已
-    # 实现，但公开 composition root 仍由外层 fuse 阻断，待 ACK/freshness
-    # 批次原子接线后才移除。
+    # 仍回退 V21-08。Product 则复用唯一 ACK authority，在入口、Phase B、
+    # final precommit 与 exact replay 检查 freshness；失败保持 503。
     competition_active = (
         competition_activation is not None
         and settings.effective_v21_mode() == "active"
@@ -203,6 +208,7 @@ def create_app(
         ),
         competition_model_output_observation=competition_active,
         runtime_binding_resolver=runtime_binding_resolver,
+        product_activation_authority=product_activation_authority,
     )
     # CT-PR-03b：CT 事实投影编排器（D2/D3：独立 flag，默认关闭；
     # 仅 pipeline 材料就绪时生效）。构造无 I/O；flag off 时全部入口
@@ -233,7 +239,7 @@ def create_app(
         ct_projection_service=ct_projection_service,
         context_builder_service=context_builder_service,
         competition_activation=competition_activation,
-        product_active_fuse=product_active_fuse,
+        product_activation_authority=product_activation_authority,
     )
     task_ingress_service = TaskIngressService(
         store=store,
@@ -414,6 +420,7 @@ def create_app(
             policy_service=policy_service,
             evaluation_service=evaluation_service,
             task_ingress_service=task_ingress_service,
+            product_activation_authority=product_activation_authority,
             security_state_service=security_state_service,
             v21_shadow_service=v21_shadow_service,
         ),

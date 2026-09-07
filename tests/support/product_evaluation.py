@@ -29,7 +29,10 @@ from guard_api.models import (
 from guard_api.security_state import SecurityStateService
 from guard_api.services import ApprovalService, AuditService, EvaluationService
 from guard_api.services.policy import PolicyService
-from guard_api.services.product_activation import load_frozen_product_activation
+from guard_api.services.product_activation import (
+    ProductActivationAuthorityService,
+    load_frozen_product_activation,
+)
 from guard_api.services.runtime_binding import RuntimeBindingResolver
 from guard_api.services.task_ingress import TaskIngressService
 from guard_api.services.v21_pipeline import V21PipelineService
@@ -40,6 +43,7 @@ from .product_activation import (
     TEST_PRODUCT_ACTIVATION_SECRET_B64,
     ProductActivationFixture,
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -74,6 +78,14 @@ class ProductEvaluationHarness:
     scope_digest: str
     auth_context: AuthContext
     runtime: ProductReplayRuntime
+    activation_ack_token: str
+
+    def evaluate(self, event: GuardEvent):
+        return self.evaluation.evaluate(
+            event,
+            auth_context=self.auth_context,
+            activation_ack_token=self.activation_ack_token,
+        )
 
     def event(
         self,
@@ -140,10 +152,15 @@ def create_product_evaluation_harness(
     settings = product_replay_settings(activation_path, fixture)
     store = MemoryControlPlaneStore()
     store.save_policy_snapshot(policy, expected_revision=0, updated_by="replay-test")
+    activation_ack_tokens: dict[str, str] = {}
     for observed_runtime in ("langgraph", "openclaw"):
+        status = product_runtime_status_for_activation(fixture, observed_runtime)
+        ack = product_activation_ack_for_status(fixture, status)
         store.save_product_runtime_status(
-            product_runtime_status_for_activation(fixture, observed_runtime)
+            status,
+            activation_ack=ack,
         )
+        activation_ack_tokens[observed_runtime] = ack.ack_token
 
     entry = fixture.bundle.runtime_entry(runtime)
     credential_id = (
@@ -166,6 +183,11 @@ def create_product_evaluation_harness(
     activation = load_frozen_product_activation(settings)
     assert activation is not None
     resolver = RuntimeBindingResolver(product_activation=activation)
+    product_authority = ProductActivationAuthorityService(
+        activation=activation,
+        store=store,
+        server_secret=fixture.server_secret,
+    )
     task = TaskIngressService(
         store=store,
         settings=settings,
@@ -197,6 +219,7 @@ def create_product_evaluation_harness(
         state_service=SecurityStateService(store),
         policy_service=policy_service,
         runtime_binding_resolver=resolver,
+        product_activation_authority=product_authority,
     )
     audit_service = AuditService(store=store)
     evaluation = EvaluationService(
@@ -204,6 +227,7 @@ def create_product_evaluation_harness(
         audit_service=audit_service,
         approval_service=ApprovalService(store=store, settings=settings),
         v21_pipeline=pipeline,
+        product_activation_authority=product_authority,
     )
     auth_context = AuthContext(
         principal_type="component",
@@ -227,6 +251,7 @@ def create_product_evaluation_harness(
         scope_digest=task.scope_digest,
         auth_context=auth_context,
         runtime=runtime,
+        activation_ack_token=activation_ack_tokens[runtime],
     )
 
 

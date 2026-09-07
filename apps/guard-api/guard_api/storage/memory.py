@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import hmac as hmac_module
 from copy import deepcopy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from threading import Lock, RLock
 from typing import Any, Callable, Iterator, cast
 
 from agentguard_core import (
+    ActivationAckV1,
     ActionCriticReview,
     AuditEvent,
     ConfigAuditEvent,
@@ -38,9 +39,11 @@ from guard_api.models import (
     LlmApprovalReview,
 )
 from guard_api.runtime_status import (
+    ProductActivationAckRecordV1,
     ProductRuntime,
     ProductRuntimeStatusIdentityV1,
     ProductRuntimeStatusV2,
+    activation_ack_matches_runtime_status,
 )
 from guard_api.storage.base import (
     ApprovalExecutionLeaseExpiredError,
@@ -177,6 +180,10 @@ class MemoryControlPlaneStore:
     product_runtime_statuses_v2: dict[
         tuple[str, str, str, str], tuple[int, ProductRuntimeStatusV2]
     ] = field(default_factory=dict)
+    product_activation_acks_v1: dict[str, ProductActivationAckRecordV1] = field(
+        default_factory=dict,
+        repr=False,
+    )
     product_runtime_status_write_sequence: int = 0
     credentials: dict[str, CredentialRecord] = field(default_factory=dict)
     action_critic_reviews: dict[str, ActionCriticReview] = field(default_factory=dict)
@@ -420,6 +427,7 @@ class MemoryControlPlaneStore:
                 "product_runtime_statuses_v2": deepcopy(
                     self.product_runtime_statuses_v2
                 ),
+                "product_activation_acks_v1": deepcopy(self.product_activation_acks_v1),
                 "product_runtime_status_write_sequence": (
                     self.product_runtime_status_write_sequence
                 ),
@@ -457,6 +465,10 @@ class MemoryControlPlaneStore:
                 self.product_runtime_statuses_v2.clear()
                 self.product_runtime_statuses_v2.update(
                     snapshot["product_runtime_statuses_v2"]
+                )
+                self.product_activation_acks_v1.clear()
+                self.product_activation_acks_v1.update(
+                    snapshot["product_activation_acks_v1"]
                 )
                 self.product_runtime_status_write_sequence = snapshot[
                     "product_runtime_status_write_sequence"
@@ -535,7 +547,14 @@ class MemoryControlPlaneStore:
         """
 
         del approval_id
-        with self.audit_integrity_lock, self.approval_lease_lock:
+        # ACK issuance/revocation reads may occur inside this transaction.
+        # Match Product evaluation and lease ordering before taking audit or
+        # approval locks, including legacy receipts in an activated process.
+        with (
+            self.product_runtime_status_lock,
+            self.audit_integrity_lock,
+            self.approval_lease_lock,
+        ):
             yield
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
@@ -763,9 +782,43 @@ class MemoryControlPlaneStore:
             return deepcopy(self.adapter_statuses)
 
     def save_product_runtime_status(
-        self, status: ProductRuntimeStatusV2 | dict[str, Any]
+        self,
+        status: ProductRuntimeStatusV2 | dict[str, Any],
+        *,
+        activation_ack: ActivationAckV1 | dict[str, Any] | None = None,
+        revoke_activation_acks_for: (
+            ProductRuntimeStatusIdentityV1 | dict[str, Any] | None
+        ) = None,
+        revoked_at: str | None = None,
     ) -> ProductRuntimeStatusV2:
         record = ProductRuntimeStatusV2.model_validate(status)
+        ack = (
+            None
+            if activation_ack is None
+            else ActivationAckV1.model_validate(activation_ack)
+        )
+        if ack is not None and not activation_ack_matches_runtime_status(ack, record):
+            raise ValueError("activation ACK does not match runtime status")
+        revoke_identity = (
+            None
+            if revoke_activation_acks_for is None
+            else ProductRuntimeStatusIdentityV1.model_validate(
+                revoke_activation_acks_for
+            )
+        )
+        if (revoke_identity is None) != (revoked_at is None):
+            raise ValueError("ACK revocation identity and timestamp must be paired")
+        issued = (
+            None
+            if ack is None
+            else ProductActivationAckRecordV1.from_ack(
+                ack,
+                principal_id=record.principal_id,
+            )
+        )
+        if revoked_at is not None:
+            parsed_revoked_at = parse_audit_timestamp(revoked_at)
+            revoked_at = parsed_revoked_at.astimezone(timezone.utc).isoformat()
         stored = deepcopy(record)
         identity = stored.identity()
         key = (
@@ -776,13 +829,99 @@ class MemoryControlPlaneStore:
         )
         legacy_payload = stored.to_legacy_adapter_status().model_dump(mode="json")
         with self.product_runtime_status_lock:
+            if issued is not None:
+                existing = self.product_activation_acks_v1.get(issued.token_digest)
+                if existing is not None and existing != issued:
+                    raise ValueError("activation ACK digest conflicts with issuance")
+            revocations: dict[str, ProductActivationAckRecordV1] = {}
+            if revoke_identity is not None and revoked_at is not None:
+                revocations = self._prepare_product_activation_ack_revocations_locked(
+                    revoke_identity,
+                    revoked_at=revoked_at,
+                )
             self.product_runtime_status_write_sequence += 1
             self.product_runtime_statuses_v2[key] = (
                 self.product_runtime_status_write_sequence,
                 stored,
             )
+            self.product_activation_acks_v1.update(revocations)
+            if issued is not None:
+                self.product_activation_acks_v1[issued.token_digest] = deepcopy(issued)
             self.adapter_statuses[identity.runtime] = deepcopy(legacy_payload)
         return deepcopy(stored)
+
+    def get_product_activation_ack(
+        self,
+        token_digest: str,
+    ) -> ProductActivationAckRecordV1 | None:
+        with self.product_runtime_status_lock:
+            record = self.product_activation_acks_v1.get(token_digest)
+            return deepcopy(record) if record is not None else None
+
+    def get_latest_product_activation_ack(
+        self,
+        identity: ProductRuntimeStatusIdentityV1 | dict[str, Any],
+    ) -> ProductActivationAckRecordV1 | None:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        with self.product_runtime_status_lock:
+            candidates = [
+                record
+                for record in self.product_activation_acks_v1.values()
+                if record.revoked_at is None and record.identity() == exact
+            ]
+            candidates.sort(
+                key=lambda item: (
+                    item.unsigned_ack().issued_at,
+                    item.token_digest,
+                ),
+                reverse=True,
+            )
+            return deepcopy(candidates[0]) if candidates else None
+
+    def revoke_product_activation_acks(
+        self,
+        identity: ProductRuntimeStatusIdentityV1 | dict[str, Any],
+        *,
+        revoked_at: str,
+    ) -> int:
+        exact = ProductRuntimeStatusIdentityV1.model_validate(identity)
+        with self.product_runtime_status_lock:
+            return self._revoke_product_activation_acks_locked(
+                exact,
+                revoked_at=revoked_at,
+            )
+
+    def _revoke_product_activation_acks_locked(
+        self,
+        identity: ProductRuntimeStatusIdentityV1,
+        *,
+        revoked_at: str,
+    ) -> int:
+        replacements = self._prepare_product_activation_ack_revocations_locked(
+            identity,
+            revoked_at=revoked_at,
+        )
+        self.product_activation_acks_v1.update(replacements)
+        return len(replacements)
+
+    def _prepare_product_activation_ack_revocations_locked(
+        self,
+        identity: ProductRuntimeStatusIdentityV1,
+        *,
+        revoked_at: str,
+    ) -> dict[str, ProductActivationAckRecordV1]:
+        replacements: dict[str, ProductActivationAckRecordV1] = {}
+        for token_digest, record in list(self.product_activation_acks_v1.items()):
+            if record.revoked_at is None and record.identity() == identity:
+                replacements[token_digest] = (
+                    ProductActivationAckRecordV1.model_validate(
+                        {
+                            **record.model_dump(mode="json"),
+                            "revoked_at": revoked_at,
+                        }
+                    )
+                )
+        return replacements
 
     def get_product_runtime_status(
         self, identity: ProductRuntimeStatusIdentityV1 | dict[str, Any]
@@ -1284,9 +1423,17 @@ class MemoryControlPlaneStore:
                 raise
 
     def consume_approval_execution_lease(
-        self, command: ApprovalLeaseConsumeCommand
+        self,
+        command: ApprovalLeaseConsumeCommand,
+        *,
+        release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
-        with self.approval_lease_lock:
+        runtime_lock = (
+            self.product_runtime_status_lock
+            if release_check is not None
+            else nullcontext()
+        )
+        with runtime_lock, self.approval_lease_lock:
             grants_snapshot = deepcopy(self.capability_grants)
             consumptions_snapshot = deepcopy(self.grant_consumption_records)
             leases_snapshot = deepcopy(self.execution_lease_records)
@@ -1365,6 +1512,9 @@ class MemoryControlPlaneStore:
                         "private approval authority state is inconsistent",
                     )
                 grant_expires_at = parse_audit_timestamp(str(grant["expires_at"]))
+
+                if release_check is not None:
+                    release_check(now)
 
                 consumption_id = _derive_consumption_id(
                     binding.grant_id, binding.action_id

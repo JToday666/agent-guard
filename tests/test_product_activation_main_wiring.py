@@ -17,6 +17,7 @@ from tests.support.auth import add_adapter_credential
 from tests.support.product_activation import (
     TEST_PRODUCT_ACTIVATION_SECRET_B64,
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -68,17 +69,10 @@ def _event() -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize(
-    ("record_observations", "expected_code"),
-    [
-        (False, "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH"),
-        (True, "V21_PRODUCT_SELECTOR_NOT_WIRED"),
-    ],
-)
-def test_create_app_arms_product_fuse_without_current_fallback(
+@pytest.mark.parametrize("record_observations", [False, True])
+def test_create_app_requires_fresh_product_ack_without_current_fallback(
     tmp_path: Path,
     record_observations: bool,
-    expected_code: str,
 ) -> None:
     now = datetime.now(timezone.utc)
     fixture = build_test_product_activation(now=now)
@@ -92,12 +86,14 @@ def test_create_app_arms_product_fuse_without_current_fallback(
     )
     if record_observations:
         for runtime in ("langgraph", "openclaw"):
+            status = product_runtime_status_for_activation(
+                fixture,
+                runtime,
+                last_heartbeat_at=now,
+            )
             store.save_product_runtime_status(
-                product_runtime_status_for_activation(
-                    fixture,
-                    runtime,
-                    last_heartbeat_at=now,
-                )
+                status,
+                activation_ack=product_activation_ack_for_status(fixture, status),
             )
 
     app = create_app(store=store, settings=_settings(path))
@@ -109,8 +105,13 @@ def test_create_app_arms_product_fuse_without_current_fallback(
         )
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == expected_code
-    assert "current" not in response.text
+    # The caller-owned ACK is checked before dual-runtime observation
+    # reconciliation.  Missing observations must not disclose a different
+    # failure class to a request that did not present any ACK authority.
+    assert response.json()["error"]["code"] == (
+        "V21_PRODUCT_ACTIVATION_ACK_REQUIRED"
+    )
+    assert '"source":"current"' not in response.text
     assert store.audit_events == []
     assert store.approvals == {}
     assert store.enforcement_bindings == {}

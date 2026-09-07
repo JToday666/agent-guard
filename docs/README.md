@@ -81,6 +81,7 @@ docs/
 4. [Dashboard 指标作用域与审计窗口 API 协作契约](08_api/dashboard_metrics_api_contract.md)
 5. [Capability Auth 总体方案](07_auth/鉴权总体方案.md)
 6. [Dashboard 前端与 UI 设计规范](04_apps/dashboard_ui_spec.md)
+7. [Product Active Activation ACK 接线](08_api/product_activation_ack.md)
 
 ### Redteam 开发
 

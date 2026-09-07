@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 import pytest
@@ -49,6 +49,7 @@ from guard_api.services.v21_pipeline import (
     V21OfficialEvaluationUnavailableError,
     V21PipelineService,
 )
+from guard_api.runtime_status import ProductRuntimeHeartbeatV2
 from guard_api.storage.base import TaskFactRecord
 from tests.support.product_evaluation import (
     PRODUCT_REPLAY_SESSION_ID,
@@ -85,10 +86,7 @@ def _committed_product_evaluation(
     event_id: str = "evt:product-replay",
 ):
     event = harness.event(event_id=event_id)
-    response = harness.evaluation.evaluate(
-        event,
-        auth_context=harness.auth_context,
-    )
+    response = harness.evaluate(event)
     assert response.decision_authority is not None
     assert response.decision_authority.source == "v21"
     assert response.decision_authority.mode == "active"
@@ -217,13 +215,17 @@ def test_product_replay_recaptures_authority_before_provenance_repair_without_re
     )
     monkeypatch.setattr(harness.audit_service, "repair_provenance", observed_repair)
 
-    replay = harness.evaluation.evaluate(
-        event,
-        auth_context=harness.auth_context,
-    )
+    replay = harness.evaluate(event)
 
     assert assessment_calls == 1
-    assert order == ["authority", "state_repair", "authority", "provenance"]
+    assert order == [
+        "authority",  # request-entry zero-side-effect gate
+        "authority",  # locked pre-repair gate
+        "state_repair",
+        "authority",  # post-state-repair gate
+        "provenance",
+        "authority",  # final precommit gate
+    ]
     assert replay.model_dump(mode="json") == first.model_dump(mode="json")
 
 
@@ -254,10 +256,7 @@ def test_product_replay_is_byte_exact_and_storage_idempotent(
     audit_count = len(harness.store.audit_events)
 
     for _ in range(2):
-        replay = harness.evaluation.evaluate(
-            event,
-            auth_context=harness.auth_context,
-        )
+        replay = harness.evaluate(event)
         persisted = harness.store.get_policy_evaluation_by_event_id(event.event_id)
         assert persisted is not None
         assert replay.model_dump_json() == response_bytes
@@ -325,7 +324,7 @@ def test_openclaw_replay_preserves_restricted_ask_carrier_without_reassessment(
         )
 
     monkeypatch.setattr(GuardEngine, "evaluate_with_results", force_current_ask)
-    first = harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    first = harness.evaluate(event)
     audit = harness.store.get_policy_evaluation_by_event_id(event.event_id)
     assert audit is not None and audit.evidence is not None
     evidence = parse_decision_authority_evidence_payload(
@@ -345,7 +344,7 @@ def test_openclaw_replay_preserves_restricted_ask_carrier_without_reassessment(
         raise AssertionError("Product replay must not reassess")
 
     monkeypatch.setattr(GuardEngine, "evaluate_with_results", fail_if_reassessed)
-    replay = harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    replay = harness.evaluate(event)
 
     assert replay.model_dump_json() == first.model_dump_json()
     assert harness.store.get_approval(first.approval.approval_id) == approval_before
@@ -378,10 +377,7 @@ def test_product_replay_recovers_pending_reservation_without_reassessment(
     assert assessment_calls == 1
 
     monkeypatch.setattr(harness.pipeline, "run_phase_c", original_phase_c)
-    replay = harness.evaluation.evaluate(
-        event,
-        auth_context=harness.auth_context,
-    )
+    replay = harness.evaluate(event)
 
     recovered = harness.store.get_security_state(harness.scope_digest)
     persisted = harness.store.get_policy_evaluation_by_event_id(event.event_id)
@@ -458,7 +454,7 @@ def test_product_replay_authority_drift_performs_zero_repair_or_d9_backfill(
     monkeypatch.setattr(harness.pipeline, "backfill_projection", count_backfill)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == expected_code
     assert state_repair_calls == 0
@@ -482,16 +478,22 @@ def test_product_replay_accepts_heartbeat_refresh_but_rejects_inventory_drift(
         harness.store.list_product_runtime_statuses(runtime="langgraph")[0].identity()
     )
     assert current is not None
-    heartbeat = datetime.fromisoformat(current.last_heartbeat_at.replace("Z", "+00:00"))
-    refreshed = current.model_copy(
-        update={"last_heartbeat_at": (heartbeat + timedelta(seconds=30)).isoformat()}
+    heartbeat = ProductRuntimeHeartbeatV2.model_validate(
+        current.model_dump(
+            mode="json",
+            exclude={"runtime", "principal_id", "last_heartbeat_at"},
+        )
     )
-    harness.store.save_product_runtime_status(refreshed)
+    authority = harness.evaluation.product_activation_authority
+    assert authority is not None
+    accepted = authority.accept_heartbeat(
+        "langgraph",
+        heartbeat,
+        harness.auth_context,
+    )
+    refreshed = accepted.runtime_status
 
-    replay = harness.evaluation.evaluate(
-        event,
-        auth_context=harness.auth_context,
-    )
+    replay = harness.evaluate(event)
     assert replay.model_dump_json() == first.model_dump_json()
 
     repair_calls = 0
@@ -510,7 +512,7 @@ def test_product_replay_accepts_heartbeat_refresh_but_rejects_inventory_drift(
     harness.store.save_product_runtime_status(drifted)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == RUNTIME_OBSERVATION_MISMATCH
     assert repair_calls == 0
@@ -622,7 +624,7 @@ def test_late_product_replay_authority_drift_precedes_all_repair(
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == expected_code
     assert drift_injected is True
@@ -709,7 +711,7 @@ def test_product_replay_rejects_non_product_historical_audit_before_repair(
     monkeypatch.setattr(harness.audit_service, "repair_provenance", count_repair)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == PRODUCT_AUTHORITY_NOT_CURRENT
     assert repair_calls == 0

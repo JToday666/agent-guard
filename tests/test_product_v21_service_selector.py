@@ -44,7 +44,10 @@ from guard_api.security_state import SecurityStateService
 from guard_api.services import ApprovalService, AuditService, EvaluationService
 from guard_api.services.competition import parse_decision_authority_evidence_payload
 from guard_api.services.policy import PolicyService
-from guard_api.services.product_activation import load_frozen_product_activation
+from guard_api.services.product_activation import (
+    ProductActivationAuthorityService,
+    load_frozen_product_activation,
+)
 from guard_api.services.runtime_binding import RuntimeBindingResolver
 from guard_api.services.task_ingress import TaskIngressService
 from guard_api.services.v21_pipeline import V21PipelineService
@@ -54,6 +57,7 @@ from tests.support.product_activation import (
     TEST_PRODUCT_ACTIVATION_SECRET_B64,
     ProductActivationFixture,
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -147,6 +151,7 @@ class _ProductServiceStack:
     task_id: str
     scope_digest: str
     runtime: Runtime
+    activation_ack_token: str
 
     def event(
         self,
@@ -221,10 +226,15 @@ def _stack(
         expected_revision=0,
         updated_by="product-selector-service-test",
     )
+    activation_ack_tokens: dict[str, str] = {}
     for observed_runtime in ("langgraph", "openclaw"):
+        status = product_runtime_status_for_activation(fixture, observed_runtime)
+        ack = product_activation_ack_for_status(fixture, status)
         store.save_product_runtime_status(
-            product_runtime_status_for_activation(fixture, observed_runtime)
+            status,
+            activation_ack=ack,
         )
+        activation_ack_tokens[observed_runtime] = ack.ack_token
 
     entry = fixture.bundle.runtime_entry(runtime)
     raw_token = f"product-selector-service-token:{runtime}"
@@ -246,6 +256,11 @@ def _stack(
     activation = load_frozen_product_activation(settings)
     assert activation is not None
     resolver = RuntimeBindingResolver(product_activation=activation)
+    product_authority = ProductActivationAuthorityService(
+        activation=activation,
+        store=store,
+        server_secret=fixture.server_secret,
+    )
     created = TaskIngressService(
         store=store,
         settings=settings,
@@ -283,12 +298,14 @@ def _stack(
         state_service=SecurityStateService(store),
         policy_service=policy_service,
         runtime_binding_resolver=resolver,
+        product_activation_authority=product_authority,
     )
     evaluation = EvaluationService(
         policy_service=policy_service,
         audit_service=AuditService(store=store),
         approval_service=ApprovalService(store=store, settings=settings),
         v21_pipeline=pipeline,
+        product_activation_authority=product_authority,
     )
     auth_context = AuthContext(
         principal_type="component",
@@ -309,6 +326,7 @@ def _stack(
         task_id=created.task_id,
         scope_digest=created.scope_digest,
         runtime=runtime,
+        activation_ack_token=activation_ack_tokens[runtime],
     )
 
 
@@ -335,7 +353,11 @@ def test_all_product_events_commit_v2_active_profile_all_without_current_fallbac
     stack = _stack(tmp_path, runtime)
     event = stack.event(event_type)
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
 
     authority = response.decision_authority
     assert authority is not None
@@ -375,7 +397,11 @@ def test_product_service_commits_a_true_raw_v21_allow(tmp_path: Path) -> None:
         },
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
     evidence = _authority_evidence(stack, event)
 
     assert evidence.current_decision.decision == "allow"
@@ -450,7 +476,11 @@ def test_product_ask_commits_runtime_specific_release_and_exact_carrier_parity(
         },
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
 
     assert response.decision.decision == "ask"
     assert response.approval is not None
@@ -514,7 +544,11 @@ def test_product_side_effect_ask_release_applies_to_memory_and_message(
         payload=_safe_payload(event_type),
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
     evidence = _authority_evidence(stack, event)
 
     assert evidence.raw_v21_decision.decision == "allow"
@@ -640,7 +674,11 @@ def test_current_deny_floor_remains_v2_authority_not_current_fallback(
         },
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
     evidence = _authority_evidence(stack, event)
 
     assert evidence.current_decision.decision == "deny"

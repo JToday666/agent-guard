@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
+from agentguard_core import ActivationAckV1
 from agentguard_core.actions.canonical_json import canonical_json_bytes
 from agentguard_core.security_context import ExecutionLease
 from agentguard_core.security_context.projection.authority_verdict import (
@@ -48,6 +50,7 @@ from guard_api.storage.base import (
 if TYPE_CHECKING:
     from guard_api.auth import AuthContext
     from guard_api.services.approval import ApprovalService
+    from guard_api.services.product_activation import ProductActivationAuthorityService
 
 __all__ = [
     "DEFAULT_LEASE_TTL_SECONDS",
@@ -314,6 +317,7 @@ class ApprovalExecutionLeaseService:
     approval_service: ApprovalService
     lease_token_key: bytes
     lease_ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS
+    product_activation_authority: "ProductActivationAuthorityService | None" = None
 
     def consume(
         self,
@@ -322,19 +326,36 @@ class ApprovalExecutionLeaseService:
         action_id: str,
         authorization_fingerprint: str,
         auth_context: AuthContext,
+        activation_ack_token: str | None = None,
         now: datetime | None = None,
     ) -> GrantConsumptionResult:
+        release_ack: ActivationAckV1 | None = None
         try:
+            if self.product_activation_authority is not None:
+                release_ack = self.product_activation_authority.enforce_release(
+                    auth_context,
+                    activation_ack_token,
+                )
             return self._consume(
                 approval_id,
                 action_id=action_id,
                 authorization_fingerprint=authorization_fingerprint,
                 auth_context=auth_context,
+                activation_ack_token=activation_ack_token,
+                release_ack=release_ack,
                 now=now,
             )
         except ApprovalLeaseStoreError:
             raise
-        except Exception:
+        except Exception as exc:
+            # Product authority failures carry a stable public 503 code and
+            # must not be collapsed into the generic lease availability code.
+            from guard_api.services.v21_pipeline import (  # noqa: PLC0415
+                V21OfficialEvaluationUnavailableError,
+            )
+
+            if isinstance(exc, V21OfficialEvaluationUnavailableError):
+                raise
             # Never let driver/internal exception text escape the stable API
             # envelope.  Transient/unclassified failures are retryable and the
             # bound action remains fail-closed.
@@ -349,6 +370,8 @@ class ApprovalExecutionLeaseService:
         action_id: str,
         authorization_fingerprint: str,
         auth_context: AuthContext,
+        activation_ack_token: str | None,
+        release_ack: ActivationAckV1 | None,
         now: datetime | None = None,
     ) -> GrantConsumptionResult:
         moment = now or datetime.now(timezone.utc)
@@ -430,10 +453,26 @@ class ApprovalExecutionLeaseService:
             action_id=binding.action_id,
             authorization_fingerprint=binding.authorization_fingerprint,
         )
-        expires_at = min(
+        expiry_candidates = [
             moment + timedelta(seconds=self.lease_ttl_seconds),
             approval_expires_at,
-        ).isoformat()
+        ]
+        if release_ack is not None:
+            expiry_candidates.append(_parse_lease_datetime(release_ack.expires_at))
+        expires_at = min(expiry_candidates).isoformat()
+        release_check: Callable[[datetime], ActivationAckV1] | None = None
+        if self.product_activation_authority is not None:
+            authority = self.product_activation_authority
+
+            def validate_release(reference_time: datetime) -> ActivationAckV1:
+                return authority.enforce_release(
+                    auth_context,
+                    activation_ack_token,
+                    reference_time=reference_time,
+                )
+
+            release_check = validate_release
+
         return self.store.consume_approval_execution_lease(
             ApprovalLeaseConsumeCommand(
                 credential_id=credential_id,
@@ -446,7 +485,8 @@ class ApprovalExecutionLeaseService:
                 authorization_fingerprint=authorization_fingerprint,
                 lease_token=lease_token,
                 expires_at=expires_at,
-            )
+            ),
+            release_check=release_check,
         )
 
 
@@ -470,12 +510,14 @@ def approval_execution_lease_service_from_settings(
     approval_service: ApprovalService,
     *,
     lease_ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
+    product_activation_authority: "ProductActivationAuthorityService | None" = None,
 ) -> ApprovalExecutionLeaseService:
     return ApprovalExecutionLeaseService(
         store=store,
         approval_service=approval_service,
         lease_token_key=derive_lease_token_key(settings.control_token),
         lease_ttl_seconds=lease_ttl_seconds,
+        product_activation_authority=product_activation_authority,
     )
 
 
