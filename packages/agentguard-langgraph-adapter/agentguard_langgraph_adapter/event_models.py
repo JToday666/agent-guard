@@ -570,6 +570,9 @@ class ToolExecutionResult(BaseModel):
     sanitize_applied: bool = False
     quarantine_applied: bool = False
     runtime_receipt_error: str | None = None
+    runtime_receipt_status: Literal["recorded", "disabled", "failed"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     lease_id: str | None = Field(default=None, exclude_if=lambda value: value is None)
     consumption_id: str | None = Field(
         default=None, exclude_if=lambda value: value is None

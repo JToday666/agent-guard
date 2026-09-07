@@ -53,12 +53,34 @@ fail closed 且不调用工具。网络、429、5xx/503 只在原审批 deadline
 请求有界重试。SDK 不本地重算 authorization fingerprint，明文 lease token 仅在
 consume 响应解析栈内验证后丢弃，结果与回执只携带 lease/consumption ID。
 
+## Required runtime receipts
+
+`runtime_receipt_mode="best_effort"` 为兼容默认值；需要强制回执的产品 gateway
+可显式配置 `runtime_receipt_mode="required"`。Product V2 Active 的 `profile_all`
+响应或 `required_durable` directive 也会强制 required，不能由本地默认值降级。
+
+required 模式会在审批/lease 前检查回执入口和 policy parent；未启用、缺少
+submitter 或 policy audit ID 时不调用工具。start 回执必须收到包含精确 audit ID
+的肯定响应后才能执行。terminal 回执失败保留已经执行的事实，不重试工具，
+并在 `ToolExecutionResult.runtime_receipt_status` 中返回 `failed`。
+
+新 API `submit_runtime_receipt_result()` 明确返回 `recorded | disabled | failed`；
+旧 `submit_runtime_receipt()` 保留 `str | None` 兼容投影，二者使用同一发送路径。
+required 调用方和验收脚本必须检查结构化状态，不能把 `disabled` 当作成功。
+`recorded` 只说明服务端确认了该回执，不是持久性或 Host exactly-once 的独立证明。
+
+本批不提供 ACK handshake/历史 ACK carrier，不开启 Product Active runtime 开关，
+也不构成原生 StateGraph、双 canary 或 Internal RC 资格。后续小批次依次接通
+ACK 客户端与历史 carrier、统一执行模板、原生 LangGraph runtime；每批从前一批
+实际合入后的 `dev` SHA 开始。OpenClaw 配置/契约读取层单独交付，不混入本批。
+
 ## 验证
 
 在仓库根目录执行：
 
 ```bash
 uv run pytest packages/agentguard-langgraph-adapter/tests -q
+uv run pytest packages/agentguard-langgraph-adapter/tests/test_required_runtime_receipts.py -q
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 ```
 
