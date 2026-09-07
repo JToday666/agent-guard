@@ -32,10 +32,10 @@ Product runtime 向 `POST /v1/adapters/{runtime}/heartbeat` 提交 `ProductRunti
 
 `POST /v1/audit/events` 的 runtime outcome 使用已有的 `metadata.activation_ack` 携带完整 ACK，不要求重复 header。服务端在 receipt 事务中读取不可变 policy parent、ACK issuance 和相关 lease：
 
-- 无 lease 时，按服务端 policy evaluation 时间验证 ACK；该时间只证明判定时的 authority。
+- 无 lease 时，按 policy parent 中服务端 Phase-B 写入的 `product_authority_initial_checked_at` 验证 ACK；该时间只证明判定时的 authority。
 - 有 lease 时，按该 action 的服务端 `ExecutionLease.issued_at` 验证 ACK，并匹配 runtime binding、approval 和 consumption。
 - 时间窗口为 `issued_at <= anchor < expires_at`；撤销时间必须晚于 anchor。
-- receipt 的终态时间可以晚于 ACK 到期时间，后续 heartbeat、activation 替换或 ACK 撤销不会丢弃此前有效的历史证据。
+- receipt 的终态时间可以晚于 ACK 到期时间，后续 heartbeat、同签名密钥的 activation 替换或 ACK 撤销不会丢弃此前有效的历史证据。签名密钥轮换前须先 drain 历史 receipt；本批未引入历史 keyring。
 - malformed、未签发、篡改或历史窗口不符为 422 / `RUNTIME_OUTCOME_INVALID`；parent 或 immutable content 冲突仍为 409。存储/服务故障保留 5xx。
 
 历史 ACK 校验不证明宿主 invocation-start。OpenClaw 仍为 `C3=false`，其非权威执行开始时间只能按签署的 residual boundaries 解释。真实 start receipt 和 Host exactly-once 边界在 runtime 批次验收。

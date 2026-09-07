@@ -330,12 +330,12 @@ class ApprovalExecutionLeaseService:
         now: datetime | None = None,
     ) -> GrantConsumptionResult:
         release_ack: ActivationAckV1 | None = None
-        if self.product_activation_authority is not None:
-            release_ack = self.product_activation_authority.enforce_release(
-                auth_context,
-                activation_ack_token,
-            )
         try:
+            if self.product_activation_authority is not None:
+                release_ack = self.product_activation_authority.enforce_release(
+                    auth_context,
+                    activation_ack_token,
+                )
             return self._consume(
                 approval_id,
                 action_id=action_id,

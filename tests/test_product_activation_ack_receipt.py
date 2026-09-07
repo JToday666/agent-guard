@@ -23,6 +23,8 @@ from guard_api.runtime_status import (
 from guard_api.services.audit import AuditService, RuntimeOutcomeReceiptError
 from guard_api.main import create_app
 from guard_api.services.approval import ApprovalService
+from guard_api.services.product_activation import FrozenProductActivation
+from agentguard_core.actions.canonical_json import canonical_sha256
 from guard_api.security_state import SecurityStateService
 from guard_api.security_state.lease_service import (
     approval_execution_lease_service_from_settings,
@@ -33,6 +35,7 @@ from tests.support.product_evaluation import (
 )
 from tests.test_rte05_execution_lease_api import _approval_release_receipt
 from tests.test_product_v21_service_selector import _force_current_decision
+from tests.support.product_activation import build_test_product_activation
 
 pytestmark = pytest.mark.integration
 
@@ -129,9 +132,18 @@ def test_delayed_receipt_and_replay_use_historical_ack_without_live_authority(
     )
     authority = service.product_activation_authority
     assert authority is not None
+    replacement = build_test_product_activation(
+        now=datetime.now(timezone.utc) + timedelta(days=30),
+        server_secret=harness.fixture.server_secret,
+    )
     service.product_activation_authority = replace(
         authority,
         clock=lambda: datetime.now(timezone.utc) + timedelta(days=30),
+        activation=FrozenProductActivation(
+            bundle=replacement.bundle,
+            source_path="/test/replacement-activation.json",
+            content_digest=canonical_sha256(replacement.bundle.model_dump(mode="json")),
+        ),
     )
     receipt = RuntimeOutcomeReceipt.model_validate(payload)
     first = service.submit(receipt, auth_context=harness.auth_context)
@@ -144,6 +156,13 @@ def test_delayed_receipt_and_replay_use_historical_ack_without_live_authority(
     assert harness.activation_ack_token not in repr(
         service.product_activation_authority
     )
+    payload["metadata"]["activation_ack"]["ack_token"] = "hmac-sha256:" + "0" * 64
+    with pytest.raises(RuntimeOutcomeReceiptError) as raised:
+        service.submit(
+            RuntimeOutcomeReceipt.model_validate(payload),
+            auth_context=harness.auth_context,
+        )
+    assert raised.value.code == "RUNTIME_OUTCOME_INVALID"
 
 
 @pytest.mark.parametrize(
@@ -186,7 +205,7 @@ def test_invalid_receipt_ack_is_permanent_and_writes_nothing(
     elif mutation == "revoked":
         harness.store.revoke_product_activation_acks(
             record.identity(),
-            revoked_at=parent.timestamp,
+            revoked_at=parent.metadata["product_authority_initial_checked_at"],
         )
     elif mutation == "expired_at_anchor":
         # Signed and registered ACK, but the server authority anchor is outside
@@ -329,3 +348,31 @@ def test_receipt_http_uses_embedded_ack_and_maps_permanent_errors_to_422(
     if carrier != "valid":
         assert response.json()["error"]["code"] == "RUNTIME_OUTCOME_INVALID"
         assert harness.store.get_audit_event(payload["audit_id"]) is None
+
+
+def test_missing_receipt_verifier_has_stable_503_and_zero_writes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    harness, _parent, payload, _service = _rig(tmp_path)
+    original_init = AuditService.__init__
+
+    def without_verifier(self, **kwargs):
+        kwargs["product_activation_authority"] = None
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "__init__", without_verifier)
+    with TestClient(
+        create_app(store=harness.store, settings=harness.settings)
+    ) as client:
+        response = client.post(
+            "/v1/audit/events",
+            json=payload,
+            headers={"Authorization": f"Bearer {PRODUCT_REPLAY_RAW_TOKEN}"},
+        )
+    assert response.status_code == 503
+    assert (
+        response.json()["error"]["code"]
+        == "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
+    )
+    assert harness.store.get_audit_event(payload["audit_id"]) is None

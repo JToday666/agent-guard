@@ -46,6 +46,9 @@ _ERROR_MESSAGES = {
     "V21_PRODUCT_ACTIVATION_ACK_NOT_CURRENT": (
         "The Product V2 runtime activation acknowledgement is not current."
     ),
+    "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE": (
+        "The Product V2 runtime acknowledgement verifier is unavailable."
+    ),
     "V21_PRODUCT_SECURITY_STATE_NOT_READY": (
         "Product V2 security state is not ready for a read-only decision."
     ),

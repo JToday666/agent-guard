@@ -262,8 +262,16 @@ class AuditService:
         if authority is None:
             # A missing server verifier is retryable infrastructure failure;
             # malformed runtime evidence below is permanently invalid (422).
-            raise RuntimeError("Product receipt ACK verifier is unavailable")
-        reference_time = parent.timestamp
+            from .v21_pipeline import V21OfficialEvaluationUnavailableError
+
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
+            )
+        # This reserved field is written by the fenced Phase-B capture and
+        # records the exact server authority check, before audit construction.
+        reference_time = parent.metadata.get("product_authority_initial_checked_at")
+        if not isinstance(reference_time, str):
+            self._runtime_outcome_authority_mismatch()
         if receipt.links.lease_id is not None:
             lease = self.store.get_execution_lease(
                 evidence.approval_release_directive.scope_digest,

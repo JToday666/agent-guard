@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from threading import Barrier
 
 import pytest
@@ -28,6 +29,7 @@ from guard_api.storage.integrity import canonical_sha256
 from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.product_activation import (
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
 )
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
@@ -252,20 +254,29 @@ def test_product_activation_reconciliation_uses_exact_postgres_rows() -> None:
             content_digest=canonical_sha256(fixture.bundle.model_dump(mode="json")),
         )
         for runtime in ("langgraph", "openclaw"):
+            status = product_runtime_status_for_activation(fixture, runtime)
             store.save_product_runtime_status(
-                product_runtime_status_for_activation(fixture, runtime)
+                status,
+                activation_ack=product_activation_ack_for_status(fixture, status),
             )
 
         assert reconcile_product_runtime_observations(
             activation,
             store,
+            server_secret=fixture.server_secret,
+            reference_time=datetime.now(timezone.utc),
         ).matched
 
         openclaw = product_runtime_status_for_activation(fixture, "openclaw")
         store.save_product_runtime_status(
             openclaw.model_copy(update={"runtime_version": "drifted-host"})
         )
-        drifted = reconcile_product_runtime_observations(activation, store)
+        drifted = reconcile_product_runtime_observations(
+            activation,
+            store,
+            server_secret=fixture.server_secret,
+            reference_time=datetime.now(timezone.utc),
+        )
         assert drifted.matched is False
         assert drifted.reason_codes == ("V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH",)
     finally:

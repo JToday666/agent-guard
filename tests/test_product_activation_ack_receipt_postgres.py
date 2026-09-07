@@ -31,7 +31,9 @@ def test_postgres_historical_ack_receipt_and_replay(
             activation_ack_token_digest(harness.activation_ack_token)
         )
         assert record is not None
-        anchor = datetime.fromisoformat(parent.timestamp)
+        anchor = datetime.fromisoformat(
+            parent.metadata["product_authority_initial_checked_at"]
+        )
         harness.writer.revoke_product_activation_acks(
             record.identity(),
             revoked_at=(
