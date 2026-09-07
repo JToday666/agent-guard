@@ -732,6 +732,12 @@ class ProductActivationAuthorityService:
                 raise ValueError("activation ACK is not current")
         except (TypeError, ValueError):
             raise V21OfficialEvaluationUnavailableError(ACTIVATION_ACK_NOT_CURRENT)
+        except Exception:
+            # Backend failures are retryable authority unavailability, not
+            # malformed caller evidence.  Never expose private backend text.
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
+            ) from None
         return ack, reconciliation
 
     def enforce_evaluation(

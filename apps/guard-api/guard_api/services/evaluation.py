@@ -309,6 +309,32 @@ class EvaluationService:
             requesting_principal_id = auth_context.principal_id
         if requesting_principal_id is None:
             raise ValueError("requesting principal is required")
+        # Product authority must never become only an ACK precheck followed
+        # by the legacy selector.  Defend direct service composition and
+        # in-process drift as well as the correctly wired public factory.
+        pipeline = self.v21_pipeline
+        authority = self.product_activation_authority
+        if authority is not None or (pipeline is not None and pipeline.product_active):
+            if (
+                authority is None
+                or pipeline is None
+                or not pipeline.enabled
+                or not pipeline.active
+                or not pipeline.product_active
+                or pipeline.product_activation_authority is not authority
+                or pipeline.product_activation is not authority.activation
+                or authority.store is not self.audit_service.store
+            ):
+                # Preserve the public historical-replay failure code without
+                # running legacy repair, detectors, or any write path.
+                stored = self.audit_service.store.get_policy_evaluation_by_event_id(
+                    event.event_id
+                )
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_REPLAY_UNAVAILABLE"
+                    if _stored_product_evaluation(stored)
+                    else "V21_PRODUCT_SELECTOR_UNAVAILABLE"
+                )
         if self.product_activation_authority is not None:
             self.product_activation_authority.enforce_evaluation(
                 event,

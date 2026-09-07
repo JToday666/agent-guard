@@ -21,7 +21,9 @@ Product runtime 向 `POST /v1/adapters/{runtime}/heartbeat` 提交 `ProductRunti
 | --- | --- | --- |
 | 未带 ACK | 503 / `V21_PRODUCT_ACTIVATION_ACK_REQUIRED` | 无 evaluation 或消费写入 |
 | ACK 错误、过期、未来签发或已撤销 | 503 / `V21_PRODUCT_ACTIVATION_ACK_NOT_CURRENT` | 阻断当前请求 |
+| ACK registry 无法读取 | 503 / `V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE` | 阻断当前请求，不返回私有后端错误 |
 | 任一 runtime 的冻结状态或最新 ACK 不匹配 | 503 / `V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH` | 阻断当前请求 |
+| Product authority 与 Active pipeline 组合不完整或不一致 | 503 / `V21_PRODUCT_SELECTOR_UNAVAILABLE`；历史 Product replay 保持 `V21_PRODUCT_REPLAY_UNAVAILABLE` | 首次请求与历史重放均禁止落入旧判定 |
 | activation、TaskFact、policy 或其他权威变化 | 对应 Product 503 | 禁止回退 `source=current` |
 
 `evaluate` 在请求入口、锁内 Phase B、提交前，以及 exact replay 修复前后重验 ACK。token 显式传递，不进入事件请求 digest 或稳定的 replay authority digest。成功的适用事件返回 `source=v21`、`mode=active`、`selection_basis=profile_all`。

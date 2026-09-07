@@ -177,12 +177,18 @@ def test_overlapping_ack_generations_remain_valid_until_each_exact_expiry() -> N
     }
 
     assert first["langgraph"].ack_token != second["langgraph"].ack_token
-    assert store.get_product_activation_ack(
-        activation_ack_token_digest(first["langgraph"].ack_token)
-    ) is not None
-    assert store.get_product_activation_ack(
-        activation_ack_token_digest(second["langgraph"].ack_token)
-    ) is not None
+    assert (
+        store.get_product_activation_ack(
+            activation_ack_token_digest(first["langgraph"].ack_token)
+        )
+        is not None
+    )
+    assert (
+        store.get_product_activation_ack(
+            activation_ack_token_digest(second["langgraph"].ack_token)
+        )
+        is not None
+    )
 
     before_first_expiry = _NOW + timedelta(seconds=120, microseconds=-1)
     assert (
@@ -319,9 +325,7 @@ def test_unrelated_adapter_heartbeat_cannot_write_or_revoke_entry_ack(
     assert store.list_product_runtime_statuses() == before_statuses
     assert store.get_product_activation_ack(token_digest) == before_issuance
     assert (
-        store.get_latest_product_activation_ack(
-            accepted.runtime_status.identity()
-        )
+        store.get_latest_product_activation_ack(accepted.runtime_status.identity())
         == before_issuance
     )
 
@@ -363,9 +367,7 @@ def test_ack_secret_and_raw_tokens_do_not_leak_from_private_status_surfaces() ->
     assert raised.value.code == ACTIVATION_ACK_REQUIRED
     assert ack.ack_token not in str(raised.value)
 
-    tampered_token = ack.ack_token[:-1] + (
-        "0" if ack.ack_token[-1] != "0" else "1"
-    )
+    tampered_token = ack.ack_token[:-1] + ("0" if ack.ack_token[-1] != "0" else "1")
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
         authority.enforce_evaluation(
             _event(),
@@ -374,3 +376,36 @@ def test_ack_secret_and_raw_tokens_do_not_leak_from_private_status_surfaces() ->
         )
     assert raised.value.code == ACTIVATION_ACK_NOT_CURRENT
     assert tampered_token not in str(raised.value)
+
+
+@pytest.mark.parametrize("operation", ["evaluate", "release"])
+def test_exact_ack_registry_failure_returns_stable_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    fixture = build_test_product_activation(now=_NOW)
+    store = MemoryControlPlaneStore()
+    authority = _authority(fixture, store, [_NOW])
+    ack = _accept(authority, fixture, "langgraph").activation_ack
+    _accept(authority, fixture, "openclaw")
+
+    def unavailable(_store: MemoryControlPlaneStore, _token_digest: str):
+        raise RuntimeError("private registry failure: " + ack.ack_token)
+
+    monkeypatch.setattr(
+        MemoryControlPlaneStore, "get_product_activation_ack", unavailable
+    )
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        if operation == "evaluate":
+            authority.enforce_evaluation(
+                _event(), _auth(fixture, "langgraph"), ack.ack_token
+            )
+        else:
+            authority.enforce_release(_auth(fixture, "langgraph"), ack.ack_token)
+
+    assert raised.value.code == "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
+    assert ack.ack_token not in str(raised.value)
+    assert "private registry failure" not in str(raised.value)
+    assert store.audit_events == []
+    assert store.approvals == {}
+    assert store.enforcement_bindings == {}
