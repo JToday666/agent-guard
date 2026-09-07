@@ -79,8 +79,28 @@
       },
       "strongApprovalBindingEnabled": {
         "type": "boolean",
-        "default": false,
-        "description": "Enable canary strong-binding processing. Server-declared execution leases are always enforced, but current OpenClaw cannot atomically replace and seal the final action, so heartbeat C3 remains false."
+        "deprecated": true,
+        "description": "Deprecated legacy canary flag; defaults to false in the config builder. Do not combine with V2 options. C3 remains false; server-declared execution leases still fail closed."
+      },
+      "officialProfileId": {
+        "type": "string",
+        "enum": ["agentguard-openclaw-v2-restricted"],
+        "description": "Trusted V2 profile metadata, paired with officialProfileDigest and runtimeBindingId in enforce mode. Activation is not available in this reader-only build; configured profiles refuse plugin registration."
+      },
+      "officialProfileDigest": {
+        "type": "string",
+        "pattern": "^sha256:[0-9a-f]{64}$",
+        "description": "Trusted canonical SHA-256 digest of the official profile; never learned from the evaluation response."
+      },
+      "restrictedAskReleaseEnabled": {
+        "type": "boolean",
+        "description": "Experimental restricted ASK release; defaults to false in the config builder. Enabling is not available in this reader-only build. C3 remains false."
+      },
+      "activationAckMaxAgeMs": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 120000,
+        "description": "Maximum ActivationAckV1 age in milliseconds; defaults to 120000 in the config builder. Does not extend server expiry."
       },
       "runtimeBindingId": {
         "type": "string",
@@ -111,8 +131,24 @@
       "label": "Enforcement mode"
     },
     "strongApprovalBindingEnabled": {
-      "label": "Strong approval binding canary",
-      "help": "Enables canary processing; current OpenClaw lacks atomic replace-and-seal, so C3 is not advertised. Server-declared execution leases still fail closed."
+      "label": "Legacy canary flag (deprecated)",
+      "help": "Deprecated; do not combine with V2 fields, including explicit false values. C3 remains false. Server-declared execution leases still fail closed."
+    },
+    "officialProfileId": {
+      "label": "Official V2 profile ID",
+      "help": "Provision together with officialProfileDigest and runtimeBindingId in enforce mode. Activation is not available in this build; configured profiles refuse plugin registration rather than run legacy authority."
+    },
+    "officialProfileDigest": {
+      "label": "Official V2 profile digest",
+      "help": "Provision a lowercase sha256 digest out of band; do not derive it from Guard API responses."
+    },
+    "restrictedAskReleaseEnabled": {
+      "label": "Experimental restricted ASK release",
+      "help": "Defaults to false. Enabling is not available in this build; handshake, required spool and breaker are not yet wired. C3 remains false."
+    },
+    "activationAckMaxAgeMs": {
+      "label": "Activation ACK maximum age (ms)",
+      "help": "Integer from 1 to 120000; default 120000. Server expiry remains authoritative."
     },
     "runtimeBindingId": {
       "label": "Runtime binding ID",

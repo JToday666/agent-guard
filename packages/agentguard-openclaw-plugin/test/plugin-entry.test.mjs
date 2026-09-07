@@ -10,6 +10,31 @@ function registerPlugin(plugin, api) {
   register({ registerService() {}, ...api });
 }
 
+test("official profile configuration refuses plugin registration before legacy work", async () => {
+  const { default: plugin } = await import("../dist/index.js");
+  const registrations = [];
+  assert.throws(
+    () =>
+      registerPlugin(plugin, {
+        pluginConfig: {
+          adapterToken: "plugin-token",
+          officialProfileId: "agentguard-openclaw-v2-restricted",
+          officialProfileDigest: `sha256:${"a".repeat(64)}`,
+          runtimeBindingId: "binding:openclaw:main",
+          restrictedAskReleaseEnabled: false,
+        },
+        registerService() {
+          registrations.push("service");
+        },
+        on() {
+          registrations.push("hook");
+        },
+      }),
+    /officialProfileId activation is not available/,
+  );
+  assert.deepEqual(registrations, []);
+});
+
 test("plugin background work is owned by the OpenClaw service lifecycle", async () => {
   const { default: plugin } = await import("../dist/index.js");
   const services = [];
