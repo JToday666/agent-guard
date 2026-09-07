@@ -309,6 +309,12 @@ class EvaluationService:
             requesting_principal_id = auth_context.principal_id
         if requesting_principal_id is None:
             raise ValueError("requesting principal is required")
+        if self.product_activation_authority is not None:
+            self.product_activation_authority.enforce_evaluation(
+                event,
+                auth_context,
+                activation_ack_token,
+            )
         # Product authority must never become only an ACK precheck followed
         # by the legacy selector.  Defend direct service composition and
         # in-process drift as well as the correctly wired public factory.
@@ -335,12 +341,6 @@ class EvaluationService:
                     if _stored_product_evaluation(stored)
                     else "V21_PRODUCT_SELECTOR_UNAVAILABLE"
                 )
-        if self.product_activation_authority is not None:
-            self.product_activation_authority.enforce_evaluation(
-                event,
-                auth_context,
-                activation_ack_token,
-            )
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)

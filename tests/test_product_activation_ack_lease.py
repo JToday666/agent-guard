@@ -52,7 +52,6 @@ from guard_api.storage.postgres import (
     PostgresControlPlaneStore,
     _lock_product_runtime_status,
 )
-from guard_api.storage.base import ApprovalExecutionLeaseUnavailableError
 from guard_api.storage.sqlalchemy_models import product_runtime_statuses_v2
 from tests.support.postgres import get_test_database_url, reset_control_plane_schema
 from tests.support.product_activation import (
@@ -486,7 +485,7 @@ def test_lease_release_rejects_bad_ack_without_consumption(
     _assert_not_consumed(rig)
 
 
-def test_release_precheck_storage_failure_maps_to_retryable_lease_unavailable(
+def test_release_precheck_storage_failure_preserves_retryable_product_unavailable(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     lease_store,
@@ -510,11 +509,10 @@ def test_release_precheck_storage_failure_maps_to_retryable_lease_unavailable(
         fail_exact_ack,
     )
 
-    with pytest.raises(ApprovalExecutionLeaseUnavailableError) as raised:
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
         rig.consume(rig.activation_ack_token)
 
-    assert raised.value.reason_code == "rte-05:lease_unavailable"
-    assert str(raised.value) == "execution lease is unavailable"
+    assert raised.value.code == "V21_PRODUCT_ACTIVATION_ACK_VERIFIER_UNAVAILABLE"
     assert private_driver_detail not in str(raised.value)
     _assert_not_consumed(rig)
 
