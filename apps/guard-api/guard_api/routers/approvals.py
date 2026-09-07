@@ -117,6 +117,10 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         approval_id: str,
         payload: ExecutionLeaseConsumeRequest,
         authorization: str | None = Header(default=None),
+        x_agentguard_activation_ack: str | None = Header(
+            default=None,
+            alias="X-AgentGuard-Activation-Ack",
+        ),
     ) -> dict[str, Any]:
         auth_context = auth.verify_bearer(authorization, "approval:wait")
         # Authenticate before the rollout gate so flag-off cannot be used as an
@@ -130,6 +134,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 action_id=payload.action_id,
                 authorization_fingerprint=payload.authorization_fingerprint,
                 auth_context=auth_context,
+                activation_ack_token=x_agentguard_activation_ack,
             )
         except ApprovalLeaseAuthorizationError:
             raise ApiAuthError("APPROVAL_CONSUMPTION_DENIED", status_code=403) from None

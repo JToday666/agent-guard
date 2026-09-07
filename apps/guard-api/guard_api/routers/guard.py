@@ -22,7 +22,12 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
 
     @app.post("/v1/guard/evaluate")
     def evaluate_guard_event(
-        payload: GuardEvent, authorization: str | None = Header(default=None)
+        payload: GuardEvent,
+        authorization: str | None = Header(default=None),
+        x_agentguard_activation_ack: str | None = Header(
+            default=None,
+            alias="X-AgentGuard-Activation-Ack",
+        ),
     ) -> dict[str, Any]:
         context = auth.verify_bearer(authorization, "event:evaluate")
         event_agent_id = (
@@ -40,6 +45,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             response = evaluation_service.evaluate(
                 payload,
                 auth_context=context,
+                activation_ack_token=x_agentguard_activation_ack,
             )
         except EvaluationConflictError as exc:
             logger.warning(

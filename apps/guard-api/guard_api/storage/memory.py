@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hmac as hmac_module
 from copy import deepcopy
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from threading import Lock, RLock
@@ -427,9 +427,7 @@ class MemoryControlPlaneStore:
                 "product_runtime_statuses_v2": deepcopy(
                     self.product_runtime_statuses_v2
                 ),
-                "product_activation_acks_v1": deepcopy(
-                    self.product_activation_acks_v1
-                ),
+                "product_activation_acks_v1": deepcopy(self.product_activation_acks_v1),
                 "product_runtime_status_write_sequence": (
                     self.product_runtime_status_write_sequence
                 ),
@@ -549,7 +547,14 @@ class MemoryControlPlaneStore:
         """
 
         del approval_id
-        with self.audit_integrity_lock, self.approval_lease_lock:
+        # ACK issuance/revocation reads may occur inside this transaction.
+        # Match Product evaluation and lease ordering before taking audit or
+        # approval locks, including legacy receipts in an activated process.
+        with (
+            self.product_runtime_status_lock,
+            self.audit_integrity_lock,
+            self.approval_lease_lock,
+        ):
             yield
 
     def add_provenance_node(self, node: ProvenanceNode) -> ProvenanceNode:
@@ -908,11 +913,13 @@ class MemoryControlPlaneStore:
         replacements: dict[str, ProductActivationAckRecordV1] = {}
         for token_digest, record in list(self.product_activation_acks_v1.items()):
             if record.revoked_at is None and record.identity() == identity:
-                replacements[token_digest] = ProductActivationAckRecordV1.model_validate(
-                    {
-                        **record.model_dump(mode="json"),
-                        "revoked_at": revoked_at,
-                    }
+                replacements[token_digest] = (
+                    ProductActivationAckRecordV1.model_validate(
+                        {
+                            **record.model_dump(mode="json"),
+                            "revoked_at": revoked_at,
+                        }
+                    )
                 )
         return replacements
 
@@ -1416,9 +1423,17 @@ class MemoryControlPlaneStore:
                 raise
 
     def consume_approval_execution_lease(
-        self, command: ApprovalLeaseConsumeCommand
+        self,
+        command: ApprovalLeaseConsumeCommand,
+        *,
+        release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
-        with self.approval_lease_lock:
+        runtime_lock = (
+            self.product_runtime_status_lock
+            if release_check is not None
+            else nullcontext()
+        )
+        with runtime_lock, self.approval_lease_lock:
             grants_snapshot = deepcopy(self.capability_grants)
             consumptions_snapshot = deepcopy(self.grant_consumption_records)
             leases_snapshot = deepcopy(self.execution_lease_records)
@@ -1497,6 +1512,9 @@ class MemoryControlPlaneStore:
                         "private approval authority state is inconsistent",
                     )
                 grant_expires_at = parse_audit_timestamp(str(grant["expires_at"]))
+
+                if release_check is not None:
+                    release_check(now)
 
                 consumption_id = _derive_consumption_id(
                     binding.grant_id, binding.action_id

@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal, cast
+from typing import Any, Callable, Iterator, Literal, cast
 
 from alembic import command
 from alembic.config import Config
@@ -870,6 +870,10 @@ class PostgresControlPlaneStore:
         if self._active_store_session.get() is not None:
             raise RuntimeError("nested runtime outcome transactions are not supported")
         with self._session_factory.begin() as session:
+            # Historical ACK reads and concurrent revocations share the same
+            # order as Product evaluation and lease consume.
+            for runtime in ("langgraph", "openclaw"):
+                _lock_product_runtime_status(session, runtime, shared=True)
             session.execute(
                 text("SELECT pg_advisory_xact_lock(:lock_id)"),
                 {"lock_id": _AUDIT_INTEGRITY_ADVISORY_LOCK_ID},
@@ -1363,8 +1367,7 @@ class PostgresControlPlaneStore:
                 session.execute(
                     update(product_activation_acks_v1)
                     .where(
-                        product_activation_acks_v1.c.runtime
-                        == revoke_identity.runtime,
+                        product_activation_acks_v1.c.runtime == revoke_identity.runtime,
                         product_activation_acks_v1.c.agent_id
                         == revoke_identity.agent_id,
                         product_activation_acks_v1.c.runtime_binding_id
@@ -1396,15 +1399,19 @@ class PostgresControlPlaneStore:
                     )
                 )
                 session.execute(ack_insert)
-                persisted_issuance = session.execute(
-                    select(
-                        product_activation_acks_v1.c.payload_json,
-                        product_activation_acks_v1.c.revoked_at,
-                    ).where(
-                        product_activation_acks_v1.c.token_digest
-                        == issuance.token_digest
+                persisted_issuance = (
+                    session.execute(
+                        select(
+                            product_activation_acks_v1.c.payload_json,
+                            product_activation_acks_v1.c.revoked_at,
+                        ).where(
+                            product_activation_acks_v1.c.token_digest
+                            == issuance.token_digest
+                        )
                     )
-                ).mappings().one()
+                    .mappings()
+                    .one()
+                )
                 if _product_activation_ack_from_row(persisted_issuance) != issuance:
                     raise ValueError("activation ACK digest conflicts with issuance")
             session.execute(
@@ -1477,7 +1484,7 @@ class PostgresControlPlaneStore:
         )
         with self._write_session() as session:
             _lock_product_runtime_status(session, exact.runtime)
-            result = session.execute(stmt)
+            result = cast("CursorResult[Any]", session.execute(stmt))
             return int(result.rowcount or 0)
 
     def get_product_runtime_status(
@@ -2425,11 +2432,37 @@ class PostgresControlPlaneStore:
             return _enforcement_binding_from_row(registered_values)
 
     def consume_approval_execution_lease(
-        self, command: ApprovalLeaseConsumeCommand
+        self,
+        command: ApprovalLeaseConsumeCommand,
+        *,
+        release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
         with self._session_factory() as session:
             with session.begin():
-                now = session.execute(select(func.now())).scalar_one()
+                if release_check is not None:
+                    for runtime in ("langgraph", "openclaw"):
+                        _lock_product_runtime_status(session, runtime, shared=True)
+                now = session.execute(select(func.clock_timestamp())).scalar_one()
+
+                def run_release_check() -> datetime:
+                    sampled = session.execute(
+                        select(func.clock_timestamp())
+                    ).scalar_one()
+                    if release_check is None:
+                        return sampled
+                    token = self._active_store_session.set(session)
+                    try:
+                        release_check(sampled)
+                    finally:
+                        self._active_store_session.reset(token)
+                    if credential_row is None or not _credential_authorizes_binding(
+                        credential_row, command, sampled
+                    ):
+                        raise ApprovalLeaseAuthorizationError(
+                            "rte-05:authorization_denied",
+                            "credential or bound identity is not authorized",
+                        )
+                    return sampled
 
                 # Fixed lock/check order: credential -> approval -> binding ->
                 # grant -> consumption -> lease.
@@ -2581,6 +2614,8 @@ class PostgresControlPlaneStore:
                             "rte-05:state_invalid",
                             "private execution lease state is inconsistent",
                         )
+                    if release_check is not None:
+                        now = run_release_check()
                     lease_status = str(lease_row["status"])
                     if (
                         approval_expires_at <= now
@@ -2611,6 +2646,8 @@ class PostgresControlPlaneStore:
                         replayed=True,
                     )
 
+                if release_check is not None:
+                    now = run_release_check()
                 if approval_expires_at <= now or grant_expires_at <= now:
                     raise ApprovalLeaseExpiredError(
                         "rte-05:approval_expired", "approval has expired"

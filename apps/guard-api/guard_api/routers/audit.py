@@ -83,7 +83,10 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             require_agent_id=isinstance(prepared, RuntimeOutcomeReceipt),
         )
         try:
-            return audit_service.submit(prepared)
+            return audit_service.submit(
+                prepared,
+                auth_context=auth_context,
+            )
         except ContextManifestWriteForbiddenError:
             raise ApiAuthError(
                 "CONTEXT_MANIFEST_WRITE_FORBIDDEN", status_code=422

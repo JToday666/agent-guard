@@ -1,9 +1,8 @@
 """Product Active runtime binding wiring and TaskFact scope integrity tests.
 
-This suite is intentionally limited to the identity boundary that must precede
-the Product selector.  Loading an activation still leaves evaluate behind the
-pre-selector fuse; these tests exercise Task Ingress through its public HTTP
-route and the V2 pipeline directly so no decision authority is introduced.
+This suite covers the identity boundary before the Product selector. Tests use
+signed heartbeat ACKs and exercise Task Ingress through its public HTTP route
+and the V2 pipeline directly.
 """
 
 from __future__ import annotations
@@ -35,7 +34,10 @@ from guard_api.models import (
     TaskCreateRequest,
 )
 from guard_api.services.policy import PolicyService
-from guard_api.services.product_activation import load_frozen_product_activation
+from guard_api.services.product_activation import (
+    ProductActivationAuthorityService,
+    load_frozen_product_activation,
+)
 from guard_api.services.runtime_binding import (
     PRODUCT_TASK_IDENTITY_MISMATCH,
     PRODUCT_TASK_SCOPE_INVALID,
@@ -55,6 +57,7 @@ from tests.support.product_activation import (
     TEST_PRODUCT_ACTIVATION_SECRET_B64,
     ProductActivationFixture,
     build_test_product_activation,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -105,9 +108,9 @@ def _product_context(
     store = MemoryControlPlaneStore()
     store.save_policy_snapshot(policy, expected_revision=0, updated_by="p0-test")
     for runtime in ("langgraph", "openclaw"):
-        store.save_product_runtime_status(
-            product_runtime_status_for_activation(fixture, runtime)
-        )
+        status = product_runtime_status_for_activation(fixture, runtime)
+        ack = product_activation_ack_for_status(fixture, status)
+        store.save_product_runtime_status(status, activation_ack=ack)
     entry = fixture.bundle.runtime_entry("langgraph")
     store.create_credential(
         CredentialRecord(
@@ -176,13 +179,32 @@ def _pipeline(
     settings: GuardApiSettings,
 ) -> V21PipelineService:
     state_service = SecurityStateService(store)
+    resolver = _resolver(settings)
+    activation = resolver.product_activation
+    assert activation is not None
+    product_secret = settings.v21_product_activation_server_secret_bytes()
+    assert product_secret is not None
+    authority = ProductActivationAuthorityService(
+        activation=activation,
+        store=store,
+        server_secret=product_secret,
+    )
     return V21PipelineService(
         settings=settings,
         store=store,
         state_service=state_service,
         policy_service=PolicyService(store=store),
-        runtime_binding_resolver=_resolver(settings),
+        runtime_binding_resolver=resolver,
+        product_activation_authority=authority,
     )
+
+
+def _activation_ack_token(
+    fixture: ProductActivationFixture,
+    store: MemoryControlPlaneStore,
+) -> str:
+    status = store.list_product_runtime_statuses(runtime="langgraph")[0]
+    return product_activation_ack_for_status(fixture, status).ack_token
 
 
 def _auth(
@@ -679,7 +701,11 @@ def test_product_phase_b_rejects_same_content_new_task_revision(
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_activation_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_TASK_IDENTITY_MISMATCH
 
@@ -709,7 +735,11 @@ def test_product_phase_b_rechecks_task_content_integrity(tmp_path: Path) -> None
     ]
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_activation_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_TASK_SCOPE_INVALID
 
@@ -775,7 +805,11 @@ def test_product_phase_b_rejects_mutated_materials_snapshot(tmp_path: Path) -> N
     materials.snapshot.task.task_summary = "mutated after assessment"
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_activation_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_TASK_SCOPE_INVALID
 
@@ -792,7 +826,11 @@ def test_product_phase_b_rejects_mutated_action_ir(tmp_path: Path) -> None:
     materials.action_ir.runtime_binding_id = "binding:mutated-after-assessment"
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_activation_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_TASK_SCOPE_INVALID
 
@@ -809,4 +847,8 @@ def test_product_phase_b_rechecks_mutated_auth_identity(tmp_path: Path) -> None:
     auth_context.principal_id = "principal:mutated-after-phase-a"
 
     with pytest.raises(V21OfficialEvaluationUnavailableError):
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_activation_ack_token(fixture, store),
+        )

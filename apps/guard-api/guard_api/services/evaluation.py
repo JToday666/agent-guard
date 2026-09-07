@@ -84,7 +84,7 @@ if TYPE_CHECKING:
     )
     from .v21_shadow import V21ShadowService
     from .competition import FrozenCompetitionActivation
-    from .product_activation import ProductActivePreSelectorFuse
+    from .product_activation import ProductActivationAuthorityService
 
 
 logger = logging.getLogger(__name__)
@@ -257,7 +257,7 @@ class EvaluationService:
         ct_projection_service: "CtProjectionService | None" = None,
         context_builder_service: "ContextBuilderService | None" = None,
         competition_activation: "FrozenCompetitionActivation | None" = None,
-        product_active_fuse: "ProductActivePreSelectorFuse | None" = None,
+        product_activation_authority: "ProductActivationAuthorityService | None" = None,
     ) -> None:
         self.policy_service = policy_service
         self.audit_service = audit_service
@@ -278,12 +278,11 @@ class EvaluationService:
         self.ct_projection_service = ct_projection_service
         self.context_builder_service = context_builder_service
         self.competition_activation = competition_activation
-        # P0-V21-01a2: loading a Product Active bundle arms a fail-closed
-        # pre-selector fuse.  It is deliberately checked at the very top of
-        # ``evaluate`` (after authenticated principal normalization) so an
-        # unwired Product selector can never fall through to current authority
-        # or touch replay/state/policy side-effect paths.
-        self.product_active_fuse = product_active_fuse
+        # Product Active authority is checked at the top of ``evaluate`` after
+        # authenticated principal normalization.  The ACK header stays outside
+        # GuardEvent/request_digest so a heartbeat refresh cannot create a
+        # false replay conflict.
+        self.product_activation_authority = product_activation_authority
 
     def evaluate(
         self,
@@ -291,6 +290,7 @@ class EvaluationService:
         *,
         requesting_principal_id: str | None = None,
         auth_context: AuthContext | None = None,
+        activation_ack_token: str | None = None,
     ) -> GuardEvaluationResponse:
         """Evaluate with the router-authenticated identity when available.
 
@@ -309,8 +309,12 @@ class EvaluationService:
             requesting_principal_id = auth_context.principal_id
         if requesting_principal_id is None:
             raise ValueError("requesting principal is required")
-        if self.product_active_fuse is not None:
-            self.product_active_fuse.enforce(event, auth_context)
+        if self.product_activation_authority is not None:
+            self.product_activation_authority.enforce_evaluation(
+                event,
+                auth_context,
+                activation_ack_token,
+            )
         # Validate temporal identity before detectors or any approval/memory side
         # effects run; persistence uses the same parser for defense in depth.
         parse_audit_timestamp(event.timestamp)
@@ -353,6 +357,7 @@ class EvaluationService:
                 event=event,
                 request_digest=request_digest,
                 auth_context=auth_context,
+                activation_ack_token=activation_ack_token,
             ).model_copy(update={"context_plan": replay_plan})
             if self.ct_projection_service is not None:
                 self.ct_projection_service.backfill(existing_evaluation)
@@ -372,6 +377,7 @@ class EvaluationService:
                     event=event,
                     request_digest=request_digest,
                     auth_context=auth_context,
+                    activation_ack_token=activation_ack_token,
                 ).model_copy(update={"context_plan": replay_plan})
                 if self.ct_projection_service is not None:
                     self.ct_projection_service.backfill(existing)
@@ -562,9 +568,18 @@ class EvaluationService:
                     auth_context=materials.auth_context,
                     task_id=materials.task_id,
                     scope_digest=materials.scope_digest,
+                    activation_ack_token=activation_ack_token,
                 )
                 replayed = self._rebuild_response(existing)
                 self.audit_service.repair_provenance(existing)
+                self.v21_pipeline.finalize_product_replay_locked(
+                    event,
+                    existing,
+                    auth_context=materials.auth_context,
+                    task_id=materials.task_id,
+                    scope_digest=materials.scope_digest,
+                    activation_ack_token=activation_ack_token,
+                )
                 product_replay_completed = True
             elif _stored_product_evaluation(existing):
                 assert existing is not None
@@ -612,6 +627,7 @@ class EvaluationService:
                     materials=materials,
                     ct_plan=ct_plan,
                     context_manifest=context_manifest,
+                    activation_ack_token=activation_ack_token,
                 )
                 created_evaluation = True
             if product_transaction and created_evaluation:
@@ -633,6 +649,7 @@ class EvaluationService:
                             "product_authority_initial_checked_at"
                         ),
                     ),
+                    activation_ack_token=activation_ack_token,
                 )
         # D4 commit → project：投影在事务提交**之后**执行，绝不影响
         # 已 commit 的审计记录与已确定的响应；两者互斥：新评估走
@@ -659,6 +676,7 @@ class EvaluationService:
         materials: "V21PipelineMaterials | None" = None,
         ct_plan: "CtCommitPlan | None" = None,
         context_manifest: ContextManifestPrepared | None = None,
+        activation_ack_token: str | None = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """事务内单次评估；返回（响应, 已落盘审计记录, Phase C 计划）。
 
@@ -673,6 +691,7 @@ class EvaluationService:
                 materials=materials,
                 ct_plan=ct_plan,
                 context_manifest=context_manifest,
+                activation_ack_token=activation_ack_token,
             )
         snapshot_record = self.policy_service.current_snapshot_record()
         if snapshot_record is not None:
@@ -754,6 +773,7 @@ class EvaluationService:
         materials: "V21PipelineMaterials",
         ct_plan: "CtCommitPlan | None" = None,
         context_manifest: ContextManifestPrepared | None = None,
+        activation_ack_token: str | None = None,
     ) -> tuple[GuardEvaluationResponse, AuditEvent | None, "V21PhaseCPlan | None"]:
         """四段式编排路径（D4）：Phase A 产物已在事务外就绪。
 
@@ -789,7 +809,11 @@ class EvaluationService:
         semantic_metadata: dict[str, object] = {}
         product_authority_metadata: dict[str, object] = {}
         if self.v21_pipeline is not None:
-            outcome = self.v21_pipeline.build_phase_b(event, materials)
+            outcome = self.v21_pipeline.build_phase_b(
+                event,
+                materials,
+                activation_ack_token=activation_ack_token,
+            )
             if outcome is not None:
                 phase_b_outcome = outcome
                 v21_evidence = outcome.envelope
@@ -1455,6 +1479,7 @@ class EvaluationService:
         event: GuardEvent,
         request_digest: str,
         auth_context: AuthContext | None,
+        activation_ack_token: str | None,
     ) -> GuardEvaluationResponse:
         """Return an exact Product replay only after authority/state recovery."""
 
@@ -1473,6 +1498,7 @@ class EvaluationService:
             event,
             existing,
             auth_context,
+            activation_ack_token=activation_ack_token,
         ) as locked:
             response = self._rebuild_response(locked)
             self.audit_service.repair_provenance(locked)

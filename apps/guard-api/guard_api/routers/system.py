@@ -56,12 +56,12 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
             preserve_heartbeat=True,
         )
 
-    @app.post("/v1/adapters/{runtime}/heartbeat")
+    @app.post("/v1/adapters/{runtime}/heartbeat", response_model=None)
     def save_adapter_heartbeat(
         runtime: str,
         payload: ProductRuntimeHeartbeatV2 | AdapterStatusRecord,
         authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | JSONResponse:
         auth_context = auth.verify_bearer(authorization, "adapter:status:write")
         if isinstance(payload, ProductRuntimeHeartbeatV2):
             auth.verify_runtime_identity(
@@ -70,6 +70,27 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
                 agent_id=payload.agent_id,
                 require_agent_id=True,
             )
+            authority = context.product_activation_authority
+            if authority is not None:
+                try:
+                    accepted = authority.accept_heartbeat(
+                        runtime,
+                        payload,
+                        auth_context,
+                    )
+                except ValidationError:
+                    raise ApiAuthError("VALIDATION_ERROR", status_code=422) from None
+                return JSONResponse(
+                    content={
+                        "runtime_status": accepted.runtime_status.model_dump(
+                            mode="json"
+                        ),
+                        "activation_ack": accepted.activation_ack.model_dump(
+                            mode="json"
+                        ),
+                    },
+                    headers={"Cache-Control": "no-store"},
+                )
             try:
                 status = ProductRuntimeStatusV2.model_validate(
                     {

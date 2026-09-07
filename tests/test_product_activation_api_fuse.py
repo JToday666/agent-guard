@@ -146,6 +146,14 @@ class _BlockingFuse:
         )
         raise V21OfficialEvaluationUnavailableError(self.code)
 
+    def enforce_evaluation(
+        self,
+        event: GuardEvent,
+        auth_context: AuthContext | None,
+        _activation_ack_token: str | None,
+    ) -> NoReturn:
+        self.enforce(event, auth_context)
+
 
 class _ForbiddenDependency:
     """Tripwire for every legacy/current evaluation dependency."""
@@ -166,7 +174,7 @@ def _evaluation(fuse: _BlockingFuse) -> EvaluationService:
         v21_pipeline=forbidden,
         ct_projection_service=forbidden,
         context_builder_service=forbidden,
-        product_active_fuse=cast(Any, fuse),
+        product_activation_authority=cast(Any, fuse),
     )
     return service
 

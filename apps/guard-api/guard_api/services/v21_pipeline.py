@@ -134,7 +134,11 @@ if TYPE_CHECKING:
     from agentguard_core.security_context import AssessmentTransientFacts
     from agentguard_core.semantic.models import SemanticJudgment
 
-    from .product_activation import FrozenProductActivation
+    from .product_activation import (
+        FrozenProductActivation,
+        ProductActivationAuthorityService,
+        ProductRuntimeObservationReconciliation,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -610,6 +614,7 @@ class V21PipelineService:
         memory_not_required_actions: frozenset[str] = frozenset(),
         competition_model_output_observation: bool = False,
         runtime_binding_resolver: RuntimeBindingResolver | None = None,
+        product_activation_authority: "ProductActivationAuthorityService | None" = None,
     ) -> None:
         self._store = store
         self._state_service = state_service
@@ -624,6 +629,7 @@ class V21PipelineService:
         self._runtime_binding_resolver = (
             runtime_binding_resolver or RuntimeBindingResolver()
         )
+        self._product_activation_authority = product_activation_authority
         self._task_scope_keyring = (
             settings.task_scope_keyring()
             if self._runtime_binding_resolver.product_active
@@ -693,6 +699,45 @@ class V21PipelineService:
 
         return self._runtime_binding_resolver.product_activation
 
+    @property
+    def product_activation_authority(
+        self,
+    ) -> "ProductActivationAuthorityService | None":
+        """Expose the immutable authority instance used by composition tests."""
+
+        return self._product_activation_authority
+
+    def _product_authority_service(self) -> "ProductActivationAuthorityService":
+        authority = self._product_activation_authority
+        activation = self.product_activation
+        if (
+            authority is None
+            or activation is None
+            or authority.activation is not activation
+            or authority.store is not self._store
+        ):
+            raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
+        return authority
+
+    def _enforce_product_activation_ack(
+        self,
+        event: GuardEvent,
+        auth_context: AuthContext | None,
+        activation_ack_token: str | None,
+        *,
+        reference_time: datetime,
+    ) -> "ProductRuntimeObservationReconciliation":
+        """Revalidate the caller ACK against this exact frozen authority."""
+
+        authority = self._product_authority_service()
+        _, observation = authority.enforce_evaluation_with_observation(
+            event,
+            auth_context,
+            activation_ack_token,
+            reference_time=reference_time,
+        )
+        return observation
+
     @contextmanager
     def authority_transaction(
         self,
@@ -754,6 +799,8 @@ class V21PipelineService:
         event: GuardEvent,
         audit: AuditEvent,
         auth_context: AuthContext | None,
+        *,
+        activation_ack_token: str | None = None,
     ) -> Iterator[AuditEvent]:
         """Repair and expose one exact Product replay under its full fence.
 
@@ -813,8 +860,17 @@ class V21PipelineService:
                         auth_context=auth_context,
                         task_id=task_id,
                         scope_digest=scope_digest,
+                        activation_ack_token=activation_ack_token,
                     )
                     yield locked
+                    self.finalize_product_replay_locked(
+                        event,
+                        locked,
+                        auth_context=auth_context,
+                        task_id=task_id,
+                        scope_digest=scope_digest,
+                        activation_ack_token=activation_ack_token,
+                    )
             except ProductAuthorityCredentialUnavailableError as exc:
                 raise V21OfficialEvaluationUnavailableError(
                     PRODUCT_CREDENTIAL_NOT_CURRENT
@@ -830,6 +886,7 @@ class V21PipelineService:
         auth_context: AuthContext,
         task_id: str,
         scope_digest: str,
+        activation_ack_token: str | None = None,
     ) -> None:
         """Validate, repair, then revalidate a replay in an existing fence."""
 
@@ -839,6 +896,7 @@ class V21PipelineService:
             auth_context=auth_context,
             task_id=task_id,
             scope_digest=scope_digest,
+            activation_ack_token=activation_ack_token,
         )
         self._repair_product_replay_projection_locked(
             audit,
@@ -853,6 +911,28 @@ class V21PipelineService:
             auth_context=auth_context,
             task_id=task_id,
             scope_digest=scope_digest,
+            activation_ack_token=activation_ack_token,
+        )
+
+    def finalize_product_replay_locked(
+        self,
+        event: GuardEvent,
+        audit: AuditEvent,
+        *,
+        auth_context: AuthContext,
+        task_id: str,
+        scope_digest: str,
+        activation_ack_token: str | None = None,
+    ) -> None:
+        """Apply the final replay ACK/authority fence after staged repair."""
+
+        self._revalidate_product_replay_authority(
+            event,
+            audit,
+            auth_context=auth_context,
+            task_id=task_id,
+            scope_digest=scope_digest,
+            activation_ack_token=activation_ack_token,
         )
 
     def _revalidate_product_replay_authority(
@@ -863,6 +943,7 @@ class V21PipelineService:
         auth_context: AuthContext,
         task_id: str,
         scope_digest: str,
+        activation_ack_token: str | None = None,
     ) -> ProductDecisionAuthorityEvidenceV1:
         """Re-capture replay-stable Product authority without reassessment."""
 
@@ -877,6 +958,12 @@ class V21PipelineService:
             activation.assert_unchanged()
             if not activation.bundle.valid_at(checked_at):
                 raise ValueError("Product activation is not current")
+            observations = self._enforce_product_activation_ack(
+                event,
+                auth_context,
+                activation_ack_token,
+                reference_time=checked_at,
+            )
             raw_envelope = (
                 audit.evidence.get("decision_authority")
                 if isinstance(audit.evidence, dict)
@@ -962,15 +1049,8 @@ class V21PipelineService:
         ):
             raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
 
-        from .product_activation import (  # noqa: PLC0415
-            RUNTIME_OBSERVATION_MISMATCH,
-            reconcile_product_runtime_observations,
-        )
+        from .product_activation import RUNTIME_OBSERVATION_MISMATCH  # noqa: PLC0415
 
-        observations = reconcile_product_runtime_observations(
-            activation,
-            self._store,
-        )
         if (
             not observations.matched
             or observations.authority_observation_digest is None
@@ -1668,6 +1748,8 @@ class V21PipelineService:
         self,
         event: GuardEvent,
         materials: V21PipelineMaterials,
+        *,
+        activation_ack_token: str | None = None,
     ) -> _ProductAuthorityCapture:
         """Re-read one complete Product authority snapshot under its fence."""
 
@@ -1693,6 +1775,13 @@ class V21PipelineService:
                 PRODUCT_AUTHORITY_NOT_CURRENT
             ) from exc
 
+        observations = self._enforce_product_activation_ack(
+            event,
+            materials.auth_context,
+            activation_ack_token,
+            reference_time=checked_at,
+        )
+
         binding = materials.runtime_binding
         self._runtime_binding_resolver.revalidate(
             binding,
@@ -1711,15 +1800,8 @@ class V21PipelineService:
         assert activation is not None
         # Delayed import avoids the intentional product_activation -> pipeline
         # error-boundary dependency during module initialization.
-        from .product_activation import (  # noqa: PLC0415
-            RUNTIME_OBSERVATION_MISMATCH,
-            reconcile_product_runtime_observations,
-        )
+        from .product_activation import RUNTIME_OBSERVATION_MISMATCH  # noqa: PLC0415
 
-        observations = reconcile_product_runtime_observations(
-            activation,
-            self._store,
-        )
         if (
             not observations.matched
             or observations.observation_digest is None
@@ -1902,7 +1984,11 @@ class V21PipelineService:
     # ------------------------------------------------------------------
 
     def build_phase_b(
-        self, event: GuardEvent, materials: V21PipelineMaterials
+        self,
+        event: GuardEvent,
+        materials: V21PipelineMaterials,
+        *,
+        activation_ack_token: str | None = None,
     ) -> V21PhaseBOutcome | None:
         """Phase B（D4：由 evaluation 编排在 evaluation_transaction 内调用）。
 
@@ -1914,7 +2000,11 @@ class V21PipelineService:
         """
 
         try:
-            return self._build_phase_b(event, materials)
+            return self._build_phase_b(
+                event,
+                materials,
+                activation_ack_token=activation_ack_token,
+            )
         except V21OfficialEvaluationUnavailableError:
             raise
         except RuntimeBindingResolutionError as exc:
@@ -1930,7 +2020,11 @@ class V21PipelineService:
             return None
 
     def _build_phase_b(
-        self, event: GuardEvent, materials: V21PipelineMaterials
+        self,
+        event: GuardEvent,
+        materials: V21PipelineMaterials,
+        *,
+        activation_ack_token: str | None = None,
     ) -> V21PhaseBOutcome | None:
         if self._runtime_binding_resolver.product_active:
             if (
@@ -2012,7 +2106,11 @@ class V21PipelineService:
             # Product consumes the complete strict authority anchor.  Any
             # mismatch is a 503 availability failure, never ordinary shadow
             # stale evidence and never a legacy/current fallback.
-            product_capture = self._capture_product_authority(event, materials)
+            product_capture = self._capture_product_authority(
+                event,
+                materials,
+                activation_ack_token=activation_ack_token,
+            )
             current_state_version = product_capture.state_version
             current_task_digest = product_capture.task_digest
             current_policy_digest = product_capture.policy_digest
@@ -2188,6 +2286,7 @@ class V21PipelineService:
         phase_c_plan: V21PhaseCPlan | None,
         expected_authority_digest: str | None,
         initial_authority_checked_at: str | None,
+        activation_ack_token: str | None = None,
     ) -> None:
         """Perform the final Product check and reserve commit→project.
 
@@ -2215,7 +2314,11 @@ class V21PipelineService:
             ) from exc
 
         try:
-            capture = self._capture_product_authority(event, materials)
+            capture = self._capture_product_authority(
+                event,
+                materials,
+                activation_ack_token=activation_ack_token,
+            )
         except V21OfficialEvaluationUnavailableError:
             raise
         except RuntimeBindingResolutionError as exc:

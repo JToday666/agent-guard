@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, ContextManager, Protocol
+from typing import Any, Callable, ContextManager, Protocol
 
 from agentguard_core import (
     ActivationAckV1,
@@ -1051,9 +1051,12 @@ class ControlPlaneStore(Protocol):
         ...
 
     def consume_approval_execution_lease(
-        self, command: ApprovalLeaseConsumeCommand
+        self,
+        command: ApprovalLeaseConsumeCommand,
+        *,
+        release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
-        """Atomically revalidate approval authority and consume one lease."""
+        """Atomically revalidate Product/release authority and consume one lease."""
         ...
 
     def get_execution_lease(

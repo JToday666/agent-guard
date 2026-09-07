@@ -365,8 +365,7 @@ def activation_ack_matches_runtime_status(
         and ack.capability_digest == report.report_digest
         and ack.host_inventory_digest == status.host_inventory_digest
         and ack.plugin_inventory_digest == status.plugin_inventory_digest
-        and ack.plugin_order_inventory_digest
-        == status.plugin_order_inventory_digest
+        and ack.plugin_order_inventory_digest == status.plugin_order_inventory_digest
         and ack.tool_inventory_digest == status.tool_inventory_digest
         and (
             not require_heartbeat_time

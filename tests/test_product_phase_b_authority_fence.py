@@ -41,7 +41,10 @@ from tests.test_product_runtime_binding_wiring import (
     _event,
     _pipeline,
 )
-from tests.support.product_activation import product_runtime_status_for_activation
+from tests.support.product_activation import (
+    product_activation_ack_for_status,
+    product_runtime_status_for_activation,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -57,6 +60,7 @@ def _stack(tmp_path):
         audit_service=AuditService(store=store),
         approval_service=ApprovalService(store=store, settings=settings),
         v21_pipeline=pipeline,
+        product_activation_authority=pipeline.product_activation_authority,
     )
     return (
         fixture,
@@ -65,6 +69,19 @@ def _stack(tmp_path):
         evaluation,
         task_id,
         scope_digest,
+    )
+
+
+def _ack_token(fixture, store: MemoryControlPlaneStore) -> str:
+    status = store.list_product_runtime_statuses(runtime="langgraph")[0]
+    return product_activation_ack_for_status(fixture, status).ack_token
+
+
+def _evaluate(evaluation, event, fixture, store):
+    return evaluation.evaluate(
+        event,
+        auth_context=_auth(fixture),
+        activation_ack_token=_ack_token(fixture, store),
     )
 
 
@@ -222,10 +239,7 @@ def test_product_fence_commits_audit_and_projection_reservation_atomically(
     )
     event = _event(task_id)
 
-    response = evaluation.evaluate(
-        event,
-        auth_context=_auth(fixture),
-    )
+    response = _evaluate(evaluation, event, fixture, store)
 
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     state = store.get_security_state(scope_digest)
@@ -280,7 +294,7 @@ def test_product_phase_c_never_reads_audit_under_state_transaction(
         guarded_get_audit,
     )
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate(evaluation, event, fixture, store)
 
     state = store.get_security_state(scope_digest)
     assert state is not None and state.state_version == 1
@@ -328,13 +342,13 @@ def test_product_reservation_proves_bounded_rebuild_headroom_before_commit(
     before = _memory_store_image(store)
 
     if accepted:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
         state = store.get_security_state(scope_digest)
         assert state is not None and state.state_version == 999
         assert len(store.projection_records) == 999
     else:
         with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-            evaluation.evaluate(event, auth_context=_auth(fixture))
+            _evaluate(evaluation, event, fixture, store)
         assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
         _assert_no_evaluation_effects(
             store,
@@ -353,7 +367,7 @@ def test_product_missing_exact_credential_fails_before_any_side_effect(
     store.credentials.clear()
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_CREDENTIAL_NOT_CURRENT
     _assert_no_evaluation_effects(store, event_id=event.event_id)
@@ -389,7 +403,7 @@ def test_product_phase_a_requires_exact_persisted_policy(
     initial_store_image = _memory_store_image(store)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_POLICY_NOT_CURRENT
     _assert_no_evaluation_effects(
@@ -407,7 +421,7 @@ def test_product_backfill_applies_an_existing_unapplied_reservation(
     event = _event(task_id)
     monkeypatch.setattr(pipeline, "run_phase_c", lambda _plan: None)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate(evaluation, event, fixture, store)
 
     audit = store.get_policy_evaluation_by_event_id(event.event_id)
     pending = store.get_security_state(scope_digest)
@@ -435,7 +449,7 @@ def test_product_phase_c_rebuilds_when_another_projector_advances_first(
 
     monkeypatch.setattr(pipeline, "run_phase_c", interleave_other_projector)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate(evaluation, event, fixture, store)
 
     state = store.get_security_state(scope_digest)
     assert state is not None and state.state_version == 2
@@ -462,7 +476,7 @@ def test_product_phase_c_rebuilds_foreign_unapplied_envelope(
 
     monkeypatch.setattr(pipeline, "run_phase_c", interleave_crashed_projector)
 
-    evaluation.evaluate(event, auth_context=_auth(fixture))
+    _evaluate(evaluation, event, fixture, store)
 
     state = store.get_security_state(scope_digest)
     assert state is not None and state.state_version == 2
@@ -522,7 +536,11 @@ def test_phase_b_rejects_same_version_state_authority_drift(
         )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
 
@@ -535,7 +553,11 @@ def test_policy_same_content_new_revision_is_a_product_503(tmp_path) -> None:
     store.save_policy_snapshot(PolicyBundle(), expected_revision=1, updated_by="race")
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_POLICY_NOT_CURRENT
 
@@ -561,7 +583,11 @@ def test_full_task_fact_revision_drift_is_a_product_503(tmp_path) -> None:
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        pipeline.build_phase_b(event, materials)
+        pipeline.build_phase_b(
+            event,
+            materials,
+            activation_ack_token=_ack_token(fixture, store),
+        )
 
     assert raised.value.code == PRODUCT_TASK_IDENTITY_MISMATCH
 
@@ -583,7 +609,7 @@ def test_final_authority_drift_rolls_back_every_staged_side_effect(
     monkeypatch.setattr(pipeline, "build_phase_b", build_then_drift)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
     _assert_no_evaluation_effects(
@@ -595,7 +621,7 @@ def test_final_authority_drift_rolls_back_every_staged_side_effect(
     # The failed transaction leaves no poisoned reservation or authority
     # mutation: the exact same event can commit after the interleaving is gone.
     monkeypatch.setattr(pipeline, "build_phase_b", original_build)
-    response = evaluation.evaluate(event, auth_context=_auth(fixture))
+    response = _evaluate(evaluation, event, fixture, store)
     assert store.get_policy_evaluation_by_event_id(event.event_id) is not None
     assert response.policy_audit_id is not None
 
@@ -665,7 +691,7 @@ def test_final_non_state_authority_drift_rolls_back_staged_evaluation(
     monkeypatch.setattr(pipeline, "build_phase_b", build_then_drift)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
 
     assert raised.value.code == expected_code
     _assert_no_evaluation_effects(
@@ -689,6 +715,19 @@ def test_activation_expiry_between_phase_b_and_final_commit_is_zero_write_503(
     sampled_at = [expiry - timedelta(seconds=1)]
     resolver = pipeline._runtime_binding_resolver
     object.__setattr__(resolver, "clock", lambda: sampled_at[0])
+    authority = pipeline.product_activation_authority
+    assert authority is not None
+    object.__setattr__(authority, "clock", lambda: sampled_at[0])
+    for runtime in ("langgraph", "openclaw"):
+        status = product_runtime_status_for_activation(
+            fixture,
+            runtime,
+            last_heartbeat_at=sampled_at[0],
+        )
+        store.save_product_runtime_status(
+            status,
+            activation_ack=product_activation_ack_for_status(fixture, status),
+        )
     initial_store_image = _memory_store_image(store)
     original_build = pipeline.build_phase_b
 
@@ -700,7 +739,7 @@ def test_activation_expiry_between_phase_b_and_final_commit_is_zero_write_503(
     monkeypatch.setattr(pipeline, "build_phase_b", build_then_expire)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=_auth(fixture))
+        _evaluate(evaluation, event, fixture, store)
 
     assert raised.value.code == PRODUCT_ACTIVATION_NOT_CURRENT
     _assert_no_evaluation_effects(
@@ -737,10 +776,11 @@ def test_projection_reservation_linearizes_same_scope_different_events(
             evaluation.evaluate,
             first,
             auth_context=_auth(fixture),
+            activation_ack_token=_ack_token(fixture, store),
         )
         assert entered_phase_c.wait(timeout=5)
         with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-            evaluation.evaluate(second, auth_context=_auth(fixture))
+            _evaluate(evaluation, second, fixture, store)
         assert raised.value.code == PRODUCT_SECURITY_STATE_NOT_READY
         release_phase_c.set()
         first_response = first_future.result(timeout=5)

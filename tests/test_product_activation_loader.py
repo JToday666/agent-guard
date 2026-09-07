@@ -35,6 +35,7 @@ from tests.support.product_activation import (
     ProductActivationFixture,
     build_test_product_activation,
     build_test_runtime_capability,
+    product_activation_ack_for_status,
     product_runtime_status_for_activation,
     write_test_product_activation,
 )
@@ -143,14 +144,22 @@ def _save_matching_statuses(
     fixture: ProductActivationFixture,
     *,
     heartbeat_at: datetime | None = None,
+    include_acks: bool = True,
 ) -> None:
+    observed_at = _NOW if heartbeat_at is None else heartbeat_at
     for runtime in ("langgraph", "openclaw"):
+        status = product_runtime_status_for_activation(
+            fixture,
+            runtime,
+            last_heartbeat_at=observed_at,
+        )
         store.save_product_runtime_status(
-            product_runtime_status_for_activation(
-                fixture,
-                runtime,
-                last_heartbeat_at=heartbeat_at,
-            )
+            status,
+            activation_ack=(
+                product_activation_ack_for_status(fixture, status)
+                if include_acks
+                else None
+            ),
         )
 
 
@@ -487,14 +496,30 @@ def test_reconciliation_requires_both_exact_product_rows_and_ignores_legacy() ->
         ),
     )
 
-    missing = reconcile_product_runtime_observations(activation, store)
+    missing = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
     assert missing.matched is False
     assert missing.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
 
-    store.save_product_runtime_status(
-        product_runtime_status_for_activation(fixture, "langgraph")
+    langgraph = product_runtime_status_for_activation(
+        fixture,
+        "langgraph",
+        last_heartbeat_at=_NOW,
     )
-    partial = reconcile_product_runtime_observations(activation, store)
+    store.save_product_runtime_status(
+        langgraph,
+        activation_ack=product_activation_ack_for_status(fixture, langgraph),
+    )
+    partial = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
     assert partial.matched is False
     assert partial.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
 
@@ -521,13 +546,17 @@ def test_reconciliation_collapses_signed_field_drift_to_one_non_secret_code(
     fixture = build_test_product_activation(now=_NOW)
     activation = _frozen(fixture)
     store = MemoryControlPlaneStore()
-    langgraph = product_runtime_status_for_activation(fixture, "langgraph")
+    _save_matching_statuses(store, fixture)
     openclaw = product_runtime_status_for_activation(fixture, "openclaw")
     drifted = openclaw.model_copy(update={field: value})
-    store.save_product_runtime_status(langgraph)
     store.save_product_runtime_status(drifted)
 
-    result = reconcile_product_runtime_observations(activation, store)
+    result = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
 
     assert result.matched is False
     assert result.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
@@ -552,26 +581,57 @@ def test_reconciliation_requires_capability_digest_supported_and_active(
         openclaw.model_copy(update={"capability_report": inactive_report})
     )
 
-    result = reconcile_product_runtime_observations(activation, store)
+    result = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
 
     assert result.matched is False
     assert result.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
 
 
-def test_reconciliation_matches_without_heartbeat_freshness_or_ack() -> None:
+def test_reconciliation_requires_fresh_ack_for_both_runtimes() -> None:
     fixture = build_test_product_activation(now=_NOW)
     activation = _frozen(fixture)
     store = MemoryControlPlaneStore()
+
+    _save_matching_statuses(store, fixture, include_acks=False)
+    without_ack = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
+    assert without_ack.matched is False
+    assert without_ack.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
+
     _save_matching_statuses(
         store,
         fixture,
         heartbeat_at=_NOW - timedelta(days=365),
     )
+    stale = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
+    assert stale.matched is False
+    assert stale.reason_codes == (RUNTIME_OBSERVATION_MISMATCH,)
 
-    result = reconcile_product_runtime_observations(activation, store)
-
-    assert result.matched is True
-    assert result.reason_codes == ()
+    _save_matching_statuses(store, fixture, heartbeat_at=_NOW)
+    current = reconcile_product_runtime_observations(
+        activation,
+        store,
+        server_secret=fixture.server_secret,
+        reference_time=_NOW,
+    )
+    assert current.matched is True
+    assert current.reason_codes == ()
+    assert current.observation_digest is not None
+    assert current.authority_observation_digest is not None
 
 
 def test_preselector_fuse_uses_four_stable_fail_closed_codes() -> None:

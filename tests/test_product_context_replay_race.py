@@ -85,7 +85,7 @@ def test_product_context_replay_reconstructs_complete_manifest_without_rebuild(
         metadata={"task_id": harness.task_id},
     )
 
-    first = harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    first = harness.evaluate(event)
     assert first.context_plan is not None
     policy_audit = harness.store.get_policy_evaluation_by_event_id(event.event_id)
     assert policy_audit is not None
@@ -105,7 +105,7 @@ def test_product_context_replay_reconstructs_complete_manifest_without_rebuild(
         raise AssertionError("Product context replay must not rerun Context Builder")
 
     monkeypatch.setattr(context_builder, "build", fail_if_rebuilt)
-    replay = harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    replay = harness.evaluate(event)
 
     assert replay.context_plan == first.context_plan
     assert replay.model_dump_json() == first.model_dump_json()
@@ -159,7 +159,7 @@ def test_concurrent_product_replay_rejects_winner_truncated_manifest(
         metadata={"task_id": harness.task_id},
     )
 
-    winner = harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    winner = harness.evaluate(event)
     assert winner.context_plan is not None
     policy_audit = harness.store.get_policy_evaluation_by_event_id(event.event_id)
     assert policy_audit is not None
@@ -202,7 +202,7 @@ def test_concurrent_product_replay_rejects_winner_truncated_manifest(
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == "V21_PRODUCT_CONTEXT_REPLAY_UNAVAILABLE"
     assert lookup_count >= 2
@@ -251,7 +251,7 @@ def test_conflicting_product_replay_precedes_partial_or_missing_manifest_repair(
         payload=ContextBuildPayload(sources=[_source(index) for index in range(21)]),
         metadata={"task_id": harness.task_id},
     )
-    harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+    harness.evaluate(event)
     policy_audit = harness.store.get_policy_evaluation_by_event_id(event.event_id)
     assert policy_audit is not None
     anchor = context_manifest_anchor_from_policy(policy_audit)
@@ -304,7 +304,7 @@ def test_conflicting_product_replay_precedes_partial_or_missing_manifest_repair(
     )
 
     with pytest.raises(EvaluationConflictError):
-        harness.evaluation.evaluate(conflicting, auth_context=harness.auth_context)
+        harness.evaluate(conflicting)
 
     assert state_repair_calls == 0
     assert provenance_repair_calls == 0

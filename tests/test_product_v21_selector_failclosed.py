@@ -77,7 +77,7 @@ def test_core_selector_error_maps_to_stable_product_503_without_writes(
     )
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        harness.evaluation.evaluate(event, auth_context=harness.auth_context)
+        harness.evaluate(event)
 
     assert raised.value.code == _SELECTOR_UNAVAILABLE
     assert _write_image(harness.store) == before
@@ -135,7 +135,11 @@ def test_releasable_ask_without_allow_once_becomes_forbidden_without_release_row
         force_unreleasable_ask,
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
 
     assert response.decision.decision == "ask"
     assert response.decision.approval_intent is None
@@ -205,7 +209,11 @@ def test_equal_ask_current_deny_only_intent_cannot_gain_product_release(
         lambda **_: ("DEFER", ["test:force-equal-rank-v21-ask"]),
     )
 
-    response = stack.evaluation.evaluate(event, auth_context=stack.auth_context)
+    response = stack.evaluation.evaluate(
+        event,
+        auth_context=stack.auth_context,
+        activation_ack_token=stack.activation_ack_token,
+    )
 
     assert response.decision.decision == "ask"
     assert response.decision.approval_intent is None
@@ -237,6 +245,7 @@ def test_product_activation_with_non_active_pipeline_fails_closed_without_writes
         state_service=SecurityStateService(harness.store),
         policy_service=policy_service,
         runtime_binding_resolver=resolver,
+        product_activation_authority=harness.pipeline.product_activation_authority,
     )
     evaluation = EvaluationService(
         policy_service=policy_service,
@@ -251,7 +260,11 @@ def test_product_activation_with_non_active_pipeline_fails_closed_without_writes
     before = _write_image(harness.store)
 
     with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
-        evaluation.evaluate(event, auth_context=harness.auth_context)
+        evaluation.evaluate(
+            event,
+            auth_context=harness.auth_context,
+            activation_ack_token=harness.activation_ack_token,
+        )
 
     assert raised.value.code == _SELECTOR_UNAVAILABLE
     assert _write_image(harness.store) == before
