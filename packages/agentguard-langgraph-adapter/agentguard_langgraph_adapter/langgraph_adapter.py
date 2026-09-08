@@ -5,10 +5,14 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from .activation_ack import ActivationAckV1, ProductActivationError
-from .config import AgentGuardLangGraphConfig, product_configuration_digest
+from .config import (
+    AgentGuardLangGraphConfig,
+    product_configuration_digest,
+    validate_product_receipt_paths,
+)
 from .context_guard import (
     REFERENCE_RUNTIME_FACT,
     context_content_digest,
@@ -36,6 +40,12 @@ from .event_models import (
 )
 from .strong_binding import ExecutionLeaseReference
 from .product_manifest import ProductRuntimeObservation
+from .product_delivery import ProductReceiptDeliveryResult
+from .product_envelope_store import ProductEnvelopeStore, ProductStoreNamespace
+
+if TYPE_CHECKING:
+    from .product_outbox import ProductReceiptOutbox
+    from .product_action_barrier import ProductActionBarrier
 
 TOOL_METADATA = {
     "read_file": ("file", "file_read", "read"),
@@ -88,6 +98,12 @@ class LangGraphAdapter:
     _official_client: AgentGuardCoreClient | None = field(
         default=None, init=False, repr=False
     )
+    _product_outbox: ProductReceiptOutbox | None = field(
+        default=None, init=False, repr=False
+    )
+    _product_barrier: ProductActionBarrier | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         self._product_enabled = (
@@ -100,6 +116,77 @@ class LangGraphAdapter:
             if isinstance(self.core_client, AgentGuardCoreClient):
                 self._official_client = self.core_client
             self._product_client()
+            if getattr(self.config, "product_receipt_directory", None) is not None:
+                self._initialize_product_delivery()
+
+    def _initialize_product_delivery(self) -> None:
+        from .product_outbox import ProductReceiptOutbox
+        from .product_action_barrier import ProductActionBarrier
+
+        client = self._product_client()
+        validate_product_receipt_paths(self.config, required=True)
+        manifest = client._product_manifest
+        if manifest is None:
+            raise ProductActivationError("product_delivery_unavailable")
+        store: ProductEnvelopeStore | None = None
+        try:
+            store = ProductEnvelopeStore(
+                self.config.product_receipt_directory,
+                self.config.product_receipt_key_path,
+                namespace=ProductStoreNamespace(
+                    runtime=manifest.runtime,
+                    agent_id=manifest.agent_id,
+                    principal_id=manifest.principal_id,
+                    runtime_binding_id=manifest.runtime_binding_id,
+                ),
+            )
+            self._product_outbox = ProductReceiptOutbox(
+                store, send_receipt=client.submit_product_receipt_wire
+            )
+            self._product_barrier = ProductActionBarrier(self._product_outbox)
+            self._product_outbox.start()
+        except Exception:
+            if store is not None:
+                store.close()
+            self._product_outbox = None
+            self._product_barrier = None
+            raise ProductActivationError("product_delivery_unavailable") from None
+
+    @property
+    def product_action_barrier(self) -> ProductActionBarrier:
+        if self._product_barrier is None:
+            raise ProductActivationError("product_delivery_unavailable")
+        return self._product_barrier
+
+    def product_delivery_status(self) -> Any:
+        if self._product_outbox is None:
+            raise ProductActivationError("product_delivery_unavailable")
+        return self._product_outbox.status()
+
+    def drain_product_receipts(self) -> tuple[ProductReceiptDeliveryResult, ...]:
+        if self._product_outbox is None:
+            raise ProductActivationError("product_delivery_unavailable")
+        return self._product_outbox.drain_once()
+
+    def close_product_delivery(self) -> None:
+        if self._product_outbox is not None:
+            self._product_outbox.close()
+
+    def submit_product_receipt(
+        self, receipt: AuditEvent | RuntimeOutcomeReceipt
+    ) -> ProductReceiptDeliveryResult:
+        # Historical delivery retains the original outbox and HTTP transport,
+        # even if the current session/config/public client has been replaced.
+        if self._product_outbox is None:
+            return ProductReceiptDeliveryResult(
+                "failed", receipt.audit_id, error_code="product_delivery_unavailable"
+            )
+        try:
+            return self._product_outbox.submit(receipt)
+        except Exception:
+            return ProductReceiptDeliveryResult(
+                "failed", receipt.audit_id, error_code="product_delivery_failed"
+            )
 
     @property
     def product_enabled(self) -> bool:
@@ -791,6 +878,8 @@ class LangGraphAdapter:
     def submit_audit_event(
         self, audit_event: AuditEvent | RuntimeOutcomeReceipt
     ) -> dict[str, Any]:
+        if self.product_enabled:
+            return self.submit_product_receipt(audit_event).compatibility_response()
         if not self.product_enabled and not self.config.defense_enabled:
             return {"ok": True, "skipped": "defense_off"}
         try:
@@ -799,10 +888,6 @@ class LangGraphAdapter:
                 if isinstance(audit_event, RuntimeOutcomeReceipt)
                 else audit_event.model_dump()
             )
-            if self.product_enabled:
-                if self._official_client is None:
-                    raise ProductActivationError("official_client_required")
-                return self._official_client.submit_audit_event(payload)
             assert self.core_client is not None
             return self.core_client.submit_audit_event(payload)
         except CoreClientError as exc:

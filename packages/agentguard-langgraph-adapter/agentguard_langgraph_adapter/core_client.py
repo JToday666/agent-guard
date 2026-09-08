@@ -18,6 +18,7 @@ from .config import DEFAULT_API_MODE, product_configuration_digest, validate_api
 from .endpoint_policy import GuardApiEndpointError, validate_guard_api_base_url
 from .event_models import PolicyDecision, RuleHit
 from .product_manifest import ProductActivationManifest, ProductRuntimeObservation
+from .product_delivery import ProductReceiptTransportResult
 from .strong_binding import (
     ExecutionLeaseConsumeError,
     ExecutionLeaseCorrelation,
@@ -278,6 +279,105 @@ class AgentGuardCoreClient:
         if self.product_enabled or _api_mode(self.config) == "guard-api-v0.3":
             return self._post_json("/v1/audit/events", event)
         return self._post_json("/v1/audit/event", event)
+
+    def submit_product_receipt_wire(
+        self, payload: bytes
+    ) -> ProductReceiptTransportResult:
+        """Send one immutable durable envelope payload using its original transport.
+
+        No session refresh, current ACK header, hidden retries, or response body
+        escapes this boundary. The outbox owns retry scheduling and persistence.
+        """
+        transport = self._product_transport
+        if transport is None or type(payload) is not bytes or len(payload) > 512 * 1024:
+            return ProductReceiptTransportResult(
+                "failed", error_code="product_transport_unavailable"
+            )
+        try:
+            data = json.loads(payload)
+            audit_id = data.get("audit_id") if isinstance(data, dict) else None
+            if (
+                not isinstance(audit_id, str)
+                or not audit_id
+                or data.get("runtime") != "langgraph"
+                or data.get("record_type")
+                not in {"runtime_outcome", "runtime_observation"}
+            ):
+                raise ValueError
+        except (ValueError, TypeError):
+            return ProductReceiptTransportResult(
+                "failed", error_code="receipt_payload_invalid"
+            )
+        base_url, token, timeout = transport
+        status: int | None = None
+        try:
+            deadline = time.monotonic() + timeout
+            with httpx.Client(
+                timeout=timeout, follow_redirects=False, trust_env=False
+            ) as client:
+                with client.stream(
+                    "POST",
+                    base_url + "/v1/audit/events",
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                    },
+                    content=payload,
+                ) as response:
+                    status = response.status_code
+                    if status in {408, 429} or status >= 500:
+                        return ProductReceiptTransportResult(
+                            "retryable", audit_id, status, "http_retryable"
+                        )
+                    if status >= 300:
+                        return ProductReceiptTransportResult(
+                            "permanent_rejected",
+                            audit_id,
+                            status,
+                            "http_permanent_rejection",
+                        )
+                    if status < 200:
+                        return ProductReceiptTransportResult(
+                            "failed", audit_id, status, "receipt_response_invalid"
+                        )
+                    body = bytearray()
+                    for chunk in response.iter_bytes():
+                        if len(body) + len(chunk) > 1024 * 1024:
+                            return ProductReceiptTransportResult(
+                                "failed", audit_id, status, "receipt_response_too_large"
+                            )
+                        if time.monotonic() >= deadline:
+                            return ProductReceiptTransportResult(
+                                "retryable",
+                                audit_id,
+                                status,
+                                "receipt_response_timeout",
+                            )
+                        body.extend(chunk)
+            acknowledged = json.loads(body)
+            if (
+                not isinstance(acknowledged, dict)
+                or acknowledged.get("ok") is not True
+                or acknowledged.get("audit_id") != audit_id
+                or "skipped" in acknowledged
+            ):
+                return ProductReceiptTransportResult(
+                    "failed", audit_id, status, "receipt_acknowledgement_invalid"
+                )
+            return ProductReceiptTransportResult("recorded", audit_id, status)
+        except httpx.RequestError:
+            return ProductReceiptTransportResult(
+                "retryable", audit_id, status, "receipt_network_unavailable"
+            )
+        except (ValueError, TypeError):
+            return ProductReceiptTransportResult(
+                "failed", audit_id, status, "receipt_response_invalid"
+            )
+        except Exception:
+            return ProductReceiptTransportResult(
+                "failed", audit_id, status, "receipt_transport_failed"
+            )
 
     def wait_for_approval(
         self, approval_id: str, timeout: float | None = None

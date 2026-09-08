@@ -177,7 +177,14 @@ def test_sdk_http_contract_receipt_keeps_evaluation_ack_after_refresh(
     transport_contract: ProductRuntimeHttpHarness,
 ) -> None:
     harness = transport_contract
-    adapter = LangGraphAdapter(config=harness.config())
+    config = harness.config()
+    config.product_receipt_directory = str(
+        harness.manifest_path.parent / "receipt-queue"
+    )
+    config.product_receipt_key_path = str(
+        harness.manifest_path.parent / "receipt-key.bin"
+    )
+    adapter = LangGraphAdapter(config=config)
     try:
         original_ack = adapter.start_product_session(
             observe=lambda: harness.observation
@@ -215,3 +222,4 @@ def test_sdk_http_contract_receipt_keeps_evaluation_ack_after_refresh(
         assert fresh_ack.header_value() not in persisted.model_dump_json()
     finally:
         adapter.close_product_session()
+        adapter.close_product_delivery()

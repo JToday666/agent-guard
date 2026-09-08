@@ -26,6 +26,7 @@ from tests.support.product_activation import (
 )
 
 pytestmark = pytest.mark.unit
+_HTTPX_CLIENT = httpx.Client
 
 
 @pytest.fixture
@@ -74,6 +75,8 @@ def official_client(tmp_path, monkeypatch):
     )
     config = AgentGuardLangGraphConfig(
         product_manifest_path=str(manifest_path),
+        product_receipt_directory=str(directory / "receipts"),
+        product_receipt_key_path=str(directory / "receipt-key.bin"),
         agent_id=entry.agent_id,
         runtime_binding_id=entry.runtime_binding_id,
         context_isolation_mode="required",
@@ -352,16 +355,20 @@ def test_original_client_closes_and_receives_history_after_config_or_client_chan
         client.snapshot_product_ack()
     receipt = AuditEvent(
         audit_id="audit:historical",
+        record_type="runtime_observation",
         trace_id="trace:history",
+        links={"event_id": "event:history", "policy_audit_id": "policy:history"},
         summary="fixture",
         reason="fixture",
     )
+    receipt._product_activation_ack = ack
     assert adapter.submit_audit_event(receipt)["ok"] is True
     adapter.core_client = None
     assert adapter.submit_audit_event(receipt)["ok"] is True
     assert requests[-1].url.path == "/v1/audit/events"
     assert adapter.evaluate_guard_event(event()).decision == "deny"
     assert ack.header_value() not in repr(adapter)
+    adapter.close_product_delivery()
 
 
 @pytest.mark.parametrize(
@@ -442,3 +449,105 @@ def test_product_config_rejects_incompatible_options(changes):
     }
     with pytest.raises(ValueError):
         AgentGuardLangGraphConfig(**values)
+
+
+@pytest.mark.parametrize(
+    ("http_status", "response", "expected"),
+    [
+        (200, {"ok": True, "audit_id": "audit:typed"}, "recorded"),
+        (200, {"ok": False, "audit_id": "audit:typed"}, "failed"),
+        (200, {"ok": 1, "audit_id": "audit:typed"}, "failed"),
+        (200, {"ok": True, "audit_id": "audit:wrong"}, "failed"),
+        (200, {"ok": True, "audit_id": "audit:typed", "skipped": "no"}, "failed"),
+        (200, ["invalid"], "failed"),
+        (301, {}, "permanent_rejected"),
+        (400, {}, "permanent_rejected"),
+        (401, {}, "permanent_rejected"),
+        (403, {}, "permanent_rejected"),
+        (409, {}, "permanent_rejected"),
+        (422, {}, "permanent_rejected"),
+        (408, {}, "retryable"),
+        (429, {}, "retryable"),
+        (500, {}, "retryable"),
+        (503, {}, "retryable"),
+    ],
+)
+def test_product_receipt_typed_transport_classifies_one_attempt(
+    official_client, monkeypatch, http_status, response, expected
+):
+    client, _, _, _, _ = official_client
+    payload = json.dumps(
+        {
+            "audit_id": "audit:typed",
+            "runtime": "langgraph",
+            "record_type": "runtime_observation",
+        }
+    ).encode()
+    attempts = []
+
+    def handler(request):
+        attempts.append(request)
+        return httpx.Response(http_status, json=response)
+
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: _HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+    client.close_product_session()
+    client.config.token = "changed-token"
+    client.config.core_base_url = "https://changed.invalid"
+    result = client.submit_product_receipt_wire(payload)
+    assert result.status == expected
+    assert result.audit_id == "audit:typed"
+    assert result.http_status == http_status
+    assert len(attempts) == 1
+    assert attempts[0].content == payload
+    assert attempts[0].headers["authorization"] == "Bearer private-test-token"
+    assert "x-agentguard-activation-ack" not in attempts[0].headers
+    assert attempts[0].url.host == "127.0.0.1"
+    assert "private-test-token" not in repr(result)
+
+
+@pytest.mark.parametrize("fault", ["read_timeout", "invalid_json", "oversized"])
+def test_product_receipt_transport_bounds_and_redacts_failure(
+    official_client, monkeypatch, fault
+):
+    client, _, _, _, _ = official_client
+    secret = "transport-callback-secret"
+    payload = json.dumps(
+        {
+            "audit_id": "audit:typed",
+            "runtime": "langgraph",
+            "record_type": "runtime_observation",
+        }
+    ).encode()
+
+    def handler(request):
+        if fault == "read_timeout":
+            raise httpx.ReadTimeout(secret, request=request)
+        if fault == "invalid_json":
+            return httpx.Response(200, content=secret.encode())
+        return httpx.Response(200, content=b"x" * (1024 * 1024 + 1))
+
+    monkeypatch.setattr(
+        httpx,
+        "Client",
+        lambda **kwargs: _HTTPX_CLIENT(
+            transport=httpx.MockTransport(handler), **kwargs
+        ),
+    )
+    result = client.submit_product_receipt_wire(payload)
+    assert result.status == ("retryable" if fault == "read_timeout" else "failed")
+    assert secret not in repr(result)
+
+
+def test_product_receipt_transport_without_product_identity_sends_nothing(monkeypatch):
+    def unexpected(**kwargs):
+        raise AssertionError("no network before trusted Product identity")
+
+    monkeypatch.setattr(httpx, "Client", unexpected)
+    client = AgentGuardCoreClient(AgentGuardLangGraphConfig())
+    assert client.submit_product_receipt_wire(b"{}").status == "failed"

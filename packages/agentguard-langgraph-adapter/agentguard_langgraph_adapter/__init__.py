@@ -5,6 +5,16 @@ from __future__ import annotations
 from .activation_ack import ActivationAckV1, ProductActivationError
 from .activation_session import ProductActivationSession
 from .product_manifest import ProductActivationManifest, ProductRuntimeObservation
+from .product_delivery import (
+    ProductReceiptDeliveryResult,
+    ProductReceiptTransportResult,
+)
+from .product_outbox import ProductReceiptOutbox, ProductOutboxStatus
+from .product_action_barrier import (
+    ProductActionBarrier,
+    ProductActionTicket,
+    BeginActionResult,
+)
 from .config import AgentGuardLangGraphConfig
 from .context_guard import (
     ContextPlanValidationError,
@@ -63,6 +73,13 @@ __all__ = [
     "ProductActivationSession",
     "ProductActivationManifest",
     "ProductRuntimeObservation",
+    "ProductReceiptDeliveryResult",
+    "ProductReceiptTransportResult",
+    "ProductReceiptOutbox",
+    "ProductOutboxStatus",
+    "ProductActionBarrier",
+    "ProductActionTicket",
+    "BeginActionResult",
     "AgentGuardCoreClient",
     "AgentGuardLangGraphConfig",
     "ContextPlanValidationError",

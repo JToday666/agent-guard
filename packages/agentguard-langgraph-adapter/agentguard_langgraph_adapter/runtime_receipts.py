@@ -243,7 +243,7 @@ def build_tool_started_observation(
     }
     if enforcement is not None:
         evidence["enforcement"] = _enforcement_dump(enforcement)
-    return AuditEvent(
+    observation = AuditEvent(
         audit_id=f"audit_observation_started_{event_id}",
         schema_version="0.4",
         record_type="runtime_observation",
@@ -268,6 +268,10 @@ def build_tool_started_observation(
         metadata={"action_name": action_name, "observation_state": "started"},
         evidence=evidence,
     )
+    observation._product_activation_ack = _outcome_activation_ack(
+        decision, has_execution_lease=bool(lease_id or consumption_id)
+    )
+    return observation
 
 
 def build_runtime_outcome(

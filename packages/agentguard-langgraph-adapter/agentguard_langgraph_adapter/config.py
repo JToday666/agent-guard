@@ -91,6 +91,10 @@ class AgentGuardLangGraphConfig:
     product_manifest_path: str | None = None
     product_refresh_interval_seconds: float = 30.0
     activation_ack_max_age_seconds: float = 120.0
+    # Transport-only sessions may omit both. Product receipt delivery and the
+    # eventual native composition require both protected local locations.
+    product_receipt_directory: str | None = None
+    product_receipt_key_path: str | None = None
 
     def __post_init__(self) -> None:
         self.core_base_url = validate_guard_api_base_url(self.core_base_url)
@@ -106,6 +110,7 @@ class AgentGuardLangGraphConfig:
             raise ValueError("timeout must be greater than 0")
         if self.product_manifest_path is not None:
             validate_product_configuration(self)
+        validate_product_receipt_paths(self)
 
     @property
     def core_api_mode(self) -> ApiMode:
@@ -146,6 +151,24 @@ def validate_product_configuration(config: Any) -> None:
     assert isinstance(age, (int, float)) and isinstance(interval, (int, float))
     if age > 120 or interval > 30 or interval >= age:
         raise ValueError("Product timing configuration is invalid")
+    validate_product_receipt_paths(config)
+
+
+def validate_product_receipt_paths(config: Any, *, required: bool = False) -> None:
+    directory = getattr(config, "product_receipt_directory", None)
+    key_path = getattr(config, "product_receipt_key_path", None)
+    if not required and directory is None and key_path is None:
+        return
+    if any(
+        not isinstance(value, str) or not value or not Path(value).is_absolute()
+        for value in (directory, key_path)
+    ):
+        raise ValueError("Product receipt storage configuration is incomplete")
+    assert isinstance(directory, str) and isinstance(key_path, str)
+    queue = Path(directory)
+    key = Path(key_path)
+    if key == queue or queue in key.parents:
+        raise ValueError("Product receipt key must be outside the queue")
 
 
 def product_configuration_digest(config: Any) -> str:
@@ -167,6 +190,8 @@ def product_configuration_digest(config: Any) -> str:
         "product_manifest_path",
         "product_refresh_interval_seconds",
         "activation_ack_max_age_seconds",
+        "product_receipt_directory",
+        "product_receipt_key_path",
     )
     projection = {name: getattr(config, name, None) for name in fields}
     return hashlib.sha256(
