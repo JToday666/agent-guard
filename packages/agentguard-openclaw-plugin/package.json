@@ -41,7 +41,7 @@
   "scripts": {
     "clean": "node ./scripts/clean-dist.mjs",
     "build": "pnpm run clean && tsc -p tsconfig.json",
-    "test": "pnpm run build && node --test test/*.test.mjs"
+    "test": "pnpm run build && node --test test/*.test.mjs ../../scripts/product-runtime-*.test.mjs"
   },
   "peerDependencies": {
     "openclaw": ">=2026.6.6 <2027.0.0"
