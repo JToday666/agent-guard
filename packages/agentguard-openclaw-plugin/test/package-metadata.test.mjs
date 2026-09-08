@@ -45,6 +45,7 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "guardApiBaseUrl",
     "officialProfileDigest",
     "officialProfileId",
+    "productManifestPath",
     "requestTimeoutMs",
     "restrictedAskReleaseEnabled",
     "runtimeBindingId",
@@ -100,6 +101,9 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "agentguard-openclaw-v2-restricted",
   ]);
   assert.equal(properties.officialProfileDigest.type, "string");
+  assert.equal(properties.productManifestPath.type, "string");
+  assert.equal(properties.productManifestPath.minLength, 1);
+  assert.equal(Object.hasOwn(properties.productManifestPath, "default"), false);
   assert.equal(
     properties.officialProfileDigest.pattern,
     "^sha256:[0-9a-f]{64}$",
@@ -113,6 +117,7 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "officialProfileId",
     "officialProfileDigest",
     "restrictedAskReleaseEnabled",
+    "productManifestPath",
     "activationAckMaxAgeMs",
   ]) {
     assert.equal(
@@ -155,6 +160,7 @@ test("pinned Host schema hydration does not manufacture migration conflicts", as
     "officialProfileId",
     "officialProfileDigest",
     "restrictedAskReleaseEnabled",
+    "productManifestPath",
     "activationAckMaxAgeMs",
   ];
   const cases = [
