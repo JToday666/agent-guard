@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, ContextManager, Protocol
+from typing import Any, Callable, ContextManager, Literal, Protocol
 
 from agentguard_core import (
     ActivationAckV1,
@@ -190,6 +190,9 @@ class EnforcementBindingRecord:
     requires_execution_lease: bool
     grant_id: str | None = field(repr=False)
     created_at: str
+    # Server-side ActionIR identity is also needed for restricted grants. It
+    # does not attest that the Host implements exact execution binding (C3).
+    release_mode: Literal["strong_binding", "restricted_allow_once"] = "strong_binding"
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +215,7 @@ class ApprovalLeaseConsumeCommand:
     authorization_fingerprint: str = field(repr=False)
     lease_token: str = field(repr=False)
     expires_at: str
+    release_mode: Literal["strong_binding", "restricted_allow_once"] = "strong_binding"
 
 
 class ApprovalLeaseStoreError(Exception):

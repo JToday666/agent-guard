@@ -2208,7 +2208,15 @@ class PostgresControlPlaneStore:
     def save_enforcement_binding(
         self, record: EnforcementBindingRecord
     ) -> EnforcementBindingRecord:
-        if not record.requires_execution_lease or record.grant_id is not None:
+        if (
+            not record.requires_execution_lease
+            or record.release_mode not in {"strong_binding", "restricted_allow_once"}
+            or (
+                record.release_mode == "restricted_allow_once"
+                and record.runtime != "openclaw"
+            )
+            or record.grant_id is not None
+        ):
             raise EnforcementBindingConflictError(
                 "rte-05:binding_conflict", "private binding is invalid"
             )
@@ -2437,6 +2445,11 @@ class PostgresControlPlaneStore:
         *,
         release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
+        if command.release_mode == "restricted_allow_once" and release_check is None:
+            raise ApprovalExecutionLeaseUnavailableError(
+                "v21:restricted_activation_required",
+                "product release authority is unavailable",
+            )
         with self._session_factory() as session:
             with session.begin():
                 if release_check is not None:
@@ -2539,6 +2552,18 @@ class PostgresControlPlaneStore:
                     raise ApprovalLeaseAuthorizationError(
                         "rte-05:authorization_denied",
                         "credential or bound identity is not authorized",
+                    )
+                if (
+                    binding.release_mode != command.release_mode
+                    or command.release_mode
+                    not in {"strong_binding", "restricted_allow_once"}
+                    or (
+                        command.release_mode == "restricted_allow_once"
+                        and command.runtime != "openclaw"
+                    )
+                ):
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "v21:release_mode_mismatch", "approval release mode mismatch"
                     )
                 if binding.action_id != command.action_id or not _safe_compare(
                     binding.authorization_fingerprint,
@@ -3423,6 +3448,7 @@ def _binding_semantic_payload(record: EnforcementBindingRecord) -> tuple[Any, ..
         record.agent_id,
         record.policy_revision,
         record.requires_execution_lease,
+        record.release_mode,
         record.created_at,
     )
 
@@ -3444,6 +3470,7 @@ def _enforcement_binding_values(
         "agent_id": record.agent_id,
         "policy_revision": record.policy_revision,
         "requires_execution_lease": record.requires_execution_lease,
+        "release_mode": record.release_mode,
         "grant_id": record.grant_id,
         "created_at": record.created_at,
     }
@@ -3465,6 +3492,7 @@ def _enforcement_binding_from_row(row: Any) -> EnforcementBindingRecord:
         agent_id=str(row["agent_id"]),
         policy_revision=str(row["policy_revision"]),
         requires_execution_lease=bool(row["requires_execution_lease"]),
+        release_mode=str(row["release_mode"]),  # type: ignore[arg-type]
         grant_id=str(grant_id) if grant_id is not None else None,
         created_at=str(row["created_at"]),
     )

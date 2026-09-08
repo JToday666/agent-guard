@@ -1292,7 +1292,10 @@ class V21PipelineService:
                 if (
                     projection is None
                     or state_record is None
-                    or state_record.dirty
+                    or state_record.dirty is not False
+                    or not isinstance(state_record.dirty_domains, list)
+                    or type(state_record.state_version) is not int
+                    or not isinstance(state_record.canonical_payload, dict)
                     or state_record.projector_version != PROJECTOR_VERSION
                     or state_record.state_version < delta.new_state_version
                     or projection.delta_digest != delta.delta_digest
@@ -1303,6 +1306,32 @@ class V21PipelineService:
                 state = OnlineSecurityState.model_validate(
                     state_record.canonical_payload
                 )
+                if (
+                    state_record.scope_digest != scope_digest
+                    or state_record.state_version != state.state_version
+                    or state_record.dirty_domains
+                    or state.dirty_domains
+                    or canonical_sha256(state_record.canonical_payload)
+                    != canonical_sha256(state.model_dump(mode="json"))
+                ):
+                    return False
+                # An approval may sort before its policy during canonical
+                # recovery, so the reflected policy hash can legitimately use
+                # a different CAS base from the immutable audit reservation.
+                # Use the same full-history proof as the strict reader, not a
+                # digest-only exception or a second application of the delta.
+                from guard_api.security_state.snapshot_builder import (
+                    _require_projection_reflection,
+                )
+
+                try:
+                    _require_projection_reflection(
+                        self._state_service.store_access,
+                        scope_digest=scope_digest,
+                        state=state,
+                    )
+                except SecurityStateNotReadyError:
+                    return False
                 expected_key = projection_identity_key(
                     scope_digest,
                     delta.source.source_record_type,
@@ -1312,7 +1341,6 @@ class V21PipelineService:
                 )
                 return any(
                     item.projection_key == expected_key
-                    and item.delta_digest == delta.delta_digest
                     for item in state.applied_projections
                 )
 

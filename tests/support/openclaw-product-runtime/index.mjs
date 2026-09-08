@@ -12,6 +12,9 @@ import {
   validateInboxUrl,
 } from "./inbox.mjs";
 
+import { isMessagePermitBridge } from "./message-permits.mjs";
+export { createMessagePermitBridge } from "./message-permits.mjs";
+
 export { createFixtureMemory, FixtureError } from "./memory.mjs";
 export { startFixtureInbox } from "./inbox.mjs";
 export const PLUGIN_ID = "agentguard-product-runtime-fixture";
@@ -94,7 +97,14 @@ export function createFixtureTools(config) {
 }
 
 /** Implements pinned OpenClaw 2026.7.1-2 ChannelPlugin/ChannelOutboundAdapter. */
-export function createFixtureChannel(config) {
+export function createFixtureChannel(
+  config,
+  { productMode = false, messagePermitBridge } = {},
+) {
+  if (productMode && !isMessagePermitBridge(messagePermitBridge))
+    throw new FixtureError("fixture_message_bridge_required");
+  if (!productMode && messagePermitBridge !== undefined)
+    throw new FixtureError("invalid_fixture_message_mode");
   const account = (cfg, accountId) => {
     if (accountId && accountId !== "default")
       throw new FixtureError("invalid_fixture_account");
@@ -137,6 +147,25 @@ export function createFixtureChannel(config) {
       }),
       resolveDefaultTo: () => config.inboxTarget,
     },
+    ...(productMode
+      ? {
+          messaging: {
+            normalizeTarget: (raw) =>
+              raw === config.inboxTarget ? raw : undefined,
+            targetResolver: {
+              looksLikeId: (raw) => raw === config.inboxTarget,
+              hint: config.inboxTarget,
+            },
+          },
+          actions: {
+            describeMessageTool: () => ({ actions: ["send"] }),
+            supportsAction: ({ action }) => action === "send",
+            resolveExecutionMode: () => "local",
+            prepareSendPayload: (input) =>
+              messagePermitBridge.prepareSendPayload(input),
+          },
+        }
+      : {}),
     outbound: {
       deliveryMode: "direct",
       textChunkLimit: 32768,
@@ -144,7 +173,38 @@ export function createFixtureChannel(config) {
         to === config.inboxTarget
           ? { ok: true, to }
           : { ok: false, error: new FixtureError("invalid_inbox_target") },
+      ...(productMode
+        ? {
+            async sendPayload(context) {
+              requireAcceptanceRoot(config.acceptanceRoot);
+              if (!account(context.cfg, context.accountId).enabled)
+                throw new FixtureError("fixture_channel_disabled");
+              const permit = messagePermitBridge.claimSend(context);
+              await permit.assertReadyToSend();
+              try {
+                await context.onPlatformSendDispatch?.();
+              } catch {
+                throw new FixtureError("fixture_message_dispatch_failed");
+              }
+              await permit.assertReadyToSend();
+              permit.assertCanSend();
+              const result = await deliverInboxMessage({
+                ...config,
+                to: permit.to,
+                text: permit.text,
+              });
+              permit.delivered(result.messageId);
+              return {
+                channel: CHANNEL_ID,
+                messageId: result.messageId,
+                chatId: config.inboxTarget,
+              };
+            },
+          }
+        : {}),
       async sendText(context) {
+        if (productMode)
+          throw new FixtureError("fixture_message_permit_required");
         requireAcceptanceRoot(config.acceptanceRoot);
         if (!account(context.cfg, context.accountId).enabled)
           throw new FixtureError("fixture_channel_disabled");
@@ -173,20 +233,38 @@ export function createFixtureChannel(config) {
   };
 }
 
-export default {
-  id: PLUGIN_ID,
-  name: "AgentGuard Product Runtime Fixture",
-  version: "0.1.0",
-  register(api) {
-    // Pinned Host capabilityHandlers includes discovery and tool-discovery:
-    // native agent tool construction uses these modes without full activation.
-    const mode = api.registrationMode ?? "full";
-    if (!["full", "discovery", "tool-discovery"].includes(mode)) return;
-    const config = buildFixtureConfig(api.pluginConfig);
-    for (const tool of createFixtureTools(config)) api.registerTool(tool);
-    // The Host's tool-discovery registry does not activate runtime channels.
-    if (mode !== "tool-discovery") {
-      api.registerChannel({ plugin: createFixtureChannel(config) });
-    }
-  },
-};
+/** Trusted Host assembly may import this factory from a protected wrapper
+ * module and inject the SAME bridge object used by its action coordinator.
+ * The default export remains the explicit non-Product inventory fixture.
+ */
+export function createFixturePlugin({
+  productMode = false,
+  messagePermitBridge,
+} = {}) {
+  return {
+    id: PLUGIN_ID,
+    name: "AgentGuard Product Runtime Fixture",
+    version: "0.1.0",
+    register(api) {
+      // Pinned Host capabilityHandlers includes discovery and tool-discovery:
+      // native agent tool construction uses these modes without full activation.
+      const mode = api.registrationMode ?? "full";
+      if (!["full", "discovery", "tool-discovery"].includes(mode)) return;
+      if (productMode && !isMessagePermitBridge(messagePermitBridge))
+        throw new FixtureError("fixture_message_bridge_required");
+      const config = buildFixtureConfig(api.pluginConfig);
+      for (const tool of createFixtureTools(config)) api.registerTool(tool);
+      // The Host's tool-discovery registry does not activate runtime channels.
+      if (mode !== "tool-discovery") {
+        api.registerChannel({
+          plugin: createFixtureChannel(config, {
+            productMode,
+            messagePermitBridge,
+          }),
+        });
+      }
+    },
+  };
+}
+
+export default createFixturePlugin();

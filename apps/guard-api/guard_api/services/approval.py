@@ -36,7 +36,6 @@ from agentguard_core import (
     DecisionAuthority,
     GuardDecision,
     GuardEvent,
-    ProductDecisionAuthorityEvidenceV1,
     legacy_approval_release_projection,
 )
 from agentguard_core.actions.canonical_json import (
@@ -66,7 +65,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import _approval_evidence, describe_guard_event
-from .competition import parse_decision_authority_evidence_payload
+from .product_approval_authority import read_product_approval_authority
 from .provenance import ProvenanceWriter
 from .redaction import (
     SUMMARY_TEXT_LIMIT,
@@ -336,13 +335,19 @@ class ApprovalService:
             return
         if approval.decision != "allow_once" or approval.resolution_source != "human":
             return
-        if self.settings.rte05_strong_binding_enabled:
-            binding = self.store.get_enforcement_binding(approval.approval_id)
-            if binding is None:
-                # A C1/degraded ASK deliberately has no strong binding and must
-                # never be upgraded into a consumable grant after resolution.
-                return
+        product_release = (
+            approval.evidence.get("approval_release_directive") is not None
+        )
+        if self.settings.rte05_strong_binding_enabled or product_release:
             try:
+                binding = self.store.get_enforcement_binding(approval.approval_id)
+                if binding is None or (
+                    binding.release_mode == "strong_binding"
+                    and not self.settings.rte05_strong_binding_enabled
+                ):
+                    # Product grants cannot fall back to the legacy projector
+                    # when private authority is absent or strong mode disabled.
+                    return
                 self._project_strong_allow_once_grant(approval, binding)
             except Exception:  # noqa: BLE001 - resolution stays committed; consume 503.
                 logger.warning(
@@ -384,8 +389,6 @@ class ApprovalService:
         non-human or unbound C1 approvals.
         """
 
-        if not self.settings.rte05_strong_binding_enabled:
-            return False
         approval = self.store.get_approval(approval_id)
         binding = self.store.get_enforcement_binding(approval_id)
         if (
@@ -394,6 +397,10 @@ class ApprovalService:
             or approval.status != "resolved"
             or approval.decision != "allow_once"
             or approval.resolution_source != "human"
+            or (
+                not self.settings.rte05_strong_binding_enabled
+                and binding.release_mode != "restricted_allow_once"
+            )
         ):
             return False
         if binding.grant_id is not None:
@@ -418,16 +425,8 @@ class ApprovalService:
         if scope is None:
             return False
         task_fact, audit_record = scope
-        envelope = (audit_record.evidence or {}).get("decision_authority")
-        product_authority = (
-            isinstance(
-                parse_decision_authority_evidence_payload(
-                    {"decision_authority": envelope}
-                ),
-                ProductDecisionAuthorityEvidenceV1,
-            )
-            if envelope is not None
-            else False
+        product_authority = read_product_approval_authority(
+            self.store, binding, approval
         )
         if (
             binding.approval_id != approval.approval_id

@@ -493,7 +493,9 @@ class OpenClawFrozenToolV1(BaseModel):
     tool_id: str = Field(min_length=1, max_length=256)
     source_plugin_id: str = Field(min_length=1, max_length=256)
     input_schema_digest: str = Field(pattern=_DIGEST)
-    event_type: Literal["tool_call_proposed", "memory_write_proposed"]
+    event_type: Literal[
+        "tool_call_proposed", "memory_write_proposed", "message_send_proposed"
+    ]
     fixture_id: str = Field(min_length=1, max_length=320)
 
     @model_validator(mode="after")

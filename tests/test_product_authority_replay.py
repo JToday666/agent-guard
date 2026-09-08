@@ -348,7 +348,10 @@ def test_openclaw_replay_preserves_restricted_ask_carrier_without_reassessment(
 
     assert replay.model_dump_json() == first.model_dump_json()
     assert harness.store.get_approval(first.approval.approval_id) == approval_before
-    assert harness.store.enforcement_bindings == {}
+    private = harness.store.get_enforcement_binding(first.approval.approval_id)
+    assert private is not None and private.release_mode == "restricted_allow_once"
+    assert set(harness.store.enforcement_bindings) == {first.approval.approval_id}
+    assert private.authorization_fingerprint not in replay.model_dump_json()
 
 
 def test_product_replay_recovers_pending_reservation_without_reassessment(
@@ -759,11 +762,281 @@ def _old_competition_decision_evidence(
             "allow": "CLEAR_ALLOW",
             "ask": "DEFER",
             "deny": "CLEAR_DENY",
-        }[
-            decision.decision
-        ],  # type: ignore[arg-type]
+        }[decision.decision],  # type: ignore[arg-type]
         final_decision=decision.decision,
         mode="active",
         divergence_category=None,
         evidence_refs=[],
     )
+
+
+def _restricted_replay_grant(tmp_path, monkeypatch):
+    from tests.test_product_v21_service_selector import _force_current_decision
+
+    harness = create_product_evaluation_harness(tmp_path, runtime="openclaw")
+    event = harness.event(event_id="evt:restricted-rebased-policy")
+    event.security_context.source_trust = "trusted"
+    event.security_context.user_task = (
+        "Summarize the quarterly results already present in the conversation."
+    )
+    event.payload = ToolCallPayload(
+        tool=ToolDescriptor(name="read_file", call_id="call:restricted-rebased-policy"),
+        arguments={"path": "/docs/quarterly-results.txt"},
+        derived_resources=[],
+    )
+    _force_current_decision(monkeypatch, "ask")
+    first = harness.evaluate(event)
+    assert first.approval is not None
+    assert first.approval_release_directive.mode == "restricted_allow_once"
+    assert first.enforcement_binding is None
+    audit = harness.store.get_policy_evaluation_by_event_id(event.event_id)
+    assert audit is not None
+    approvals = ApprovalService(
+        store=harness.store,
+        settings=harness.settings,
+        state_service=SecurityStateService(harness.store),
+    )
+    return harness, event, first, audit, approvals
+
+
+def _resolve_rebased_grant(harness, first, approvals):
+    from agentguard_core.security_context import (
+        OnlineSecurityState,
+        projection_identity_key,
+    )
+
+    approval = approvals.resolve_approval(
+        first.approval.approval_id, "allow_once", resolution_source="human"
+    )
+    assert approval.status == "resolved"
+    row = next(
+        row
+        for row in harness.store.projection_records.values()
+        if row.source_record_type == "policy_evaluation"
+    )
+    key = projection_identity_key(
+        row.scope_digest,
+        row.source_record_type,
+        row.source_record_id,
+        row.source_revision,
+        row.projector_version,
+    )
+    record = harness.store.get_security_state(harness.scope_digest)
+    assert record is not None
+    state = OnlineSecurityState.model_validate(record.canonical_payload)
+    applied = next(
+        item for item in state.applied_projections if item.projection_key == key
+    )
+    # The real approval source sorts before the original policy reservation.
+    assert applied.delta_digest != row.delta_digest
+    return row, key, record, state
+
+
+def test_exact_product_replay_after_real_human_grant_rebase_is_not_reassessed(
+    tmp_path, monkeypatch
+):
+    harness, event, first, _, approvals = _restricted_replay_grant(
+        tmp_path, monkeypatch
+    )
+    _resolve_rebased_grant(harness, first, approvals)
+    before = _persistent_image(harness)
+    monkeypatch.setattr(
+        GuardEngine,
+        "evaluate_with_results",
+        lambda *_a, **_k: pytest.fail("replay reassessed a committed decision"),
+    )
+    replay = harness.evaluate(event)
+    # Approval is a live view of the actual human resolution; policy selection
+    # and authority remain byte exact, with no reassessment or second grant.
+    assert replay.model_dump_json(exclude={"approval"}) == first.model_dump_json(
+        exclude={"approval"}
+    )
+    assert replay.approval.status == "resolved"
+    assert replay.approval.decision == "allow_once"
+    assert harness.evaluate(event).model_dump_json() == replay.model_dump_json()
+    assert _persistent_image(harness) == before
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "reflection_digest",
+        "reflection_keyset",
+        "safety_state",
+        "original_delta_digest",
+        "original_delta_payload",
+    ],
+)
+def test_exact_product_replay_never_accepts_unproved_projection_reflection(
+    tmp_path, monkeypatch, mutation
+):
+    harness, event, first, _, approvals = _restricted_replay_grant(
+        tmp_path, monkeypatch
+    )
+    row, key, record, state = _resolve_rebased_grant(harness, first, approvals)
+    if mutation == "reflection_digest":
+        state.applied_projections = [
+            item.model_copy(update={"delta_digest": "sha256:" + "0" * 64})
+            if item.projection_key == key
+            else item
+            for item in state.applied_projections
+        ]
+    elif mutation == "reflection_keyset":
+        state.applied_projections = [
+            item for item in state.applied_projections if item.projection_key == key
+        ]
+    elif mutation == "safety_state":
+        state.active_grants = []
+    else:
+        storage_key = next(
+            k for k, value in harness.store.projection_records.items() if value == row
+        )
+        if mutation == "original_delta_digest":
+            mutated = replace(row, delta_digest="sha256:" + "0" * 64)
+        else:
+            payload = deepcopy(row.delta_payload)
+            payload["new_state_version"] += 1
+            mutated = replace(row, delta_payload=payload)
+        harness.store.projection_records[storage_key] = mutated
+    if mutation.startswith("reflection") or mutation == "safety_state":
+        harness.store.security_states[harness.scope_digest] = replace(
+            record, canonical_payload=state.model_dump(mode="json")
+        )
+    before = _persistent_image(harness)
+    # Reconciliation may legitimately repair a cache from correct history. This
+    # injected unavailability proves that malformed state is never called ready.
+    repair_attempts = []
+    monkeypatch.setattr(
+        harness.pipeline._state_service,
+        "reconcile_projection_history",
+        lambda scope: repair_attempts.append(scope),
+    )
+    monkeypatch.setattr(
+        GuardEngine,
+        "evaluate_with_results",
+        lambda *_a, **_k: pytest.fail("corrupt replay must not reassess"),
+    )
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        harness.evaluate(event)
+    assert raised.value.code == "V21_PRODUCT_SECURITY_STATE_NOT_READY"
+    assert _persistent_image(harness) == before
+    if mutation.startswith("reflection") or mutation == "safety_state":
+        assert repair_attempts == [harness.scope_digest]
+
+
+def test_missing_restricted_private_authority_never_projects_legacy_grant(
+    tmp_path, monkeypatch
+):
+    harness, _, first, _, approvals = _restricted_replay_grant(tmp_path, monkeypatch)
+    settings = replace(harness.settings, rte05_strong_binding_enabled=False)
+    approvals = ApprovalService(
+        store=harness.store,
+        settings=settings,
+        state_service=SecurityStateService(harness.store),
+    )
+    binding = harness.store.get_enforcement_binding(first.approval.approval_id)
+    assert binding is not None and binding.grant_id is None
+    before_projections = deepcopy(harness.store.projection_records)
+    before_grants = deepcopy(harness.store.capability_grants)
+    # Simulate a missing private handoff, while retaining the real pending
+    # Product approval. Human resolution must not use the legacy grant path.
+    monkeypatch.setattr(
+        type(harness.store), "get_enforcement_binding", lambda _self, _approval: None
+    )
+    monkeypatch.setattr(
+        approvals,
+        "_project_allow_once_grant",
+        lambda *_a: pytest.fail("Product fell back to legacy grant projection"),
+    )
+    resolved = approvals.resolve_approval(
+        first.approval.approval_id, "allow_once", resolution_source="human"
+    )
+    assert resolved.status == "resolved" and resolved.resolution_source == "human"
+    assert harness.store.projection_records == before_projections
+    assert harness.store.capability_grants == before_grants
+    assert not approvals.ensure_strong_approval_grant_registered(
+        first.approval.approval_id
+    )
+
+
+@pytest.mark.parametrize(
+    "alias",
+    [
+        "row_version_float",
+        "payload_version_float",
+        "dirty_flag_zero",
+        "dirty_domains_tuple",
+    ],
+)
+def test_product_replay_requires_the_same_canonical_row_types_as_strict_reader(
+    tmp_path, monkeypatch, alias
+):
+    harness, event, first, _, approvals = _restricted_replay_grant(
+        tmp_path, monkeypatch
+    )
+    _, _, record, _ = _resolve_rebased_grant(harness, first, approvals)
+    if alias == "row_version_float":
+        mutated = replace(record, state_version=float(record.state_version))
+    elif alias == "payload_version_float":
+        payload = deepcopy(record.canonical_payload)
+        payload["state_version"] = float(record.state_version)
+        mutated = replace(record, canonical_payload=payload)
+    elif alias == "dirty_flag_zero":
+        mutated = replace(record, dirty=0)
+    else:
+        mutated = replace(record, dirty_domains=())
+    harness.store.security_states[harness.scope_digest] = mutated
+    before = _persistent_image(harness)
+    monkeypatch.setattr(
+        harness.pipeline._state_service,
+        "reconcile_projection_history",
+        lambda _scope: None,
+    )
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        harness.evaluate(event)
+    assert raised.value.code == "V21_PRODUCT_SECURITY_STATE_NOT_READY"
+    assert _persistent_image(harness) == before
+
+
+def test_product_replay_rejects_dirty_payload_even_when_rebuild_agrees(
+    tmp_path, monkeypatch
+):
+    from agentguard_core.security_context import delta_digest_projection
+    from guard_api.services.v21_pipeline import build_evaluation_delta
+    from tests.test_v21_state_projector import make_record
+
+    harness, event, first, _, approvals = _restricted_replay_grant(
+        tmp_path, monkeypatch
+    )
+    _, _, record, _ = _resolve_rebased_grant(harness, first, approvals)
+    # A committed coverage invalidation is authoritative history. Clearing only
+    # its cache columns does not make that dirty payload valid for Product replay.
+    delta = build_evaluation_delta(
+        scope_digest=harness.scope_digest,
+        audit_id="audit:dirty-replay-fixture",
+        base_state_version=record.state_version,
+    )
+    delta = delta.model_copy(update={"dirty_domain_updates": ["behavior"]})
+    delta = delta.model_copy(
+        update={"delta_digest": canonical_sha256(delta_digest_projection(delta))}
+    )
+    service = SecurityStateService(harness.store)
+    service.project_committed(make_record(delta), scope_digest=harness.scope_digest)
+    service.reconcile_projection_history(harness.scope_digest)
+    current = harness.store.get_security_state(harness.scope_digest)
+    assert current is not None and current.canonical_payload["dirty_domains"] == [
+        "behavior"
+    ]
+    harness.store.security_states[harness.scope_digest] = replace(
+        current, dirty=False, dirty_domains=[]
+    )
+    before = _persistent_image(harness)
+    monkeypatch.setattr(
+        harness.pipeline._state_service,
+        "reconcile_projection_history",
+        lambda _scope: None,
+    )
+    with pytest.raises(V21OfficialEvaluationUnavailableError) as raised:
+        harness.evaluate(event)
+    assert raised.value.code == "V21_PRODUCT_SECURITY_STATE_NOT_READY"
+    assert _persistent_image(harness) == before

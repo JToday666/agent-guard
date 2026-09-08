@@ -1665,12 +1665,24 @@ class EvaluationService:
         if approval_id:
             approval = self.approval_service.get_approval(approval_id)
         binding = None
+        stored_binding = None
         if approval is not None:
             stored_binding = self.audit_service.store.get_enforcement_binding(
                 approval.approval_id
             )
             if stored_binding is not None:
-                binding = self._public_binding(stored_binding)
+                from .product_approval_authority import read_product_approval_authority
+
+                try:
+                    read_product_approval_authority(
+                        self.audit_service.store, stored_binding, approval
+                    )
+                    if stored_binding.release_mode == "strong_binding":
+                        binding = self._public_binding(stored_binding)
+                except ValueError as exc:
+                    raise CriticalDecisionEvidenceError(
+                        "historical private approval authority is invalid"
+                    ) from exc
         if authority is not None and authority.source == "v21":
             release_mode = (
                 approval_release_directive.mode
@@ -1684,7 +1696,10 @@ class EvaluationService:
                     "historical reviewable V2 ASK lacks approval or binding"
                 )
             if release_mode == "restricted_allow_once" and (
-                approval is None or binding is not None
+                approval is None
+                or binding is not None
+                or stored_binding is None
+                or stored_binding.release_mode != "restricted_allow_once"
             ):
                 raise CriticalDecisionEvidenceError(
                     "historical restricted V2 ASK has invalid approval binding"
@@ -1811,6 +1826,7 @@ class EvaluationService:
                 and snapshot is not None
                 and scope is not None
                 and assessment is not None
+                and bool(getattr(assessment, "authorization_fingerprint", None))
                 and material_scope_digest is not None
                 and degraded_kind is None
                 and directive_mode == "restricted_allow_once"
@@ -1823,7 +1839,7 @@ class EvaluationService:
                 and scope.scope_digest == material_scope_digest
                 and scope.scope_digest == approval_release_directive.scope_digest
                 and runtime_entry is not None
-                and runtime_entry.runtime == event.runtime
+                and runtime_entry.runtime == event.runtime == "openclaw"
                 and runtime_entry.principal_id == requesting_principal_id
                 and runtime_entry.agent_id == approval.agent_id
                 and runtime_entry.runtime_binding_id == scope.runtime_binding_id
@@ -1834,10 +1850,46 @@ class EvaluationService:
                 raise V21OfficialEvaluationUnavailableError(
                     "V21_PRODUCT_RESTRICTED_ASK_MATERIALS_INVALID"
                 )
-            # C1 best-effort Host binding is not the C3 exact
-            # ``EnforcementBinding`` contract.  The restricted lease/spool
-            # hand-off is wired by the OpenClaw runtime batch; this layer only
-            # preserves the signed release directive and human approval.
+            # Persist only server-owned ActionIR authorization. The public C3
+            # EnforcementBinding remains absent for this C1 Host.
+            assert snapshot is not None and scope is not None and assessment is not None
+            restricted_record = EnforcementBindingRecord(
+                event_id=event.event_id,
+                policy_audit_id=audit.audit_id,
+                approval_id=approval.approval_id,
+                action_id=assessment.action_id,
+                action_type=_ACTION_TYPE_BY_EVENT.get(
+                    event.event_type, event.event_type
+                ),
+                authorization_fingerprint=assessment.authorization_fingerprint,
+                runtime_binding_id=scope.runtime_binding_id,
+                scope_digest=scope.scope_digest,
+                principal_id=scope.principal_id,
+                runtime=scope.runtime,
+                agent_id=approval.agent_id,
+                policy_revision=snapshot.policy_revision,
+                requires_execution_lease=True,
+                grant_id=None,
+                created_at=approval.created_at,
+                release_mode="restricted_allow_once",
+            )
+            try:
+                stored_restricted = self.audit_service.store.save_enforcement_binding(
+                    restricted_record
+                )
+                if (
+                    self.audit_service.store.get_enforcement_binding(
+                        approval.approval_id
+                    )
+                    != stored_restricted
+                ):
+                    raise ValueError(
+                        "restricted private authorization readback mismatch"
+                    )
+            except Exception as exc:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_RESTRICTED_AUTHORIZATION_SAVE_FAILED"
+                ) from exc
             return None
         binding_required = bool(
             directive_mode == "strong_binding"
@@ -1938,7 +1990,10 @@ class EvaluationService:
 
     @staticmethod
     def _public_binding(record: EnforcementBindingRecord) -> EnforcementBinding:
-        if record.requires_execution_lease is not True:
+        if (
+            record.requires_execution_lease is not True
+            or record.release_mode != "strong_binding"
+        ):
             raise EvaluationConflictError(record.event_id)
         return EnforcementBinding(
             action_id=record.action_id,

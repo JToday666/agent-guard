@@ -49,7 +49,8 @@ def _memory_proof(parent: AuditEvent, change: MemoryGuardChange) -> VerifiedProd
     value = bindings.get("/value")
     key = bindings.get("/key")
     if (
-        proof.runtime != "langgraph"
+        proof.runtime not in {"langgraph", "openclaw"}
+        or proof.runtime != change.runtime
         or proof.first_write_memory_ref != memory_id
         or change.source_trust != "unknown"
         or value is None
@@ -236,12 +237,12 @@ def is_product_memory_completion(
 ) -> bool:
     """Select only the already validated original memory action terminal."""
     if not (
-        receipt.runtime == parent.runtime == "langgraph"
+        receipt.runtime == parent.runtime
+        and receipt.runtime in {"langgraph", "openclaw"}
         and parent.record_type == "policy_evaluation"
         and parent.event_type == "memory_write_proposed"
         and receipt.metadata.outcome_kind == "execution_completed"
         and receipt.evidence.execution.status == "executed"
-        and receipt.evidence.execution.invoked_at is not None
         and receipt.metadata.activation_ack is not None
     ):
         return False
@@ -252,7 +253,45 @@ def is_product_memory_completion(
     evidence = parse_decision_authority_evidence_payload(
         {"decision_authority": envelope}
     )
-    return isinstance(evidence, ProductDecisionAuthorityEvidenceV1)
+    if (
+        not isinstance(evidence, ProductDecisionAuthorityEvidenceV1)
+        or evidence.runtime != parent.runtime
+        or evidence.event_type != parent.event_type
+        or evidence.event_id != receipt.links.event_id
+        or evidence.selected_decision.decision != parent.decision
+    ):
+        return False
+    if receipt.runtime == "langgraph":
+        return receipt.evidence.execution.invoked_at is not None
+    # C1 reports only an actual after-hook outcome, never an authoritative
+    # invocation timestamp. Release/unknown/failed/quarantined are not commits.
+    if (
+        receipt.evidence.execution.invoked_at is not None
+        or receipt.evidence.execution.persisted is not True
+        or receipt.evidence.result.disposition != "passed_through"
+    ):
+        return False
+    if evidence.selected_decision.decision == "allow":
+        return (
+            receipt.evidence.enforcement is None
+            and receipt.links.approval_id is None
+            and receipt.links.lease_id is None
+            and evidence.approval_release_directive.mode == "not_applicable"
+        )
+    enforcement = receipt.evidence.enforcement
+    return (
+        evidence.selected_decision.decision == "ask"
+        and evidence.approval_release_directive.mode == "restricted_allow_once"
+        and enforcement is not None
+        and enforcement.release_mode == "restricted_allow_once"
+        and enforcement.gate_state == "approval_released"
+        and enforcement.binding_check_status == "not_performed"
+        and enforcement.lease_consume_outcome == "consumed"
+        and receipt.links.lease_id is not None
+        and receipt.links.consumption_id is not None
+        and receipt.evidence.approval.status == "allowed"
+        and receipt.evidence.approval.decision == "allow_once"
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -294,6 +333,21 @@ class ProductMemoryReceiptBridge:
             or parent.links.get("action_id") != receipt.links.action_id
         ):
             raise ValueError("V21_PRODUCT_MEMORY_RECEIPT_BINDING_INVALID")
+        if receipt.runtime == "openclaw":
+            accepted_execution = (stored.evidence or {}).get("execution", {})
+            if (
+                accepted_execution.get("invoked_at") is not None
+                or accepted_execution.get("persisted") is not True
+                or (stored.evidence or {}).get("result", {}).get("disposition")
+                != "passed_through"
+                or (stored.evidence or {}).get("enforcement")
+                != (
+                    receipt.evidence.enforcement.model_dump(mode="json")
+                    if receipt.evidence.enforcement
+                    else None
+                )
+            ):
+                raise ValueError("V21_PRODUCT_MEMORY_RECEIPT_BINDING_INVALID")
         proof = _memory_proof(parent, change)
         from .product_model_content import (
             ACK_VALIDATION_KEY,

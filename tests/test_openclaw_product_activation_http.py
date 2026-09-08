@@ -384,21 +384,22 @@ def test_openclaw_sdk_http_contract_original_ack_receipt_survives_refresh_and_cl
     )
 
 
-def test_openclaw_sdk_http_contract_legacy_floor_is_rejected_without_receipt(
+def test_openclaw_sdk_http_contract_conservative_floor_deny_never_releases(
     transport_contract: OpenClawHttpContract,
 ) -> None:
     harness = transport_contract
     event = harness.event()
-    # Retain the initial history-case failure as a real negative contract: this
-    # JSON triggers the legacy safety floor, which cannot qualify as pure V2.
+    # Retain the original B03 negative input. B07 accepts its conservative
+    # Product DENY without claiming a pure V2 ALLOW or invoking any tool.
     event["payload"] = {
         "tool": {"name": "exec", "call_id": "call:node-http-legacy-floor"},
         "arguments": {"command": "rm -rf /"},
         "derived_resources": [],
     }
-    result = harness.probe("legacy-floor-rejected", event)
-    assert result["rejected"] is True
-    assert result["errorCode"] == "official_response_mismatch"
+    result = harness.probe("conservative-floor-deny", event)
+    assert result["decision"] == "deny"
+    assert result["directive"]["mode"] == "not_applicable"
+    assert result["authority"]["legacy_floor_applied"] is True
     evaluations = harness.requests_for("/v1/guard/evaluate")
     assert len(evaluations) == 1
     assert evaluations[0].status_code == 200

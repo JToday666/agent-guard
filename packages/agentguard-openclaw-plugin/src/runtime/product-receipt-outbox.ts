@@ -51,6 +51,7 @@ const CODES = new Set([
   "receipt_acknowledgement_invalid",
   "receipt_permanently_rejected",
   "action_already_active",
+  "action_barrier_failed",
   "action_already_known",
   "action_identity_invalid",
   "action_ticket_invalid",
@@ -346,6 +347,12 @@ export class OpenClawProductReceiptOutbox {
       this.#trip("outbox_storage_failed");
       return failed("outbox_storage_failed", item.auditId);
     }
+  }
+
+  /** A required native boundary failed; persist the breaker without inventing an outcome. */
+  tripActionBarrier(): void {
+    this.#assertOpen();
+    this.#trip("action_barrier_failed");
   }
 
   /** Durable preparation occurs before returning any permission to the Host. */

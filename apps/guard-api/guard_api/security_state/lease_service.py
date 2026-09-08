@@ -25,7 +25,7 @@ import hmac
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from agentguard_core import ActivationAckV1
 from agentguard_core.actions.canonical_json import canonical_json_bytes
@@ -324,8 +324,11 @@ class ApprovalExecutionLeaseService:
         approval_id: str,
         *,
         action_id: str,
-        authorization_fingerprint: str,
+        authorization_fingerprint: str | None,
         auth_context: AuthContext,
+        release_mode: Literal[
+            "strong_binding", "restricted_allow_once"
+        ] = "strong_binding",
         activation_ack_token: str | None = None,
         now: datetime | None = None,
     ) -> GrantConsumptionResult:
@@ -340,6 +343,7 @@ class ApprovalExecutionLeaseService:
                 approval_id,
                 action_id=action_id,
                 authorization_fingerprint=authorization_fingerprint,
+                release_mode=release_mode,
                 auth_context=auth_context,
                 activation_ack_token=activation_ack_token,
                 release_ack=release_ack,
@@ -368,7 +372,8 @@ class ApprovalExecutionLeaseService:
         approval_id: str,
         *,
         action_id: str,
-        authorization_fingerprint: str,
+        authorization_fingerprint: str | None,
+        release_mode: Literal["strong_binding", "restricted_allow_once"],
         auth_context: AuthContext,
         activation_ack_token: str | None,
         release_ack: ActivationAckV1 | None,
@@ -422,9 +427,38 @@ class ApprovalExecutionLeaseService:
             raise ApprovalExecutionLeaseUnavailableError(
                 "rte-05:binding_unavailable", "execution binding is unavailable"
             )
-        if binding.action_id != action_id or not hmac.compare_digest(
-            binding.authorization_fingerprint,
-            authorization_fingerprint,
+        if (
+            release_mode not in {"strong_binding", "restricted_allow_once"}
+            or binding.release_mode != release_mode
+            or (
+                release_mode == "restricted_allow_once"
+                and (runtime != "openclaw" or authorization_fingerprint is not None)
+            )
+        ):
+            raise ApprovalLeaseConsumptionConflictError(
+                "v21:release_mode_mismatch", "approval release mode mismatch"
+            )
+        # Storage imports this module for token helpers before service/auth
+        # initialization. Resolve the Product service boundary only on consume.
+        from guard_api.services.product_approval_authority import (
+            read_product_approval_authority,
+            require_product_release_ack,
+        )
+
+        product_authority = read_product_approval_authority(
+            self.store, binding, approval
+        )
+        if product_authority is not None:
+            require_product_release_ack(product_authority, binding, release_ack)
+        if release_mode == "restricted_allow_once":
+            authorization_fingerprint = binding.authorization_fingerprint
+        if (
+            authorization_fingerprint is None
+            or binding.action_id != action_id
+            or not hmac.compare_digest(
+                binding.authorization_fingerprint,
+                authorization_fingerprint,
+            )
         ):
             raise ApprovalLeaseConsumptionConflictError(
                 "rte-05:binding_mismatch", "execution binding mismatch"
@@ -465,11 +499,14 @@ class ApprovalExecutionLeaseService:
             authority = self.product_activation_authority
 
             def validate_release(reference_time: datetime) -> ActivationAckV1:
-                return authority.enforce_release(
+                ack = authority.enforce_release(
                     auth_context,
                     activation_ack_token,
                     reference_time=reference_time,
                 )
+                if product_authority is not None:
+                    require_product_release_ack(product_authority, binding, ack)
+                return ack
 
             release_check = validate_release
 
@@ -485,6 +522,7 @@ class ApprovalExecutionLeaseService:
                 authorization_fingerprint=authorization_fingerprint,
                 lease_token=lease_token,
                 expires_at=expires_at,
+                release_mode=release_mode,
             ),
             release_check=release_check,
         )

@@ -11,7 +11,9 @@ from pydantic import BaseModel, ConfigDict
 from guard_api.auth import ApiAuthError
 from guard_api.models import (
     ExecutionLeaseConsumeRequest,
+    ExecutionLeaseConsumeBody,
     ExecutionLeaseConsumeResponse,
+    RestrictedExecutionLeaseConsumeRequest,
 )
 from guard_api.storage.base import (
     ApprovalExecutionLeaseExpiredError,
@@ -115,7 +117,7 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
     @app.post("/v1/approvals/{approval_id}/execution-leases/consume")
     def consume_execution_lease(
         approval_id: str,
-        payload: ExecutionLeaseConsumeRequest,
+        payload: ExecutionLeaseConsumeBody,
         authorization: str | None = Header(default=None),
         x_agentguard_activation_ack: str | None = Header(
             default=None,
@@ -126,13 +128,23 @@ def register_routes(app: FastAPI, context: ApiContext) -> None:
         # Authenticate before the rollout gate so flag-off cannot be used as an
         # unauthenticated endpoint oracle.  No approval/binding/grant write is
         # attempted while disabled.
-        if not context.settings.rte05_strong_binding_enabled:
+        restricted = isinstance(payload, RestrictedExecutionLeaseConsumeRequest)
+        if (
+            restricted and execution_lease_service.product_activation_authority is None
+        ) or (not restricted and not context.settings.rte05_strong_binding_enabled):
             raise ApiAuthError("EXECUTION_LEASE_UNAVAILABLE", status_code=503)
         try:
             result = execution_lease_service.consume(
                 approval_id,
                 action_id=payload.action_id,
-                authorization_fingerprint=payload.authorization_fingerprint,
+                authorization_fingerprint=(
+                    payload.authorization_fingerprint
+                    if isinstance(payload, ExecutionLeaseConsumeRequest)
+                    else None
+                ),
+                release_mode=(
+                    "restricted_allow_once" if restricted else "strong_binding"
+                ),
                 auth_context=auth_context,
                 activation_ack_token=x_agentguard_activation_ack,
             )

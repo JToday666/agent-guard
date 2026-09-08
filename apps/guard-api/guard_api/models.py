@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, WrapValidator, model_validator
 
 from agentguard_core import (
     ApprovalReleaseDirectiveV2,
@@ -158,6 +158,36 @@ class ExecutionLeaseConsumeRequest(BaseModel):
 
     action_id: str = Field(min_length=1)
     authorization_fingerprint: str = Field(pattern=r"^hmac-sha256:[0-9a-f]{64}$")
+
+
+class RestrictedExecutionLeaseConsumeRequest(BaseModel):
+    """Restricted Product release; the fingerprint remains server-private."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["restricted_allow_once"]
+    action_id: str = Field(min_length=1)
+
+
+def _select_execution_lease_request(value: Any, _handler: Any) -> Any:
+    # Select before parsing, so old bodies keep their exact validation error
+    # locations and never expose errors for a branch they did not request.
+    if isinstance(
+        value, (ExecutionLeaseConsumeRequest, RestrictedExecutionLeaseConsumeRequest)
+    ):
+        return value
+    model = (
+        RestrictedExecutionLeaseConsumeRequest
+        if isinstance(value, dict) and "mode" in value
+        else ExecutionLeaseConsumeRequest
+    )
+    return model.model_validate(value)
+
+
+ExecutionLeaseConsumeBody = Annotated[
+    ExecutionLeaseConsumeRequest | RestrictedExecutionLeaseConsumeRequest,
+    WrapValidator(_select_execution_lease_request),
+]
 
 
 class ExecutionLeaseConsumeResponse(BaseModel):

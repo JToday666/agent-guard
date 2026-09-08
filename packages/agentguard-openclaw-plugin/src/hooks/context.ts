@@ -1,3 +1,4 @@
+import type { OpenClawProductActionRuntime } from "../runtime/product-action-runtime.js";
 import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
 
 import { GuardApiClient, buildPluginConfig } from "../guard-api-client.js";
@@ -14,6 +15,8 @@ type PluginApi = Parameters<
 
 export type HookContext = {
   api: PluginApi;
+  /** Trusted composition only; never constructed from plugin JSON. */
+  productActions?: OpenClawProductActionRuntime;
   config: ReturnType<typeof buildPluginConfig>;
   makeClient: () => GuardApiClient;
   outcomeDelivery: RuntimeOutcomeDelivery;
@@ -21,3 +24,17 @@ export type HookContext = {
   toolCallState: Map<string, ToolCallState>;
   degradations: EvidenceDegradationTracker;
 };
+
+/** Detect authority configuration without invoking any legacy client factory. */
+export function hasProductConfiguration({
+  config,
+}: Pick<HookContext, "config">): boolean {
+  return Boolean(
+    config.officialProfileId ||
+    config.officialProfileDigest ||
+    config.productManifestPath ||
+    config.productReceiptDirectory ||
+    config.productReceiptKeyPath ||
+    config.restrictedAskReleaseEnabled,
+  );
+}

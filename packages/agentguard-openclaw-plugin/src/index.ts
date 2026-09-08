@@ -1,3 +1,4 @@
+import { assertOpenClawProductExecutionAvailable } from "./runtime/product-action-runtime.js";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import type { OpenClawPluginDefinition } from "openclaw/plugin-sdk/plugin-entry";
 import { getRuntimeConfigSourceSnapshot } from "openclaw/plugin-sdk/runtime-config-snapshot";
@@ -10,7 +11,7 @@ import {
   registerBeforeAgentRun,
   registerBeforePromptBuild,
 } from "./hooks/context-guard.js";
-import type { HookContext } from "./hooks/context.js";
+import { hasProductConfiguration, type HookContext } from "./hooks/context.js";
 import {
   registerBeforeInstall,
   registerObservationHooks,
@@ -51,9 +52,7 @@ type RuntimeConfigSourceSnapshotShape = {
 /** Reads the persisted adapterToken from the OpenClaw source config snapshot. */
 function readPersistedAdapterToken(): unknown {
   const snapshot = getRuntimeConfigSourceSnapshot() as
-    | RuntimeConfigSourceSnapshotShape
-    | null
-    | undefined;
+    RuntimeConfigSourceSnapshotShape | null | undefined;
   return snapshot?.plugins?.entries?.["agentguard-security"]?.config
     ?.adapterToken;
 }
@@ -90,6 +89,10 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     const config = buildPluginConfig(
       api.pluginConfig as OpenClawPluginConfigInput,
     );
+    // Product authority must never enter legacy hooks or background delivery.
+    // B09 will inject one Product client through the trusted action composition.
+    if (hasProductConfiguration({ config }))
+      assertOpenClawProductExecutionAvailable();
     const makeClient = () => new GuardApiClient({ config });
     const outcomeDelivery = new RuntimeOutcomeDelivery({
       spoolDirectory: join(
@@ -114,7 +117,11 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
     let stopHeartbeat: (() => void) | null = null;
     api.registerService({
       id: "agentguard-security-runtime",
-      start() {
+      async start() {
+        if (hookContext.productActions) {
+          await hookContext.productActions.start();
+          return;
+        }
         outcomeDelivery.start();
         stopHeartbeat?.();
         stopHeartbeat = scheduleHeartbeat(
@@ -125,7 +132,11 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
           hookContext.degradations,
         );
       },
-      stop() {
+      async stop() {
+        if (hookContext.productActions) {
+          await hookContext.productActions.close();
+          return;
+        }
         stopHeartbeat?.();
         stopHeartbeat = null;
         outcomeDelivery.stop();

@@ -431,6 +431,23 @@ class AuditService:
         # evidence.
         if enforcement is None:
             self._runtime_outcome_authority_mismatch()
+        if enforcement.release_mode != binding.release_mode:
+            self._runtime_outcome_authority_mismatch()
+        from .product_approval_authority import (
+            read_product_approval_authority,
+            require_product_release_ack,
+        )
+
+        try:
+            product = read_product_approval_authority(self.store, binding, approval)
+            if product is not None:
+                # This matches immutable ACK claims only. Historical ingestion
+                # uses its original issuance window, never the current session.
+                require_product_release_ack(
+                    product, binding, receipt.metadata.activation_ack
+                )
+        except ValueError:
+            self._runtime_outcome_authority_mismatch()
         self._validate_bound_outcome_shape(receipt)
         self._validate_bound_approval_evidence(receipt, approval)
 
@@ -502,6 +519,18 @@ class AuditService:
                 ),
             }
         )
+        if enforcement.release_mode == "restricted_allow_once":
+            released_consume = (
+                enforcement.gate_state == "approval_released"
+                and enforcement.binding_check_status == "not_performed"
+                and enforcement.lease_consume_outcome == "consumed"
+                and frozenset(enforcement.reason_codes)
+                == frozenset({"v21:restricted_allow_once", "rte-05:lease_consumed"})
+            )
+            blocked_after_consume = (
+                receipt.metadata.outcome_kind == "pre_execution_deny"
+                and enforcement.restricted_post_consume_deny()
+            )
         if not (released_consume or blocked_after_consume):
             self._runtime_outcome_authority_mismatch()
         self._validate_released_approval(
@@ -586,7 +615,12 @@ class AuditService:
             and evidence.decision is None
             and not has_lease_links
             and enforcement.gate_state == "timed_out"
-            and enforcement.binding_check_status == "passed"
+            and enforcement.binding_check_status
+            == (
+                "not_performed"
+                if enforcement.release_mode == "restricted_allow_once"
+                else "passed"
+            )
             and enforcement.lease_consume_outcome == "not_attempted"
             and "rte-05:approval_timed_out" in reason_codes
         )

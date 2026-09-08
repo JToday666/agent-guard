@@ -44,6 +44,31 @@ Product runtime 向 `POST /v1/adapters/{runtime}/heartbeat` 提交 `ProductRunti
 
 ACK 原文只出现在 heartbeat 响应和运行时回传中。私有 issuance 表保存 token 的 SHA-256 digest 和签名字段投影；审计/溯源和 Dashboard 状态写入前脱敏，`repr` 不显示 token 或服务器密钥。
 
+## OpenClaw restricted allow_once 消费
+
+Product OpenClaw 只消费原 official ASK 的 `restricted_allow_once` 指令。仍使用
+`POST /v1/approvals/{approval_id}/execution-leases/consume`，请求为
+`{"mode":"restricted_allow_once","action_id":"<原动作标识>"}`；禁止提交
+`authorization_fingerprint`。LangGraph 的 strong binding 请求与响应保持兼容。
+
+服务端将原 action 的指纹和 `release_mode` 保存在私有授权记录中，并从不可变
+policy parent 核验 runtime、profile、binding、approval 和指令。只有真实审批入口
+确认的 human `allow_once` 才能注册 grant；原子消费检查模式、ACK 和一次性状态。
+指纹不返回 OpenClaw，也不意味着 Host 具备 strong binding。缺失私有记录或模式
+不匹配均拒绝消费，不降级到旧审批路径。
+
+运行时等待审批后刷新 ACK；一次 consume 的不确定结果重试固定请求体与 ACK。
+restricted 回执携带原消费 ACK、lease 和 consumption，使用
+`release_mode=restricted_allow_once`、`binding_check_status=not_performed`，
+不记录权威 invocation-start。实际执行终态来自宿主 after hook；宿主中断而结果
+未知时持久保留未知状态，恢复只补回执。SQLite 写入成功的实际终态可推进对应
+memory change，内容仍保留原 provenance/trust，不能据此取得可信来源身份。
+
+迁移 `0020_restricted_approval_mode` 为旧记录默认补入 `strong_binding`。
+存在 restricted 记录时禁止降级删除模式；降级检查与 DDL 在排他锁内执行，
+避免并发插入造成记录语义丢失。第 07 批公开 Product 注册仍保持关闭，完整
+内容链和组合检查在第 08、09 批接通后才可显式启用。
+
 ## 本批验证入口
 
 ```bash

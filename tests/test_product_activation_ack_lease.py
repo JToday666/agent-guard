@@ -97,13 +97,19 @@ class _LeaseRig:
     action_id: str
     authorization_fingerprint: str
     scope_digest: str
+    release_mode: Literal["strong_binding", "restricted_allow_once"] = "strong_binding"
     race_future: Any | None = None
 
     def consume(self, ack_token: str | None):
         return self.leases.consume(
             self.approval_id,
             action_id=self.action_id,
-            authorization_fingerprint=self.authorization_fingerprint,
+            authorization_fingerprint=(
+                self.authorization_fingerprint
+                if self.release_mode == "strong_binding"
+                else None
+            ),
+            release_mode=self.release_mode,
             auth_context=self.auth_context,
             activation_ack_token=ack_token,
             now=self.clock.current,
@@ -190,6 +196,8 @@ def _prepare_rig(
     store: MemoryControlPlaneStore | PostgresControlPlaneStore,
     *,
     suffix: str,
+    runtime: Literal["langgraph", "openclaw"] = "langgraph",
+    strong_enabled: bool = True,
 ) -> _LeaseRig:
     now = datetime.now(timezone.utc).replace(microsecond=0)
     clock = _MutableClock(now)
@@ -213,23 +221,24 @@ def _prepare_rig(
             store.database_url if isinstance(store, PostgresControlPlaneStore) else None
         ),
     )
+    settings.rte05_strong_binding_enabled = strong_enabled
     store.save_policy_snapshot(
         policy,
         expected_revision=0,
         updated_by="product-ack-lease-test",
     )
     activation_ack_tokens: dict[str, str] = {}
-    for runtime in ("langgraph", "openclaw"):
+    for status_runtime in ("langgraph", "openclaw"):
         status = product_runtime_status_for_activation(
             fixture,
-            runtime,
+            status_runtime,
             last_heartbeat_at=now,
         )
         ack = product_activation_ack_for_status(fixture, status)
         store.save_product_runtime_status(status, activation_ack=ack)
-        activation_ack_tokens[runtime] = ack.ack_token
+        activation_ack_tokens[status_runtime] = ack.ack_token
 
-    entry = fixture.bundle.runtime_entry("langgraph")
+    entry = fixture.bundle.runtime_entry(runtime)
     raw_token = f"product-ack-lease-adapter-secret:{suffix}"
     token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
     credential_id = f"cred_product_ack_lease_{suffix}"
@@ -262,7 +271,7 @@ def _prepare_rig(
     ).create_task(
         TaskCreateRequest(
             task_text="exercise Product ACK-fenced approval release",
-            runtime="langgraph",
+            runtime=runtime,
             trace_id=f"trace:product-ack-lease-task:{suffix}",
             session_id=f"session:product-ack-lease:{suffix}",
             runtime_binding_id=entry.runtime_binding_id,
@@ -318,7 +327,7 @@ def _prepare_rig(
             "schema_version": "0.3",
             "event_id": f"evt:product-ack-lease:{suffix}",
             "event_type": "tool_call_proposed",
-            "runtime": "langgraph",
+            "runtime": runtime,
             "trace_id": f"trace:product-ack-lease:{suffix}",
             "timestamp": now.isoformat(),
             "pre_execution": True,
@@ -343,11 +352,11 @@ def _prepare_rig(
     response = evaluation.evaluate(
         event,
         auth_context=auth_context,
-        activation_ack_token=activation_ack_tokens["langgraph"],
+        activation_ack_token=activation_ack_tokens[runtime],
     )
     assert response.decision.decision == "ask"
     assert response.approval is not None
-    assert response.enforcement_binding is not None
+    assert (response.enforcement_binding is not None) == (runtime == "langgraph")
     resolved = approvals.resolve_approval(
         response.approval.approval_id,
         "allow_once",
@@ -373,12 +382,11 @@ def _prepare_rig(
         ),
         auth_context=auth_context,
         clock=clock,
-        activation_ack_token=activation_ack_tokens["langgraph"],
+        activation_ack_token=activation_ack_tokens[runtime],
         approval_id=response.approval.approval_id,
-        action_id=response.enforcement_binding.action_id,
-        authorization_fingerprint=(
-            response.enforcement_binding.authorization_fingerprint
-        ),
+        action_id=binding.action_id,
+        authorization_fingerprint=binding.authorization_fingerprint,
+        release_mode=binding.release_mode,
         scope_digest=task.scope_digest,
     )
 
@@ -412,7 +420,7 @@ def _expired_caller_ack(rig: _LeaseRig) -> str:
     current = _backend_now(rig)
     old_status = product_runtime_status_for_activation(
         rig.fixture,
-        "langgraph",
+        rig.auth_context.runtime,
         last_heartbeat_at=current - timedelta(seconds=2),
     )
     old_ack = product_activation_ack_for_status(
@@ -429,7 +437,7 @@ def _short_lived_caller_ack(rig: _LeaseRig) -> tuple[str, datetime]:
     current = _backend_now(rig)
     old_status = product_runtime_status_for_activation(
         rig.fixture,
-        "langgraph",
+        rig.auth_context.runtime,
         last_heartbeat_at=current - timedelta(seconds=1),
     )
     expires_at = current + timedelta(seconds=2)

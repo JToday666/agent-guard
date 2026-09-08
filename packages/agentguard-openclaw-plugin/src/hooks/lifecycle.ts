@@ -16,7 +16,7 @@ import {
   isDisabled,
   isObserve,
 } from "../runtime/enforcement.js";
-import type { HookContext } from "./context.js";
+import { hasProductConfiguration, type HookContext } from "./context.js";
 
 export function registerBeforeInstall(hookContext: HookContext): void {
   const { api, config, makeClient } = hookContext;
@@ -63,6 +63,14 @@ export function registerObservationHooks(hookContext: HookContext): void {
     api.on(
       hookName,
       (event: unknown, context: Record<string, unknown>) => {
+        if (
+          hookContext.productActions ||
+          hasProductConfiguration(hookContext)
+        ) {
+          if (hookName === "agent_end")
+            hookContext.productActions?.onRunEnd(context.runId);
+          return undefined;
+        }
         if (isDisabled(config)) {
           return undefined;
         }
