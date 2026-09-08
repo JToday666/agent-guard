@@ -10,6 +10,7 @@ from guard_api.storage.base import ControlPlaneStore
 
 from .audit import AuditService
 from .evidence import _should_quarantine_memory_change
+from .product_memory import ProductMemoryReceiptBridge
 
 if TYPE_CHECKING:
     from .ct_projection import CtProjectionService
@@ -26,6 +27,8 @@ class MemoryGuardService:
         self.store = store
         self.audit_service = audit_service
         self.projection_service = projection_service
+        if audit_service is not None:
+            audit_service.bind_product_memory_bridge(ProductMemoryReceiptBridge(self))
 
     def propose(
         self,

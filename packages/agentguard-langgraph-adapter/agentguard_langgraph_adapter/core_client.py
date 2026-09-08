@@ -255,7 +255,13 @@ class AgentGuardCoreClient:
                 or authority.mode != "active"
                 or authority.selection_basis != "profile_all"
                 or authority.matched_path_ids
-                or authority.legacy_floor_applied
+                # The retained safety floor can strengthen an official V2.1
+                # decision to ASK/DENY. It never supplies an execution grant;
+                # ASK still needs the exact strong approval/lease boundary.
+                or (
+                    authority.legacy_floor_applied
+                    and decision.decision not in {"ask", "deny"}
+                )
                 or authority.activation_ref_digest != ack.activation_ref_digest
                 or directive.activation_ref_digest != ack.activation_ref_digest
                 or directive.capability_digest != ack.capability_digest

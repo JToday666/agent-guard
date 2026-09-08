@@ -13,14 +13,16 @@ from agentguard_core.decisions.evidence import RequiredCheckPlan
 from agentguard_core.security_context import (
     PROJECTOR_VERSION,
     OnlineSecurityState,
+    SecurityStateDeltaV21,
     delta_digest_projection,
+    projection_identity_key,
 )
 from guard_api.security_state import SecurityStateNotReadyError, SecurityStateService
 from guard_api.security_state.rebuild import PREVIOUS_PROJECTOR_VERSION
 from guard_api.security_state.snapshot_builder import security_state_authority_digest
 from guard_api.storage.base import ProjectionIdentityRecord, SecurityStateRecord
 from guard_api.storage.memory import MemoryControlPlaneStore
-from tests.test_v21_security_state_models import SCOPE, make_delta, make_scope
+from tests.test_v21_security_state_models import SCOPE, make_delta, make_scope, make_recent_action
 from tests.test_v21_security_state_models import make_watermarks
 from tests.test_v21_state_projector import make_record
 
@@ -156,6 +158,93 @@ def test_current_projection_and_state_are_accepted_together() -> None:
 
     assert result.state_version == snapshot.state_version == 1
     assert authority_digest.startswith("sha256:")
+
+
+@pytest.mark.parametrize("mutation", [None, "digest", "position", "rebased_permutation"])
+def test_reconciled_prefix_accepts_only_content_equivalent_digests(
+    monkeypatch: pytest.MonkeyPatch, mutation: str | None
+) -> None:
+    store = MemoryControlPlaneStore()
+    service = SecurityStateService(store)
+    for index, record_id in enumerate(("z", "x", "b")):
+        service.project_committed(
+            make_record(make_delta(source_record_id=record_id, base_state_version=index)),
+            scope_digest=SCOPE,
+        )
+    service.reconcile_projection_history(SCOPE)
+    service.project_committed(
+        make_record(make_delta(source_record_id="a", base_state_version=3)),
+        scope_digest=SCOPE,
+    )
+    current = store.get_security_state(SCOPE)
+    assert current is not None
+    state = OnlineSecurityState.model_validate(current.canonical_payload)
+    # Prefix [b,x,z] has been legitimately rebased, then a was appended.
+    # The next canonical rebuild [a,b,x,z] changes z's position again.
+    if mutation == "digest":
+        state.applied_projections[2] = state.applied_projections[2].model_copy(
+            update={"delta_digest": "sha256:" + "0" * 64}
+        )
+    elif mutation in {"position", "rebased_permutation"}:
+        state.applied_projections[1], state.applied_projections[2] = (
+            state.applied_projections[2], state.applied_projections[1]
+        )
+    if mutation == "rebased_permutation":
+        # Applied positions are cache bookkeeping, not authenticated history.
+        # A permutation with correct hashes of the SAME authoritative payloads
+        # is acceptable while the complete safety-content digest still agrees.
+        rows = store.list_rebuild_inputs(SCOPE, limit=10)
+        by_key = {
+            projection_identity_key(
+                row.scope_digest, row.source_record_type, row.source_record_id,
+                row.source_revision, row.projector_version,
+            ): SecurityStateDeltaV21.model_validate(row.delta_payload)
+            for row in rows
+        }
+        for index, applied in enumerate(state.applied_projections):
+            rebased = by_key[applied.projection_key].model_copy(
+                update={"base_state_version": index, "new_state_version": index + 1}
+            )
+            state.applied_projections[index] = applied.model_copy(
+                update={"delta_digest": canonical_sha256(delta_digest_projection(rebased))}
+            )
+    if mutation is not None:
+        store.security_states[SCOPE] = replace(current, canonical_payload=state.model_dump(mode="json"))
+    before = deepcopy(store.get_security_state(SCOPE))
+    _forbid_writes(monkeypatch)
+    if mutation in {None, "rebased_permutation"}:
+        snapshot, _, _ = _read(service)
+        assert snapshot.state_version == 4
+    else:
+        with pytest.raises(SecurityStateNotReadyError) as raised:
+            _read(service)
+        assert raised.value.condition == "projection_digest_mismatch"
+    assert store.get_security_state(SCOPE) == before
+
+
+def test_rebased_hashes_do_not_hide_order_dependent_safety_content(monkeypatch):
+    store = MemoryControlPlaneStore()
+    service = SecurityStateService(store)
+    for index, record_id in enumerate(("z", "x", "b", "a")):
+        if index == 3:
+            service.reconcile_projection_history(SCOPE)
+        delta = make_delta(source_record_id=record_id, base_state_version=index)
+        delta = delta.model_copy(update={"action_additions": [make_recent_action(index)]})
+        delta = delta.model_copy(
+            update={"delta_digest": canonical_sha256(delta_digest_projection(delta))}
+        )
+        service.project_committed(make_record(delta), scope_digest=SCOPE)
+    before = deepcopy(store.get_security_state(SCOPE))
+    with monkeypatch.context() as read_only:
+        _forbid_writes(read_only)
+        with pytest.raises(SecurityStateNotReadyError) as raised:
+            _read(service)
+        assert raised.value.condition == "projection_state_digest_mismatch"
+        assert store.get_security_state(SCOPE) == before
+    # Recovery is explicit; strict reads never repair or excuse mismatched
+    # safety content. Reconciliation does not invoke a runtime side effect.
+    service.reconcile_projection_history(SCOPE)
+    assert _read(service)[0].state_version == 4
 
 
 def test_projection_row_revision_bool_alias_is_not_ready(

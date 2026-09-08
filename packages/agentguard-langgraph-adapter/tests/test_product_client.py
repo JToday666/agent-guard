@@ -289,6 +289,76 @@ def test_config_mutation_cannot_restore_compatibility_allow(
     assert len(requests) == 1
 
 
+def _conservative_official_response(response, *, decision, release):
+    response["decision"]["decision"] = decision
+    authority = response["decision_authority"]
+    authority["legacy_floor_applied"] = True
+    authority["approval_release"] = (
+        "strong_binding_required" if release == "strong_binding" else release
+    )
+    directive = response["approval_release_directive"]
+    directive["mode"] = release
+    if release == "strong_binding":
+        directive.update(
+            required_runtime_profile="C3",
+            action_binding="exact",
+            receipt_requirement="required_durable",
+        )
+        response["approval"] = {"approval_id": "approval:floor", "required": True}
+        response["enforcement_binding"] = {
+            "schema_version": "2.1",
+            "action_id": "call:floor",
+            "authorization_fingerprint": "hmac-sha256:" + "b" * 64,
+            "runtime_binding_id": "binding:floor",
+            "requires_execution_lease": True,
+        }
+
+
+@pytest.mark.parametrize(
+    "decision,release",
+    [
+        ("ask", "strong_binding"),
+        ("ask", "forbidden"),
+        ("ask", "not_applicable"),
+        ("deny", "not_applicable"),
+    ],
+)
+def test_official_conservative_floor_keeps_exact_decision_and_ack(
+    official_client, decision, release
+):
+    client, observation, response, _, _ = official_client
+    ack = client.start_product_session(observe=lambda: observation)
+    _conservative_official_response(response, decision=decision, release=release)
+    result, sent = client.evaluate_product_event(event())
+    assert result["decision"] == decision
+    assert result["decision_authority"]["legacy_floor_applied"] is True
+    assert result["approval_release_directive"]["mode"] == release
+    assert sent is ack
+
+
+@pytest.mark.parametrize(
+    "change", ["binding", "approval", "source", "mode", "activation", "capability"]
+)
+def test_conservative_floor_cannot_bypass_release_or_authority(official_client, change):
+    client, observation, response, _, _ = official_client
+    client.start_product_session(observe=lambda: observation)
+    _conservative_official_response(response, decision="ask", release="strong_binding")
+    if change in {"binding", "approval"}:
+        response.pop("enforcement_binding" if change == "binding" else "approval")
+    elif change == "source":
+        response["decision_authority"]["source"] = "current"
+    elif change == "mode":
+        response["decision_authority"]["mode"] = "shadow"
+    elif change == "activation":
+        response["decision_authority"]["activation_ref_digest"] = "sha256:" + "f" * 64
+    else:
+        response["approval_release_directive"]["capability_digest"] = (
+            "sha256:" + "f" * 64
+        )
+    with pytest.raises(ProductActivationError, match="official_response_mismatch"):
+        client.evaluate_product_event(event())
+
+
 def test_consume_retries_fix_ack_and_body(official_client):
     client, observation, _, _, attempts = official_client
     first = client.start_product_session(observe=lambda: observation)

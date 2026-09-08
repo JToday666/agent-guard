@@ -77,6 +77,10 @@ required 调用方和验收脚本必须检查结构化状态，不能把 `disabl
 官方响应必须同时具有 `source=v21 / mode=active / selection_basis=profile_all`、
 匹配的 activation/capability 和严格 release directive；current、shadow 或缺字段
 均返回 fail-closed 结果，不使用兼容放行分支。
+官方判定中的 `legacy_floor_applied=true` 仅可保留为更保守的 ASK/DENY；
+它不会提供执行授权。ASK 仍须通过准确的 strong binding、人工 `allow_once`
+和单次 lease 消费；禁止释放的 ASK 与 DENY 均记录未调用结果。
+`ALLOW + legacy_floor` 仍被拒绝，回执完整保留实际 authority。
 
 `ProductActivationManifest.from_file()` 读取独立可信期望值。清单必须是当前用户拥有的
 规范绝对路径，父目录 `0700`、文件 `0600`，不得使用符号链接、硬链接、重复 JSON
@@ -106,8 +110,8 @@ state dump 保存历史凭据。start observation 的私有加密 envelope 保�
 通用 HTTP observation payload 不增加公开 ACK 字段，也不据此扩大服务端
 invocation-start 验证声明。
 
-当前 `GuardedToolGateway` 继续拒绝 Product 配置：统一执行模板和原生七事件消费者
-尚未接齐。ACK 传输、持久队列和受控合同测试不构成真实 Product Active、
+当前 `GuardedToolGateway` 继续拒绝 Product 配置；原生入口使用独立的统一执行模板，
+完整组合检查通过前仍不允许启用。ACK 传输、持久队列和受控合同测试不构成真实 Product Active、
 双 canary 或 Internal RC 资格。完整顺序见
 [双运行时实施约定](../../docs/06_delivery/product_runtime_implementation_plan.md)。
 
@@ -145,11 +149,69 @@ agent、principal、binding 和记录身份，不绑定当前 activation，历�
 不透明 ticket。开始确认失败时没有 ticket；进程重启后遇到未完成意图，保留
 执行结果未知并阻断，不能推测为未执行。`finish_action()` 先持久化终态再投递；
 终态未确认期间阻断后续副作用，重启只补投已保存的终态。完成记录转换为加密
-去重 tombstone，拒绝相同动作再次执行。该 primitive 尚未接入原生工具执行入口。
+去重 tombstone，拒绝相同动作再次执行。原生模型和工具共用这个执行屏障。
+
+开始失败且当前进程确认没有发出执行 ticket 时，`begin_action()` 可以返回仅允许
+记录未调用终态的私有 `abort_proof`。`abort_action()` 把终态追加到同一动作记录，
+恢复依次补投原开始回执和终态；只有两者都确认后才解除待投阻断。重启、重复请求或
+自行提供 action ID 均不能生成此 proof，执行结果未知时也不能推断为未调用。
 
 所有记录（含 tombstone、永久失败和熔断记录）统一计入 10,000 条、单条 envelope
 512 KiB、总计 64 MiB 的限制；总容量预留一条最大 envelope 的原子替换空间。
 本批不自动清理去重记录，不宣称可以抵抗外部对整个队列目录的回滚。
+
+## LangGraph 原生入口
+
+独立安装 extra 固定 LangGraph `1.2.7`、`langgraph-prebuilt==1.1.0` 和
+`langchain-core==1.4.8`，不引入 benchmark 或 Core 包：
+
+```bash
+python -m pip install './packages/agentguard-langgraph-adapter[native]'
+```
+
+`build_native_product_graph()` 构建实际 StateGraph，模型输出通过实际 ToolNode
+驱动固定工具。`NativeProductGraph.invoke()` 只接受初始来源、security 和 trace ID，
+不接受 checkpoint、resume、外部 RunnableConfig 或自定义回调。每轮最多一个工具
+调用，节点最多尝试一次，禁止工具参数注入和动态清单；已执行过的 call ID 不重用。
+`close()` 停止新调用，工具集所有者另调用 `close_isolated_product_tools()` 释放本地句柄。
+
+`create_isolated_product_tools()` 要求 Linux 上已存在的 `0700` 验收目录和显式
+`http://127.0.0.1:<port>/inbox` 收件端，固定 `fixture-inbox` 目标。文件工具只操作
+目录内普通 `.txt` 文件；`exec` 只运行包内固定的 `python marker.py`，不使用 shell
+或继承 Provider 凭据；`process` 返回该工具集记录的命令结果。SQLite 记忆与消息
+渠道均使用真实本地存储/HTTP，不连接个人渠道。私有文件和目录锁保持单实例持有。
+本轮 SQLite profile 只接受新 key 的首次写入，覆盖写在评估前和实际写入前均拒绝。
+真实写入成功的终态回执驱动既有 Memory Change 提交与投影；读取内容必须与原写入
+记录吻合，且已提交的 MemoryFact 保留其原有信任和污点。提案、未知来源或回滚后的
+记忆不能借用已有 key 的身份进入模型。
+因此模型首次写入即使经人工批准并提交，原有 unknown/quarantined 状态也不会
+自动变成可信记忆；后续上下文继续隔离它。本批不提供提升记忆信任的初始化旁路。
+
+清单分别冻结实际模型可见 schema 与严格执行 schema、来源、事件类型和运行目录
+绑定。审批前后的参数使用不可变 JSON，执行前复核实际 schema、函数及闭包身份；
+记忆写入和消息发送各自只产生一个权威动作评估，不重复消费审批。
+
+七类事件经过完整内容检查：context plan 决定进入模型的消息；模型输入包含实际
+模型可见工具；模型输出和工具结果先隔离再进入图状态。内容上限为 64 KiB，整个
+事件为 128 KiB，超限拒绝，不截断待检查内容。旧事件构建器保留兼容行为。
+下一轮上下文由原任务来源和已确认的安全工具证据重建，不保留模型的 assistant
+历史。工具结果以 user 消息承载，但来源仍为不可信的 tool_result，并经过证据注释；
+记忆读取继续使用 memory 来源及原始内容校验。该算法保留真实模型与 ToolNode
+循环，不将模型判断提升为任务权限，也不放宽 source/dataflow 覆盖要求。
+
+模型和工具共用 `GuardedExecutionTemplate`：评估、审批/lease、确认持久动作意图、
+调用一次、独立结果检查、确认原动作终态。模型调用使用 `model_call_committed`
+观察记录；动作意图不声称调用已经发生。结果检查不会替换原动作的 policy/ACK
+关联；结果回执或终态未确认时不发布内容，故障恢复只补回执。
+
+Product 的审批 grant 与 CT 提交后投影在写入端完成有界历史重建；即使审批 ID 的
+顺序与到达顺序不同，后续严格读取仍要求完整状态摘要相等。投影或重建失败时不登记
+可消费 grant；补投复用既有记录，核对 CT 与原始审计材料，不重新执行工具。
+
+本阶段公开原生入口仍有固定启用限制。确定性测试可验证真实 StateGraph/ToolNode、
+本机 Guard API 和实际工具副作用，但测试中的合成候选身份和受控模型不构成
+最终 Product Active 验收。只有后续完整组合检查、最终 SHA 制品与签署材料、双运行时
+ACK 及真实 Qwen 场景全部通过后，才能声明本次隔离 profile 完成接通。
 
 ## 验证
 

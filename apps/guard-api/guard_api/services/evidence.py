@@ -432,7 +432,50 @@ def build_audit_event(
     if product_action_data is not None:
         from .product_model_content import read_product_action_data
 
-        read_product_action_data(result)
+        verified_data = read_product_action_data(result)
+        if isinstance(event.payload, MemoryEventPayload):
+            from agentguard_core.actions.normalize import normalize_arguments
+            from agentguard_core.actions.product_tools import product_tool_arguments
+
+            tool_name, call_id, arguments = product_tool_arguments(event)
+            projection = (result.evidence or {}).get("guard_event")
+            if (
+                event.event_type != "memory_write_proposed"
+                or tool_name != verified_data.tool_name
+                or call_id != verified_data.action_id
+                or call_id != description.action_id
+                or normalize_arguments(arguments).canonical.argument_digest
+                != verified_data.argument_digest
+                or not isinstance(projection, dict)
+            ):
+                raise CriticalDecisionEvidenceError(
+                    "Product memory tool identity mismatch"
+                )
+            # The canonical memory action and its later tool-result checkpoint
+            # share one immutable provenance identity. Only compiler-bound
+            # Product data permits using the actual native tool's identity;
+            # runtime metadata and legacy memory events do not grant this path.
+            evidence = {
+                **(result.evidence or {}),
+                "guard_event": {
+                    **projection,
+                    "tool": {
+                        "name": tool_name,
+                        "category": "memory",
+                        "call_id": call_id,
+                    },
+                },
+            }
+            if evidence_serialized_size(evidence) > MAX_EVIDENCE_BYTES:
+                raise CriticalDecisionEvidenceError(
+                    "Product memory tool evidence exceeds budget"
+                )
+            result = result.model_copy(
+                update={
+                    "evidence": evidence,
+                    "metadata": {**result.metadata, "action_name": tool_name},
+                }
+            )
     return result
 
 

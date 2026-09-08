@@ -21,9 +21,13 @@ from agentguard_core import (
 )
 from agentguard_core.actions import canonical_action_id
 from agentguard_core.actions.canonical_json import canonical_json, canonical_sha256
-from agentguard_core.actions.product_tools import VerifiedProductTool
+from agentguard_core.actions.product_tools import (
+    VerifiedProductTool,
+    product_tool_resource_identity,
+)
 from agentguard_core.decisions.product import ProductDecisionAuthorityEvidenceV1
 from agentguard_core.security_context import SecuritySnapshot
+from agentguard_core.security_context.facts import SourceFact
 from agentguard_core.security_context.product_data import (
     DataContentBinding,
     VerifiedProductData,
@@ -441,7 +445,14 @@ def _committed_artifacts(
     store: ControlPlaneStore,
     event: GuardEvent,
     snapshot: SecuritySnapshot,
-) -> tuple[set[str], set[str], set[str]]:
+) -> tuple[
+    set[str],
+    set[str],
+    set[str],
+    dict[str, set[str]],
+    dict[str, str],
+    dict[str, list[AuditEvent]],
+]:
     """Resolve identities from bounded immutable, same-scope CT policy records.
 
     A runtime supplied reference, including a cyclic chain of references, is
@@ -462,6 +473,9 @@ def _committed_artifacts(
     artifacts: set[str] = set()
     flows: set[str] = set()
     sources: set[str] = set()
+    source_contexts: dict[str, set[str]] = {}
+    action_tools: dict[str, str] = {}
+    action_results: dict[str, list[AuditEvent]] = {}
     for record in records:
         decoded = decode_ct_transient_facts(record)
         if decoded.kind == "absent":
@@ -490,6 +504,24 @@ def _committed_artifacts(
         action_id = record.links.get("action_id")
         if action_id:
             artifacts.add(f"action:{action_id}")
+            if record.event_type == "tool_result_produced":
+                action_results.setdefault(f"action:{action_id}", []).append(record)
+        if (record.evidence or {}).get("product_action_data") is not None:
+            action_proof = read_product_action_data(record)
+            _require(action_proof.scope_digest == snapshot.scope.scope_digest)
+            _require(
+                action_proof.runtime_binding_id == snapshot.scope.runtime_binding_id
+            )
+            action_ref = f"action:{action_proof.action_id}"
+            # An evaluate retry reuses its original policy record. Distinct
+            # Product parents cannot redefine one action's identity, even if
+            # they happen to name the same tool and descriptor.
+            _require(action_ref not in action_tools)
+            action_tools[action_ref] = product_tool_resource_identity(
+                action_proof.tool_name,
+                action_proof.tool_descriptor_digest,
+                action_proof.semantics_digest,
+            )
         for flow in bundle.flow_facts:
             _require(
                 flow.scope_digest == snapshot.scope.scope_digest and bool(flow.producer)
@@ -509,7 +541,89 @@ def _committed_artifacts(
             canonical_sha256(source.model_dump(mode="json"))
             for source in bundle.source_facts
         )
-    return artifacts, flows, sources
+        if record.event_type == "context_assembled":
+            context_ref = f"context:{authority.event_id}"
+            for source in bundle.source_facts:
+                if any(
+                    flow.source_ref == source.source_id
+                    and flow.target_ref == context_ref
+                    and flow.relation == "assembled_into"
+                    and flow.strength == "exact"
+                    and flow.origin == "observed"
+                    for flow in bundle.flow_facts
+                ):
+                    source_contexts.setdefault(
+                        canonical_sha256(source.model_dump(mode="json")), set()
+                    ).add(context_ref)
+    return artifacts, flows, sources, source_contexts, action_tools, action_results
+
+
+def _verified_action_result_source(
+    store: ControlPlaneStore,
+    records: list[AuditEvent],
+    action_ref: str,
+    event: GuardEvent,
+    snapshot: SecuritySnapshot,
+    sources: dict[str, SourceFact],
+) -> SourceFact:
+    """Authenticate one historical action's returned identity, never a new input.
+
+    Registering the observed action/result alias must not traverse its reverse
+    edge again. Its sole incoming edge and complete source are instead checked
+    against the original CT record, plus the accepted result checkpoint.
+    """
+    from .ct_projection import decode_ct_transient_facts
+
+    _require(len(records) == 1)
+    record = records[0]
+    authority = _authority(record, "tool_result_produced")
+    _same_parent(record, authority, event, snapshot)
+    action_id = record.links.get("action_id")
+    _require(bool(action_id) and action_ref == f"action:{action_id}")
+    decoded = decode_ct_transient_facts(record)
+    _require(decoded.kind == "full" and decoded.bundle is not None)
+    bundle = decoded.bundle
+    assert bundle is not None
+    _require(
+        not bundle.degradations
+        and bundle.event_id == authority.event_id
+        and bundle.scope_digest == snapshot.scope.scope_digest
+        and len(bundle.source_facts) == len(bundle.flow_facts) == 1
+    )
+    source, flow = bundle.source_facts[0], bundle.flow_facts[0]
+    _require(
+        source.source_id
+        == f"tool_result:{snapshot.scope.runtime_binding_id}:{action_id}"
+        and source.scope_digest == snapshot.scope.scope_digest
+        and source.source_type == "tool_result"
+        and source.trust == "untrusted"
+        and source.authority == "untrusted_claim"
+        and source.origin == "observed"
+        and bool(source.producer)
+        and "UNTRUSTED" in source.taints
+        and flow.source_ref == action_ref
+        and flow.target_ref == source.source_id
+        and flow.scope_digest == snapshot.scope.scope_digest
+        and flow.relation == "returned_by"
+        and flow.strength == "exact"
+        and flow.origin == "deterministic"
+        and bool(flow.producer)
+    )
+    current = sources.get(source.source_id)
+    _require(
+        current is not None
+        and canonical_sha256(current.model_dump(mode="json"))
+        == canonical_sha256(source.model_dump(mode="json"))
+    )
+    incoming = [item for item in snapshot.flows if item.target_ref == source.source_id]
+    _require(
+        len(incoming) == 1
+        and canonical_sha256(incoming[0].model_dump(mode="json"))
+        == canonical_sha256(flow.model_dump(mode="json"))
+        and set(flow.taints).issubset(source.taints)
+    )
+    _receipt(store, record, authority, snapshot)
+    return source
 
 
 def _verified_model_ancestors(
@@ -683,9 +797,14 @@ def verify_product_model_content(
             and model_source.authority == "model_judgment"
             and bool(model_source.producer)
         )
-        artifacts, committed_flows, committed_sources = _committed_artifacts(
-            store, event, snapshot
-        )
+        (
+            artifacts,
+            committed_flows,
+            committed_sources,
+            source_contexts,
+            action_tools,
+            action_results,
+        ) = _committed_artifacts(store, event, snapshot)
         _require(f"model_output:{authority.event_id}" in artifacts)
         _require(f"model_input:{input_authority.event_id}" in artifacts)
         # Follow every incoming dependency, retaining possible-control taints.
@@ -713,6 +832,17 @@ def verify_product_model_content(
             f"model_input:{input_authority.event_id}",
             *expected_refs,
         ]
+        # Prior writes to the exact current resource are dependencies, even
+        # when the current model did not copy the previous assistant turn.
+        # Seed only resources resolved from this verified tool; never expand
+        # unrelated historical models merely because they share a user source.
+        resource_anchors = {
+            resource.canonical_id
+            for kind, resource in normalized_resources
+            if kind != "memory"
+        }
+        roots.extend(sorted(resource_anchors))
+        artifacts.update(resource_anchors)
         if product_tool.tool_name == "agentguard_memory_read":
             roots.extend(
                 resource.canonical_id
@@ -723,6 +853,8 @@ def verify_product_model_content(
         active: set[str] = set()
         visited: set[str] = set()
         source_refs: set[str] = set()
+        source_context_artifacts: set[str] = set()
+        action_tool_artifacts: set[str] = set()
         memory_refs: set[str] = set()
         taints: set[TaintLabel] = set()
         _require(not snapshot.dirty_domains and len(snapshot.flows) <= 4096)
@@ -738,6 +870,15 @@ def verify_product_model_content(
             active.add(ref)
             _require(len(visited | active) <= 256)
             pending.append((ref, True))
+            if ref in action_tools:
+                action_tool_artifacts.add(action_tools[ref])
+                if ref in action_results:
+                    result_source = _verified_action_result_source(
+                        store, action_results[ref], ref, event, snapshot, sources
+                    )
+                    source_refs.add(result_source.source_id)
+                    taints.update(result_source.taints)
+                    _require(len(visited | active | source_refs) <= 256)
             source = sources.get(ref)
             if source is not None:
                 _require(
@@ -759,6 +900,16 @@ def verify_product_model_content(
                     )
                 source_refs.add(ref)
                 taints.update(source.taints)
+                # A context-produced source also has an observed assembly
+                # edge to its own original context artifact. Register that
+                # identity from the SAME immutable CT source+flow, without
+                # treating arbitrary outgoing edges or sibling inputs as
+                # dependencies of the model's selected source.
+                source_context_artifacts.update(
+                    source_contexts.get(
+                        canonical_sha256(source.model_dump(mode="json")), set()
+                    )
+                )
             if ref.startswith("memory://"):
                 memory = next(
                     (item for item in snapshot.memory_facts if item.memory_id == ref),
@@ -779,7 +930,11 @@ def verify_product_model_content(
                 if ref.startswith("credential:"):
                     taints.update(("CREDENTIAL", "SENSITIVE"))
             incoming = [flow for flow in snapshot.flows if flow.target_ref == ref]
-            if source is None and not ref.startswith(("credential:", "memory://")):
+            if (
+                source is None
+                and ref not in resource_anchors
+                and not ref.startswith(("credential:", "memory://"))
+            ):
                 _require(bool(incoming))
             for flow in incoming:
                 _require(
@@ -792,7 +947,11 @@ def verify_product_model_content(
                 pending.append((flow.source_ref, False))
         _require(expected_refs <= source_refs)
         first_write_memory_ref = None
-        artifact_refs = visited - source_refs - memory_refs
+        artifact_refs = (
+            (visited - source_refs - memory_refs)
+            | source_context_artifacts
+            | action_tool_artifacts
+        )
         for kind, normalized in normalized_resources:
             if kind == "memory":
                 memory_refs.add(normalized.canonical_id)

@@ -63,6 +63,7 @@ class ProductRuntimeHttpHarness:
     runtime_tokens: dict[str, str] = field(repr=False)
     trace_id: str = "trace:langgraph-sdk-http-contract"
     session_id: str = "session:langgraph-sdk-http-contract"
+    task_text: str = "exercise the public Product Active HTTP chain"
 
     def config(self) -> AgentGuardLangGraphConfig:
         entry = self.fixture.bundle.runtime_entry("langgraph")
@@ -80,13 +81,15 @@ class ProductRuntimeHttpHarness:
     def event(self, event_type: str = "tool_call_proposed") -> dict[str, Any]:
         # Share the seven existing public HTTP fixtures instead of inventing a
         # second event contract specifically for the SDK implementation.
-        return _event_payload(
+        event = _event_payload(
             "langgraph",
             event_type,
             self.task_id,
             trace_id=self.trace_id,
             session_id=self.session_id,
         )
+        event["security_context"]["user_task"] = self.task_text
+        return event
 
     def requests_for(self, path: str) -> list[CapturedProductRequest]:
         return [request for request in self.requests if request.path == path]
@@ -146,11 +149,17 @@ def _localhost_server(app: FastAPI) -> Iterator[str]:
 
 
 @contextmanager
-def product_runtime_http(tmp_path: Path) -> Iterator[ProductRuntimeHttpHarness]:
+def product_runtime_http(
+    tmp_path: Path,
+    *,
+    fixture: ProductActivationFixture | None = None,
+    product_tool_catalog_path: Path | None = None,
+    task_text: str = "exercise the public Product Active HTTP chain",
+) -> Iterator[ProductRuntimeHttpHarness]:
     """Seed the peer over HTTP; the tested SDK must establish its own heartbeat."""
 
     policy = PolicyBundle()
-    fixture = build_test_product_activation(
+    fixture = fixture or build_test_product_activation(
         now=datetime.now(timezone.utc),
         policy_digest=canonical_sha256(policy.model_dump(mode="json")),
     )
@@ -158,6 +167,11 @@ def product_runtime_http(tmp_path: Path) -> Iterator[ProductRuntimeHttpHarness]:
         tmp_path / "synthetic-signed-transport-authority.json", fixture
     )
     settings = product_replay_settings(activation_path, fixture)
+    settings.v21_product_tool_catalog_path = (
+        str(product_tool_catalog_path)
+        if product_tool_catalog_path is not None
+        else None
+    )
     settings.llm_approval_enabled = False
     settings.llm_approval_api_key = None
     settings.v21_semantic_enabled = False
@@ -250,6 +264,7 @@ def product_runtime_http(tmp_path: Path) -> Iterator[ProductRuntimeHttpHarness]:
                 task_id="",
                 requests=requests,
                 runtime_tokens=tokens,
+                task_text=task_text,
             )
             peer = harness.heartbeat_openclaw()
             assert peer.status_code == 200, peer.text
@@ -257,12 +272,15 @@ def product_runtime_http(tmp_path: Path) -> Iterator[ProductRuntimeHttpHarness]:
             task = client.post(
                 "/v1/tasks",
                 headers={"Authorization": "Bearer control-secret"},
-                json=_task_payload(
-                    "langgraph",
-                    fixture,
-                    trace_id=harness.trace_id,
-                    session_id=harness.session_id,
-                ),
+                json={
+                    **_task_payload(
+                        "langgraph",
+                        fixture,
+                        trace_id=harness.trace_id,
+                        session_id=harness.session_id,
+                    ),
+                    "task_text": task_text,
+                },
             )
             assert task.status_code == 200, task.text
             task_body = task.json()

@@ -13,6 +13,13 @@ dependencies = [
   "pydantic>=2.9",
 ]
 
+[project.optional-dependencies]
+native = [
+  "langgraph==1.2.7",
+  "langgraph-prebuilt==1.1.0",
+  "langchain-core==1.4.8",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["agentguard_langgraph_adapter*"]

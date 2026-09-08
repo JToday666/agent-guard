@@ -36,6 +36,7 @@ from agentguard_core import (
     DecisionAuthority,
     GuardDecision,
     GuardEvent,
+    ProductDecisionAuthorityEvidenceV1,
     legacy_approval_release_projection,
 )
 from agentguard_core.actions.canonical_json import (
@@ -65,6 +66,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .evidence import _approval_evidence, describe_guard_event
+from .competition import parse_decision_authority_evidence_payload
 from .provenance import ProvenanceWriter
 from .redaction import (
     SUMMARY_TEXT_LIMIT,
@@ -416,6 +418,17 @@ class ApprovalService:
         if scope is None:
             return False
         task_fact, audit_record = scope
+        envelope = (audit_record.evidence or {}).get("decision_authority")
+        product_authority = (
+            isinstance(
+                parse_decision_authority_evidence_payload(
+                    {"decision_authority": envelope}
+                ),
+                ProductDecisionAuthorityEvidenceV1,
+            )
+            if envelope is not None
+            else False
+        )
         if (
             binding.approval_id != approval.approval_id
             or binding.event_id != audit_record.links.get("event_id")
@@ -509,6 +522,20 @@ class ApprovalService:
                     projected = self.state_service.ensure_ready(binding.scope_digest)
                     exact_projected = any(
                         item == grant for item in projected.active_grants
+                    )
+            if exact_projected and product_authority:
+                # Grant upserts preserve arrival order; canonical replay orders
+                # approvals by their persisted identity. A second approval can
+                # therefore change the list order without changing any grant.
+                # Complete this Product writer before making its grant usable.
+                # On failure registration remains absent; consume retries the
+                # exact committed projection through this same recovery path.
+                with self.state_service.store_access.transaction(binding.scope_digest):
+                    reconciled = self.state_service.reconcile_projection_history(
+                        binding.scope_digest
+                    )
+                    exact_projected = any(
+                        item == grant for item in reconciled.active_grants
                     )
         if not exact_projected:
             return False

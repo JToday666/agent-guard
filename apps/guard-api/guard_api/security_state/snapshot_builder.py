@@ -194,14 +194,17 @@ def _require_projection_reflection(
         raise SecurityStateNotReadyError("projection_history_unbounded")
 
     applied_by_key: dict[str, str] = {}
-    for applied in state.applied_projections:
+    applied_positions: dict[str, int] = {}
+    for position, applied in enumerate(state.applied_projections):
         if applied.projection_key in applied_by_key:
             raise SecurityStateNotReadyError("projection_reflection_duplicate")
         applied_by_key[applied.projection_key] = applied.delta_digest
+        applied_positions[applied.projection_key] = position
 
     try:
         committed = []
         direct_current_digests: dict[str, set[str]] = {}
+        positioned_digests: dict[str, set[str]] = {}
         for row in rows:
             if (
                 row.scope_digest != scope_digest
@@ -242,6 +245,27 @@ def _require_projection_reflection(
                 normalized.projector_version,
             )
             committed.append(normalized)
+            if normalized_key in applied_positions:
+                # Product reconciliation can rebuild an existing prefix before
+                # CT appends another committed delta. The prefix's legitimate
+                # position digest may then differ from both its original wire
+                # and a fresh full-history canonical rebuild. Verify that exact
+                # applied position against the SAME validated persisted payload.
+                # This proves content equivalence, not historical application
+                # order: a correctly rebased permutation is also acceptable
+                # only when the complete reconstructed safety state matches.
+                position = applied_positions[normalized_key]
+                positioned = SecurityStateDeltaV21.model_validate(
+                    normalized.delta
+                ).model_copy(
+                    update={
+                        "base_state_version": position,
+                        "new_state_version": position + 1,
+                    }
+                )
+                positioned_digests.setdefault(normalized_key, set()).add(
+                    canonical_sha256(delta_digest_projection(positioned))
+                )
             if row.projector_version == PROJECTOR_VERSION:
                 direct_current_digests.setdefault(normalized_key, set()).add(raw_digest)
 
@@ -276,6 +300,7 @@ def _require_projection_reflection(
         acceptable_digests = {
             rebuilt_by_key[projection_key],
             *direct_current_digests.get(projection_key, set()),
+            *positioned_digests.get(projection_key, set()),
         }
         if applied_digest not in acceptable_digests:
             raise SecurityStateNotReadyError("projection_digest_mismatch")

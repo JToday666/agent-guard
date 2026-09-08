@@ -307,7 +307,16 @@ def build_runtime_outcome(
     )
     if parent_audit_id:
         links["parent_audit_id"] = parent_audit_id
-    approval = _approval_evidence(decision, approval_resolution)
+    approval = _approval_evidence(
+        decision,
+        approval_resolution,
+        forbidden_not_invoked=(
+            execution_status == "not_invoked"
+            and enforcement is None
+            and lease_id is None
+            and consumption_id is None
+        ),
+    )
     measured_effects = list(side_effects or [])
     disposition = result_disposition or _default_disposition(execution_status)
     action_name = _action_name(event_data)
@@ -624,8 +633,40 @@ def _approval_id(
 
 
 def _approval_evidence(
-    decision: PolicyDecision, resolution: dict[str, Any] | None
+    decision: PolicyDecision,
+    resolution: dict[str, Any] | None,
+    *,
+    forbidden_not_invoked: bool = False,
 ) -> dict[str, object]:
+    ack = decision._evaluation_activation_ack
+    authority = decision.decision_authority
+    directive = decision.approval_release_directive
+    if (
+        decision.decision == "ask"
+        and decision.approval is None
+        and resolution is None
+        and isinstance(ack, ActivationAckV1)
+        and authority is not None
+        and (authority.source, authority.mode, authority.selection_basis)
+        == ("v21", "active", "profile_all")
+        and not authority.matched_path_ids
+        and authority.activation_ref_digest == ack.activation_ref_digest
+        and directive is not None
+        and (
+            directive.mode == "not_applicable"
+            or (forbidden_not_invoked and directive.mode == "forbidden")
+        )
+        and directive.activation_ref_digest == ack.activation_ref_digest
+        and directive.capability_digest == ack.capability_digest
+    ):
+        # Product C1 may return ASK without a releasable approval. This is a
+        # blocked content decision, not an invented pending human workflow.
+        return {
+            "approval_id": None,
+            "status": "not_required",
+            "decision": None,
+            "resolved_at": None,
+        }
     if resolution is not None:
         resolution = normalize_approval_resolution(resolution)
     approval_id = _approval_id(decision, resolution)

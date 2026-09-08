@@ -114,8 +114,12 @@ dependencies = [
 requires-dist = [
     { name = "cryptography", specifier = ">=46.0.5" },
     { name = "httpx", specifier = ">=0.28" },
+    { name = "langchain-core", marker = "extra == 'native'", specifier = "==1.4.8" },
+    { name = "langgraph", marker = "extra == 'native'", specifier = "==1.2.7" },
+    { name = "langgraph-prebuilt", marker = "extra == 'native'", specifier = "==1.1.0" },
     { name = "pydantic", specifier = ">=2.9" },
 ]
+provides-extras = ["native"]
 
 [[package]]
 name = "agentguard-langgraph-bench"

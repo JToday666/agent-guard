@@ -66,6 +66,8 @@ from agentguard_core.actions.canonical_resources import (
     ResourceNormalizationInput,
     normalize_memory_resource,
 )
+from agentguard_core.decisions import DetectionResult
+from agentguard_core.events import MessageSendPayload
 from agentguard_core.security_context import (
     PROJECTOR_VERSION,
     CommittedRecord,
@@ -142,6 +144,32 @@ _CREDENTIAL_CATEGORIES = frozenset({"credential_exposure"})
 _SENSITIVE_CATEGORIES = frozenset(
     {"sensitive_file_access", "outbound_dlp", "file_exfiltration"}
 )
+
+
+def _product_message_review_only(event: GuardEvent, result: DetectionResult) -> bool:
+    """Recognize the existing detector's explicit non-sensitive review result.
+
+    This is called only for an action with a matching server Product proof.
+    Missing, contradictory or changed detector evidence stays conservative;
+    neither an adapter flag nor an ASK decision alone proves non-sensitivity.
+    """
+    payload = event.payload
+    return (
+        event.event_type == "message_send_proposed"
+        and isinstance(payload, MessageSendPayload)
+        and payload.contains_sensitive_data is False
+        and result.category == "outbound_dlp"
+        and result.rule_hit.rule_id == "P005_external_send"
+        and result.decision == "ask"
+        and result.rule_hit.evidence
+        == [
+            f"recipient={payload.recipient or 'unknown'}",
+            f"channel={payload.channel}",
+            "contains_sensitive_data=False",
+            "sensitive_text_match=False",
+        ]
+    )
+
 
 #: 结构化留痕：异常 base 回退跳过计数器（进程级观测信号，非全局
 #: 聚合——仅统计当前进程内发生的跳过，多进程部署下各进程独立计数；
@@ -814,9 +842,6 @@ class CtProjectionService:
             for result in detection_results
             if result.category in _CREDENTIAL_CATEGORIES
         ]
-        server_sensitive_evidence = any(
-            result.category in _SENSITIVE_CATEGORIES for result in detection_results
-        )
         credential_bearing_text: str | None = None
         if credential_hits:
             fragments = [
@@ -873,6 +898,18 @@ class CtProjectionService:
                 exc_info=True,
             )
             action_ir = None
+        verified_product_action = (
+            action_ir is not None
+            and materials.product_tool is not None
+            and materials.product_data is not None
+        )
+        server_sensitive_evidence = any(
+            result.category in _SENSITIVE_CATEGORIES
+            and not (
+                verified_product_action and _product_message_review_only(event, result)
+            )
+            for result in detection_results
+        )
         return FactBuildInputs(
             scope_digest=scope_digest,
             producer_identity=ProducerIdentity(),
@@ -1035,6 +1072,22 @@ class CtProjectionService:
                     )
                 ),
             )
+            if (
+                fact_builder_version == PRODUCT_FACT_BUILDER_VERSION
+                and result.outcome
+                in {
+                    "applied",
+                    "replayed_noop",
+                }
+            ):
+                # Product Phase C reconciles the policy prefix before this CT
+                # append. Finish the full post-commit boundary with the same
+                # bounded recovery primitive, under both required locks. This
+                # also includes other committed projections in the scope; CT
+                # itself does not append action facts. The next-action reader
+                # remains read-only and still rejects any content drift.
+                with self._state_service.store_access.transaction(scope_digest):
+                    self._state_service.reconcile_projection_history(scope_digest)
         logger.info(
             "ct fact projection %s for %s (state_version=%s)",
             result.outcome,
@@ -1276,8 +1329,9 @@ class CtProjectionService:
                 committed,
                 scope_digest=scope_digest,
                 verify_source_committed=(
-                    lambda _record: self._memory_binding_from_audit(audit, change)
-                    is not None
+                    lambda _record: (
+                        self._memory_binding_from_audit(audit, change) is not None
+                    )
                 ),
             )
 
@@ -1353,8 +1407,7 @@ class CtProjectionService:
                 ),
             }.get(issue, issue)
             logger.warning(
-                "ct replay projection backfill skipped for audit %s: "
-                "%s (fail-closed)",
+                "ct replay projection backfill skipped for audit %s: %s (fail-closed)",
                 audit.audit_id,
                 message,
             )
@@ -1415,6 +1468,33 @@ class CtProjectionService:
             PROJECTOR_VERSION,
         )
         if existing_projection is not None:
+            if fact_builder_version == PRODUCT_FACT_BUILDER_VERSION:
+                # The envelope can survive a crash or failed reconciliation
+                # after project_committed. Recover from persisted history,
+                # without constructing a second delta or executing the action.
+                with self._state_service.store_access.scope_lock(scope_digest):
+                    with self._state_service.store_access.transaction(scope_digest):
+                        persisted = self._state_service.store_access.get_projection(
+                            scope_digest,
+                            "runtime_observation",
+                            source_record_id,
+                            source_revision,
+                            PROJECTOR_VERSION,
+                        )
+                        if persisted is None:
+                            raise ValueError("product CT recovery projection missing")
+                        actual = SecurityStateDeltaV21.model_validate(
+                            persisted.delta_payload
+                        )
+                        expected = build_ct_facts_delta(
+                            scope_digest=scope_digest,
+                            source_record_id=source_record_id,
+                            base_state_version=actual.base_state_version,
+                            bundle=bundle,
+                        )
+                        if actual != expected:
+                            raise ValueError("product CT recovery source mismatch")
+                        self._state_service.reconcile_projection_history(scope_digest)
             return
 
         raw_commit_base = payload.get("base_state_version_at_commit")
