@@ -332,6 +332,10 @@ class AuditEvent(BaseModel):
     runtime_observation 与本地结果载体。runtime_outcome 使用严格专用模型。
     """
 
+    # Invocation observations retain the original ACK in the private encrypted
+    # envelope. The generic observation API has no public ACK metadata field.
+    _product_activation_ack: ActivationAckV1 | None = PrivateAttr(default=None)
+
     audit_id: str = Field(default_factory=lambda: new_id("audit"))
     schema_version: str = "0.4"
     record_type: AuditRecordType = "policy_evaluation"

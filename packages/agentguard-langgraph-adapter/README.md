@@ -102,13 +102,54 @@ evaluate 与 consume 通过 `X-AgentGuard-Activation-Ack` 发送 token。每个 
 ACK 的普通 dump/repr 隐藏 token，只有 `ActivationAckV1.to_wire()`、
 `header_value()` 和 `RuntimeOutcomeReceipt.to_wire()` 显式输出传输材料。
 `adapter.submit_audit_event(receipt)` 使用该专用 wire 投影；不要用普通日志或通用
-state dump 保存历史凭据。start observation 不携带原始 ACK，也不据此扩大服务端
+state dump 保存历史凭据。start observation 的私有加密 envelope 保留原始 ACK；其
+通用 HTTP observation payload 不增加公开 ACK 字段，也不据此扩大服务端
 invocation-start 验证声明。
 
-当前 `GuardedToolGateway` 拒绝 Product 配置：持久投递、熔断、统一执行模板和原生
-七事件消费者尚未全部接齐。ACK 传输和受控合同测试不构成真实 Product Active、
+当前 `GuardedToolGateway` 继续拒绝 Product 配置：统一执行模板和原生七事件消费者
+尚未接齐。ACK 传输、持久队列和受控合同测试不构成真实 Product Active、
 双 canary 或 Internal RC 资格。完整顺序见
 [双运行时实施约定](../../docs/06_delivery/product_runtime_implementation_plan.md)。
+
+## Product 加密持久投递
+
+Product 回执要求显式配置 `product_receipt_directory` 与
+`product_receipt_key_path`，两者均为绝对路径，密钥位于队列目录外。仅测试 ACK
+传输时可省略两者；省略后提交 Product 回执会失败，不能直接发送以绕过持久化。
+配置两者后，adapter 固定原始 namespace、HTTP endpoint 和凭据并启动补投线程。
+关闭 ACK 会话后仍可补投历史回执；退出时另调用 `close_product_delivery()` 释放
+队列锁。`drain_product_receipts()` 尝试已到重试时刻的待投记录，`product_delivery_status()`
+只返回计数和固定错误码，不显示 payload 或 token。
+
+每条 envelope 使用 [PyCA AESGCM](https://cryptography.io/en/stable/hazmat/primitives/aead/#cryptography.hazmat.primitives.ciphers.aead.AESGCM)
+实现 AES-256-GCM，使用独立随机 32 字节密钥和每次写入新生成的 12 字节 nonce。
+队列目录为 `0700`、文件及分离密钥为 `0600`，校验所有者、单链接、无符号链接，
+并以进程锁和原子 replace/fsync 保证单写者及持久确认。AAD 绑定稳定的 runtime、
+agent、principal、binding 和记录身份，不绑定当前 activation，历史 ACK 不会因
+候选更新或当前过期而被替换、丢弃。
+
+`adapter.submit_product_receipt()` 返回 `ProductReceiptDeliveryResult`：
+
+| 状态 | 事实 |
+| --- | --- |
+| `recorded` | 服务端明确返回 `ok=true` 且 audit ID 精确匹配 |
+| `queued_durable` | 已加密落盘，网络故障后等待有界退避补投，尚未确认入库 |
+| `permanent_rejected` | 永久 HTTP 拒绝，保留原记录并熔断 |
+| `failed` | 写盘、解密、内容冲突或无效确认等失败；阻断新副作用 |
+
+原 `submit_audit_event()`、`submit_runtime_receipt_result()` 和
+`submit_runtime_receipt()` 保留兼容返回；排队不会投影成成功。补投固定原始字节，
+不会刷新 ACK，也不会执行工具。永久失败和损坏记录不自动删除或降级直接发送。
+
+`ProductActionBarrier.begin_action()` 原子写入动作意图并确认开始回执后才返回
+不透明 ticket。开始确认失败时没有 ticket；进程重启后遇到未完成意图，保留
+执行结果未知并阻断，不能推测为未执行。`finish_action()` 先持久化终态再投递；
+终态未确认期间阻断后续副作用，重启只补投已保存的终态。完成记录转换为加密
+去重 tombstone，拒绝相同动作再次执行。该 primitive 尚未接入原生工具执行入口。
+
+所有记录（含 tombstone、永久失败和熔断记录）统一计入 10,000 条、单条 envelope
+512 KiB、总计 64 MiB 的限制；总容量预留一条最大 envelope 的原子替换空间。
+本批不自动清理去重记录，不宣称可以抵抗外部对整个队列目录的回滚。
 
 ## 验证
 
@@ -119,6 +160,7 @@ uv run pytest packages/agentguard-langgraph-adapter/tests -q
 uv run pytest packages/agentguard-langgraph-adapter/tests/test_required_runtime_receipts.py -q
 uv run pytest tests/test_openclaw_plugin_contract.py -q
 uv run pytest tests/test_langgraph_product_activation_http.py -q
+uv run pytest tests/test_langgraph_product_delivery_http.py -q
 ```
 
 靶场侧兼容性可通过：
