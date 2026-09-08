@@ -51,6 +51,8 @@ type OutcomeEnvelope = {
   createdAt: number;
   attempts: number;
   nextAttemptAt: number;
+  /** Retained evidence for an explicit negative or mismatched confirmation. */
+  permanentRejected?: true;
 };
 
 type DeliveryOptions = {
@@ -194,7 +196,7 @@ export class RuntimeOutcomeDelivery {
         );
         continue;
       }
-      if (envelope.nextAttemptAt > this.now()) {
+      if (envelope.permanentRejected || envelope.nextAttemptAt > this.now()) {
         continue;
       }
       await this.deliver(key, this.makeClient(), "runtime outcome retry");
@@ -242,7 +244,22 @@ export class RuntimeOutcomeDelivery {
     this.inFlight.add(key);
     try {
       const envelope = this.readEnvelope(key);
-      await client.submitRuntimeOutcome(envelope.receipt);
+      if (envelope.permanentRejected) return;
+      const response = await client.submitRuntimeOutcome(envelope.receipt);
+      if (
+        response.ok !== true ||
+        response.audit_id !== envelope.receipt.audit_id
+      ) {
+        this.writeEnvelope(key, { ...envelope, permanentRejected: true });
+        logDiagnostic(
+          this.config,
+          "runtime outcome confirmation rejected; record retained",
+          {
+            audit_id: envelope.receipt.audit_id,
+          },
+        );
+        return;
+      }
       removeIfPresent(join(this.spoolDirectory, key));
     } catch (error) {
       try {
@@ -333,6 +350,8 @@ function productDeliveryConfigured(config: AgentGuardPluginConfig): boolean {
     config.officialProfileId ||
     config.officialProfileDigest ||
     config.productManifestPath ||
+    config.productReceiptDirectory ||
+    config.productReceiptKeyPath ||
     config.restrictedAskReleaseEnabled,
   );
 }
@@ -358,7 +377,8 @@ function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
   ) {
     throw new Error("runtime outcome receipt is missing its strict identity");
   }
-  const leaseLinksPresent = leaseId !== undefined || consumptionId !== undefined;
+  const leaseLinksPresent =
+    leaseId !== undefined || consumptionId !== undefined;
   if (
     (leaseId === undefined) !== (consumptionId === undefined) ||
     (leaseLinksPresent &&
@@ -366,7 +386,8 @@ function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
   ) {
     throw new Error("runtime outcome receipt lease links must be paired");
   }
-  const hasLease = typeof leaseId === "string" && typeof consumptionId === "string";
+  const hasLease =
+    typeof leaseId === "string" && typeof consumptionId === "string";
   if (
     hasLease &&
     (!LEASE_IDENTIFIER.test(leaseId) || !LEASE_IDENTIFIER.test(consumptionId))
@@ -380,14 +401,18 @@ function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
       executionStatus: receipt.evidence.execution.status,
     });
   } else if (hasLease) {
-    throw new Error("runtime outcome receipt lease links require enforcement evidence");
+    throw new Error(
+      "runtime outcome receipt lease links require enforcement evidence",
+    );
   }
   const serialized = stableJson(receipt);
   if (
     /hmac-sha256:[0-9a-f]{64}/u.test(serialized) ||
     /lease-v1:[0-9a-f]{64}/u.test(serialized)
   ) {
-    throw new Error("runtime outcome receipt contains strong-binding secret material");
+    throw new Error(
+      "runtime outcome receipt contains strong-binding secret material",
+    );
   }
 }
 
@@ -403,7 +428,9 @@ function isOutcomeEnvelope(value: unknown): value is OutcomeEnvelope {
     Number.isFinite(candidate.createdAt) &&
     Number.isInteger(candidate.attempts) &&
     Number(candidate.attempts) >= 0 &&
-    Number.isFinite(candidate.nextAttemptAt)
+    Number.isFinite(candidate.nextAttemptAt) &&
+    (candidate.permanentRejected === undefined ||
+      candidate.permanentRejected === true)
   );
 }
 

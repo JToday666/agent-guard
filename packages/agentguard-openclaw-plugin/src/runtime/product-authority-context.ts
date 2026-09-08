@@ -132,6 +132,15 @@ export function hasProductReceiptCarrier(receipt: unknown): boolean {
   );
 }
 
+/** Presence check only; does not expose, deserialize, or grant any authority. */
+export function hasPrivateProductReceiptCarrier(receipt: unknown): boolean {
+  return (
+    typeof receipt === "object" &&
+    receipt !== null &&
+    receiptContexts.has(receipt)
+  );
+}
+
 /** Explicit transport conversion. Ordinary JSON and inspect never expose ACK tokens. */
 export function runtimeOutcomeToWire(
   receipt: RuntimeOutcomeReceipt,

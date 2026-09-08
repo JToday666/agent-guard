@@ -86,6 +86,8 @@ OpenClaw plugin config 示例：
 | `officialProfileId` | 未配置为空；仅接受 `agentguard-openclaw-v2-restricted`，当前注册限制保留 |
 | `officialProfileDigest` | 与 profile ID 成对配置，小写 `sha256:` + 64 位摘要 |
 | `productManifestPath` | 显式提供绝对路径；规范 JSON、文件 `0600`、父目录 `0700`，校验所有者、链接和变更 |
+| `productReceiptDirectory` | Product 回执必需的绝对路径；独立 `0700` 加密队列 |
+| `productReceiptKeyPath` | 与队列路径成对提供；队列之外的独立 `0600` 密钥，父目录 `0700` |
 | `restrictedAskReleaseEnabled` | 默认 `false`；当前配置 `true` 直接拒绝插件注册 |
 | `activationAckMaxAgeMs` | 默认 `120000`；`1..120000` 的整数，服务端更短 expiry 优先 |
 
@@ -93,9 +95,30 @@ profile 还要求可信非空 `runtimeBindingId`、`agentId` 和 `enforcementMod
 
 `GuardApiClient.startProductSession(observe)` 从本地清单加载身份和四类 inventory 预期，独立 observer 提供实际安装版本、能力和清单观察值；使用既有 heartbeat 接口。默认每 30 秒刷新，单次并发请求，ACK 最长 120 秒。`refreshProductAck`、`snapshotProductAck`、`closeProductSession` 管理会话；身份、版本、清单或 activation 漂移后阻断新动作。
 
-`evaluateProductEvent` 保存不可变 ACK；审批后的 `consumeProductExecutionLease` 刷新一次并固定请求体和 ACK，重复调用保留原消费结果。历史回执使用 evaluate 或 consume 当时的 ACK，关闭/刷新会话后仍通过原传输发送；普通 JSON、日志和 correlation state 不带 ACK token，只有显式 `runtimeOutcomeToWire` 才生成完整传输载体。旧明文 spool 明确拒绝 Product 回执，不降级直接投递；后续加密队列完成前不能启动产品动作。
+`evaluateProductEvent` 保存不可变 ACK；审批后的 `consumeProductExecutionLease` 刷新一次并固定请求体和 ACK，重复调用保留原消费结果。历史回执使用 evaluate 或 consume 当时的 ACK，关闭/刷新会话后仍通过原传输发送；普通 JSON、日志和 correlation state 不带 ACK token，只有显式 `runtimeOutcomeToWire` 才生成完整传输载体。旧明文 spool 明确拒绝 Product 回执。Product 的 `submitRuntimeOutcome` 已接入独立加密队列，缺少路径或写盘失败会返回失败，不会直接发送。
 
 Node 与真实 Guard API 的 HTTP 契约测试使用实际构建的 SDK 和 pinned Host 包，测试专用副本采用合成 RC metadata；不修改生产版本检查，不构成候选签署、真实宿主副作用或 Product Active 验收。OpenClaw 保持 restricted allow_once、五项残余边界、`C3=false` 和 `CF-13=NOT_SUPPORTED`。
+
+### Product 加密持久回执
+
+`GuardApiClient.openProductDelivery()` 从受保护清单读取稳定的 runtime、agent、principal 和 binding 身份，打开独立队列并启动补投。`submitProductReceipt(receipt)` 返回明确的投递状态；兼容的 `submitRuntimeOutcome(receipt)` 只有在 `recorded` 时返回 `ok:true`，并附带 `delivery_status`。原始 payload 在异步初始化之前固定，后续调用者修改对象不会改变已提交证据。
+
+| 状态 | 含义与动作边界 |
+| --- | --- |
+| `recorded` | 服务端返回 `ok:true` 且 audit ID 精确匹配 |
+| `queued_durable` | 原字节已持久化，网络、408/429/5xx 按有界退避补投；不等于服务端确认 |
+| `permanent_rejected` | 包括 409/422 的永久拒绝保留原记录，并打开 breaker |
+| `failed` | 写盘、解密、内容冲突、格式或确认错误；阻断新动作 |
+
+`delivery.status()` 仅返回计数和固定错误码；`delivery.drain()` 尝试已到重试时刻的记录。ACK 会话关闭不影响历史补投；结束队列时另外调用 `closeProductDelivery()`。每次 HTTP 尝试使用原 endpoint、token 和原 wire，禁止重定向，不添加当前 ACK header，也不重建实时授权 handle。历史 reader 检查原 ACK 的结构与发行窗口；HMAC、原 policy/lease 的时间和授权归属仍由既有 Guard API 校验，不能因为当前过期而丢弃。
+
+存储使用 Node 内置 [AES-GCM](https://nodejs.org/docs/latest-v24.x/api/crypto.html#class-cipheriv)：32-byte 独立密钥、每次写入随机 12-byte nonce、完整认证标签、绑定稳定身份和记录 revision 的 AAD。加密 envelope 为 `0600`，写入和原子替换均 fsync；密钥不在队列目录内。回执、动作、breaker 和完成 tombstone 共同计入 10,000 条、单条 512 KiB、总计 64 MiB，大小按实际编码文件计算，并预留一条最大 envelope 的原子替换空间。完成 tombstone 不自动清理，避免重复动作重新获得权限；不声称抵抗整个受保护目录的跨进程回滚。
+
+本轮存储针对 Linux 固定隔离 profile，使用 [抽象 Unix socket](https://nodejs.org/docs/latest-v24.x/api/net.html#ipc-support) 保证单进程所有权，并将 boot ID、network namespace 和队列 inode 固定在私有 owner anchor 中。进程退出后内核释放锁，同一 boot/namespace 的进程重启可以补投。主机重启、切换 namespace 或复制队列到其他 inode 会拒绝自动恢复；禁止删除、改写 anchor 或抢占已有锁来绕过此约束。其他平台不能启用这个 Product 存储。
+
+`prepareAction` / `releaseAction` 只持久记录 gate 与交回宿主的许可，不生成 invocation-start HTTP。`finishAction` 接收实际 after hook 的终态并先持久化；终态未确认期间不能释放下个动作。没有 after 的记录在重启后保持 unknown 并打开 breaker，恢复不生成 ticket、不重新执行工具。真实 hook 接线属于后续动作链批次，当前插件注册仍关闭。
+
+旧 `RuntimeOutcomeDelivery` 已修复负确认或错误 audit ID 导致删除的问题，永久失败会保留并停止自动重试。旧 hook 的写盘回退和 `receiptQueued` 状态还不具备 Product 保证，将在动作链接线时处理；Product 回执不能进入旧队列。
 
 ## Windows 支持
 

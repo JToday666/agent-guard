@@ -1,5 +1,5 @@
 import { isIP } from "node:net";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 
 import {
   OPENCLAW_REQUIRED_HOOK_COUNT,
@@ -24,8 +24,16 @@ import {
   evaluationActivationAck,
   runtimeOutcomeToWire,
   hasProductReceiptCarrier,
+  hasPrivateProductReceiptCarrier,
 } from "./runtime/product-authority-context.js";
 import { readOpenClawProductEvaluation } from "./runtime/product-evaluation.js";
+import { captureProductReceiptWire } from "./runtime/product-receipt-wire.js";
+import {
+  productReceiptCompatibilityResponse,
+  type ProductReceiptDeliveryResult,
+  type ProductReceiptTransportResult,
+} from "./runtime/product-delivery.js";
+import type { OpenClawProductReceiptOutbox } from "./runtime/product-receipt-outbox.js";
 import type {
   AgentGuardPluginConfig,
   AdapterHeartbeatInput,
@@ -269,6 +277,8 @@ export type AuditSubmitResponse = {
   audit_id: string;
   created?: boolean;
   idempotent_replay?: boolean;
+  delivery_status?: ProductReceiptDeliveryResult["status"];
+  error?: string;
 };
 
 /** decisionToToolResult / decisionToMessageResult 回传给调用方的运行时结果通知。 */
@@ -283,6 +293,8 @@ export class GuardApiClient {
   #sessionCreation: Promise<OpenClawActivationSession> | undefined;
   #productClosed = false;
   #productAbort = new AbortController();
+  #productDelivery: Promise<OpenClawProductReceiptOutbox> | undefined;
+  #productDeliveryClosed = false;
   #consumptions = new WeakMap<
     GuardEvaluationResponse,
     Promise<ExecutionLeaseReference>
@@ -309,6 +321,8 @@ export class GuardApiClient {
       this.#config.officialProfileId ||
       this.#config.officialProfileDigest ||
       this.#config.productManifestPath ||
+      this.#config.productReceiptDirectory ||
+      this.#config.productReceiptKeyPath ||
       this.#config.restrictedAskReleaseEnabled,
     );
   }
@@ -387,9 +401,9 @@ export class GuardApiClient {
     this.#session?.close();
   }
 
-  private assertProductConfiguration(): void {
+  private assertProductConfiguration(historicalDelivery = false): void {
     const config = this.#config;
-    if (this.#productClosed)
+    if (this.#productClosed && !historicalDelivery)
       throw new OpenClawProductActivationError("session_closed");
     if (
       !this.productEnabled ||
@@ -492,19 +506,24 @@ export class GuardApiClient {
 
   /**
    * 提交 runtime_outcome 回执（复用 POST /v1/audit/events，不新增端点）。
-   * 回执是 fire-and-forget：永久 4xx 只记诊断，网络、429 与 5xx
-   * 交给持久化投递队列重试，均不改变已经完成的运行时处置。
+   * Product 使用 required encrypted delivery；兼容返回仅 recorded 为 ok:true。
+   * 旧路径保留永久 4xx 的 ok:false 返回，旧队列不能把它当成确认。
    */
   async submitRuntimeOutcome(
     event: RuntimeOutcomeReceipt,
   ): Promise<AuditSubmitResponse> {
+    if (this.productEnabled || hasProductReceiptCarrier(event)) {
+      if (!hasPrivateProductReceiptCarrier(event))
+        throw new OpenClawProductActivationError("receipt_ack_context_missing");
+      captureProductReceiptWire(event);
+      return productReceiptCompatibilityResponse(
+        await this.submitProductReceipt(event),
+      );
+    }
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
 
-    if (this.productEnabled && !hasProductReceiptCarrier(event)) {
-      throw new OpenClawProductActivationError("receipt_ack_context_missing");
-    }
     const wire = runtimeOutcomeToWire(event);
 
     try {
@@ -535,6 +554,224 @@ export class GuardApiClient {
         };
       }
       throw error;
+    }
+  }
+
+  /** Lifecycle of the encrypted queue is independent from the current ACK. */
+  async openProductDelivery(): Promise<OpenClawProductReceiptOutbox> {
+    if (this.#productDeliveryClosed)
+      throw new OpenClawProductActivationError("product_delivery_closed");
+    if (!this.#productDelivery) {
+      this.#productDelivery = (async () => {
+        this.assertProductConfiguration(true);
+        validateProductReceiptPaths(this.#config, true);
+        const manifest = await OpenClawProductManifest.fromFile(
+          this.#config.productManifestPath!,
+        );
+        if (
+          manifest.data.agent_id !== this.#config.agentId ||
+          manifest.data.runtime_binding_id !== this.#config.runtimeBindingId ||
+          manifest.data.profile_id !== this.#config.officialProfileId ||
+          manifest.data.profile_digest !== this.#config.officialProfileDigest
+        )
+          throw new OpenClawProductActivationError(
+            "configuration_identity_mismatch",
+          );
+        const { OpenClawProductEnvelopeStore } =
+          await import("./runtime/product-envelope-store.js");
+        const { OpenClawProductReceiptOutbox } =
+          await import("./runtime/product-receipt-outbox.js");
+        const store = await OpenClawProductEnvelopeStore.open({
+          directory: this.#config.productReceiptDirectory!,
+          keyPath: this.#config.productReceiptKeyPath!,
+          namespace: {
+            runtime: "openclaw",
+            agentId: manifest.data.agent_id,
+            principalId: manifest.data.principal_id,
+            runtimeBindingId: manifest.data.runtime_binding_id,
+          },
+        });
+        try {
+          if (this.#productDeliveryClosed)
+            throw new OpenClawProductActivationError("product_delivery_closed");
+          const delivery = new OpenClawProductReceiptOutbox({
+            store,
+            sendReceipt: (wire) => this.submitProductReceiptWire(wire),
+          });
+          delivery.start();
+          return delivery;
+        } catch {
+          await store.close();
+          throw new OpenClawProductActivationError(
+            "product_delivery_unavailable",
+          );
+        }
+      })();
+    }
+    return this.#productDelivery;
+  }
+
+  async closeProductDelivery(): Promise<void> {
+    this.#productDeliveryClosed = true;
+    if (this.#productDelivery) {
+      try {
+        await (await this.#productDelivery).close();
+      } catch {
+        /* Initialization already failed closed; no live queue exists. */
+      }
+    }
+  }
+
+  async submitProductReceipt(
+    event: RuntimeOutcomeReceipt,
+  ): Promise<ProductReceiptDeliveryResult> {
+    try {
+      if (!hasProductReceiptCarrier(event))
+        throw new OpenClawProductActivationError("receipt_ack_context_missing");
+      const wire = captureProductReceiptWire(event);
+      return await (
+        await this.openProductDelivery()
+      ).submitHistoricalWire(wire);
+    } catch {
+      return { status: "failed", errorCode: "product_delivery_unavailable" };
+    }
+  }
+
+  /** One bounded HTTP attempt using immutable original UTF-8 bytes and no live ACK. */
+  async submitProductReceiptWire(
+    wire: string,
+  ): Promise<ProductReceiptTransportResult> {
+    let auditId: string;
+    try {
+      this.assertProductConfiguration(true);
+      if (
+        !Number.isSafeInteger(this.#config.requestTimeoutMs) ||
+        this.#config.requestTimeoutMs < 1 ||
+        this.#config.requestTimeoutMs > 600_000
+      )
+        throw new Error();
+      if (
+        typeof wire !== "string" ||
+        Buffer.byteLength(wire, "utf8") > 512 * 1024
+      )
+        throw new Error();
+      const value: unknown = JSON.parse(wire);
+      if (
+        !isRecord(value) ||
+        value.record_type !== "runtime_outcome" ||
+        value.runtime !== "openclaw" ||
+        typeof value.audit_id !== "string" ||
+        value.audit_id.length < 1 ||
+        value.audit_id.length > 256 ||
+        !isRecord(value.metadata) ||
+        value.metadata.agent_id !== this.#config.agentId ||
+        !isRecord(value.metadata.activation_ack) ||
+        value.metadata.activation_ack.runtime_binding_id !==
+          this.#config.runtimeBindingId
+      )
+        throw new Error();
+      auditId = value.audit_id;
+    } catch {
+      return { status: "failed", errorCode: "receipt_transport_invalid" };
+    }
+    const controller = new AbortController();
+    const deadline = performance.now() + this.#config.requestTimeoutMs;
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.#config.requestTimeoutMs,
+    );
+    let abortListener: () => void;
+    const aborted = new Promise<never>((_resolve, reject) => {
+      abortListener = () => reject(new GuardApiResponseError("timed_out"));
+      controller.signal.addEventListener("abort", abortListener, {
+        once: true,
+      });
+    });
+    let httpStatus: number | undefined;
+    try {
+      const response = await Promise.race([
+        this.#fetchImpl(
+          `${trimTrailingSlash(this.#config.guardApiBaseUrl)}/v1/audit/events`,
+          {
+            method: "POST",
+            body: wire,
+            redirect: "manual",
+            signal: controller.signal,
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${this.#config.adapterToken}`,
+            },
+          },
+        ),
+        aborted,
+      ]);
+      httpStatus = response.status;
+      if (controller.signal.aborted || performance.now() >= deadline)
+        throw new GuardApiResponseError("timed_out");
+      if (httpStatus === 408 || httpStatus === 429 || httpStatus >= 500) {
+        controller.abort();
+        return {
+          status: "retryable",
+          auditId,
+          httpStatus,
+          errorCode: "http_retryable",
+        };
+      }
+      if (httpStatus >= 300) {
+        controller.abort();
+        return {
+          status: "permanent_rejected",
+          auditId,
+          httpStatus,
+          errorCode: "http_permanent_rejection",
+        };
+      }
+      if (httpStatus < 200)
+        return {
+          status: "failed",
+          auditId,
+          httpStatus,
+          errorCode: "receipt_response_invalid",
+        };
+      const body = await readBoundedJsonResponse(
+        response,
+        controller.signal,
+        aborted,
+      );
+      if (controller.signal.aborted || performance.now() >= deadline)
+        throw new GuardApiResponseError("timed_out");
+      if (
+        !isRecord(body) ||
+        body.ok !== true ||
+        body.audit_id !== auditId ||
+        "skipped" in body
+      )
+        return {
+          status: "failed",
+          auditId,
+          httpStatus,
+          errorCode: "receipt_confirmation_invalid",
+        };
+      return { status: "recorded", auditId, httpStatus };
+    } catch (error) {
+      const retryable =
+        controller.signal.aborted ||
+        error instanceof TypeError ||
+        (error instanceof GuardApiResponseError &&
+          error.failure === "timed_out");
+      return {
+        status: retryable ? "retryable" : "failed",
+        auditId,
+        httpStatus,
+        errorCode: retryable
+          ? "receipt_transport_unavailable"
+          : "receipt_response_invalid",
+      };
+    } finally {
+      clearTimeout(timeout);
+      controller.signal.removeEventListener("abort", abortListener!);
+      controller.abort();
     }
   }
 
@@ -1104,6 +1341,8 @@ export function buildPluginConfig(
     "officialProfileId",
     "officialProfileDigest",
     "productManifestPath",
+    "productReceiptDirectory",
+    "productReceiptKeyPath",
     "restrictedAskReleaseEnabled",
     "activationAckMaxAgeMs",
   ];
@@ -1115,7 +1354,10 @@ export function buildPluginConfig(
   const hasProfile =
     hasField("officialProfileId") ||
     hasField("officialProfileDigest") ||
-    hasField("productManifestPath");
+    hasField("productManifestPath") ||
+    hasField("productReceiptDirectory") ||
+    hasField("productReceiptKeyPath");
+  validateProductReceiptPaths(input ?? {});
   if (
     hasField("productManifestPath") &&
     (typeof input?.productManifestPath !== "string" ||
@@ -1201,6 +1443,12 @@ export function buildPluginConfig(
     ...(input?.productManifestPath === undefined
       ? {}
       : { productManifestPath: input.productManifestPath }),
+    ...(input?.productReceiptDirectory === undefined
+      ? {}
+      : { productReceiptDirectory: input.productReceiptDirectory }),
+    ...(input?.productReceiptKeyPath === undefined
+      ? {}
+      : { productReceiptKeyPath: input.productReceiptKeyPath }),
     restrictedAskReleaseEnabled: false,
     activationAckMaxAgeMs:
       input?.activationAckMaxAgeMs ?? DEFAULT_CONFIG.activationAckMaxAgeMs,
@@ -1226,6 +1474,37 @@ export function buildPluginConfig(
     );
   }
   return config;
+}
+
+export function validateProductReceiptPaths(
+  config: {
+    productReceiptDirectory?: unknown;
+    productReceiptKeyPath?: unknown;
+  },
+  required = false,
+): void {
+  const directory = config.productReceiptDirectory;
+  const keyPath = config.productReceiptKeyPath;
+  if (!required && directory === undefined && keyPath === undefined) return;
+  if (
+    typeof directory !== "string" ||
+    !directory ||
+    !isAbsolute(directory) ||
+    typeof keyPath !== "string" ||
+    !keyPath ||
+    !isAbsolute(keyPath)
+  )
+    throw new OpenClawProductActivationError("product_receipt_paths_invalid");
+  const keyRelative = relative(directory, keyPath);
+  if (
+    keyRelative === "" ||
+    (!isAbsolute(keyRelative) &&
+      keyRelative !== ".." &&
+      !keyRelative.startsWith(`..${sep}`))
+  )
+    throw new OpenClawProductActivationError(
+      "product_receipt_key_not_separate",
+    );
 }
 
 export async function decisionToToolResult(

@@ -93,16 +93,7 @@ export function readOpenClawActivationAck(
     "invalid_expected_identity",
   );
   validateIdentity(identity, "invalid_expected_identity");
-  const ack = readDataObject(value, ACK_FIELDS, "invalid_response");
-  validateIdentity(ack, "invalid_response");
-  if (
-    ack.schema_version !== "1.0" ||
-    ack.runtime !== "openclaw" ||
-    typeof ack.ack_token !== "string" ||
-    !TOKEN.test(ack.ack_token)
-  ) {
-    fail("invalid_response");
-  }
+  const ack = readHistoricalOpenClawActivationAck(value);
   for (const field of IDENTITY_FIELDS) {
     if (ack[field] !== identity[field]) {
       fail("identity_mismatch");
@@ -115,12 +106,6 @@ export function readOpenClawActivationAck(
   if (issuedAt === null || expiresAt === null) {
     fail("invalid_response");
   }
-  if (
-    expiresAt <= issuedAt ||
-    expiresAt - issuedAt > BigInt(MAX_AGE_MS) * NS_PER_MS
-  ) {
-    fail("invalid_validity_window");
-  }
   const now = BigInt(clock.nowMs) * NS_PER_MS;
   if (now < issuedAt) {
     fail("not_yet_valid");
@@ -132,6 +117,36 @@ export function readOpenClawActivationAck(
     fail("too_old");
   }
   // readDataObject already copied all own data fields into a fresh object.
+  return Object.freeze(ack) as Readonly<OpenClawActivationAckV1>;
+}
+
+/**
+ * Historical wire validation only: no current clock, current activation, HMAC
+ * verification, or permission to invoke. The server checks the original policy
+ * or lease anchor. This raw credential must remain in private transport/storage.
+ */
+export function readHistoricalOpenClawActivationAck(
+  value: unknown,
+): Readonly<OpenClawActivationAckV1> {
+  const ack = readDataObject(value, ACK_FIELDS, "invalid_response");
+  validateIdentity(ack, "invalid_response");
+  if (
+    ack.schema_version !== "1.0" ||
+    ack.runtime !== "openclaw" ||
+    typeof ack.ack_token !== "string" ||
+    !TOKEN.test(ack.ack_token)
+  ) {
+    fail("invalid_response");
+  }
+  const issuedAt = rfc3339Nanoseconds(ack.issued_at);
+  const expiresAt = rfc3339Nanoseconds(ack.expires_at);
+  if (issuedAt === null || expiresAt === null) fail("invalid_response");
+  if (
+    expiresAt <= issuedAt ||
+    expiresAt - issuedAt > BigInt(MAX_AGE_MS) * NS_PER_MS
+  ) {
+    fail("invalid_validity_window");
+  }
   return Object.freeze(ack) as Readonly<OpenClawActivationAckV1>;
 }
 
