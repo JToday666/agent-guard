@@ -46,6 +46,8 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "officialProfileDigest",
     "officialProfileId",
     "productManifestPath",
+    "productReceiptDirectory",
+    "productReceiptKeyPath",
     "requestTimeoutMs",
     "restrictedAskReleaseEnabled",
     "runtimeBindingId",
@@ -103,6 +105,10 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
   assert.equal(properties.officialProfileDigest.type, "string");
   assert.equal(properties.productManifestPath.type, "string");
   assert.equal(properties.productManifestPath.minLength, 1);
+  for (const field of ["productReceiptDirectory", "productReceiptKeyPath"]) {
+    assert.equal(properties[field].type, "string");
+    assert.equal(properties[field].minLength, 1);
+  }
   assert.equal(Object.hasOwn(properties.productManifestPath, "default"), false);
   assert.equal(
     properties.officialProfileDigest.pattern,
@@ -118,6 +124,8 @@ test("manifest exposes one strict config surface and a SecretRef token", async (
     "officialProfileDigest",
     "restrictedAskReleaseEnabled",
     "productManifestPath",
+    "productReceiptDirectory",
+    "productReceiptKeyPath",
     "activationAckMaxAgeMs",
   ]) {
     assert.equal(
@@ -161,6 +169,8 @@ test("pinned Host schema hydration does not manufacture migration conflicts", as
     "officialProfileDigest",
     "restrictedAskReleaseEnabled",
     "productManifestPath",
+    "productReceiptDirectory",
+    "productReceiptKeyPath",
     "activationAckMaxAgeMs",
   ];
   const cases = [

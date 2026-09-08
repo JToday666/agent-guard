@@ -99,6 +99,42 @@ async function pendingFiles(spoolDirectory) {
   );
 }
 
+for (const confirmation of [
+  { ok: false, audit_id: "audit_outcome_event_001_pre_execution_deny" },
+  { ok: true, audit_id: "wrong-audit-id" },
+  { ok: "true", audit_id: "audit_outcome_event_001_pre_execution_deny" },
+]) {
+  test(`negative or mismatched confirmation stays durable across restart: ${JSON.stringify(confirmation)}`, async () => {
+    await withSpool(async (spoolDirectory) => {
+      let attempts = 0;
+      const client = {
+        async submitRuntimeOutcome() {
+          attempts++;
+          return confirmation;
+        },
+      };
+      const options = { spoolDirectory, config, makeClient: () => client };
+      await new RuntimeOutcomeDelivery(options).submit(
+        receipt(),
+        client,
+        "test",
+      );
+      const files = await pendingFiles(spoolDirectory);
+      assert.equal(files.length, 1);
+      const stored = JSON.parse(
+        await readFile(join(spoolDirectory, files[0]), "utf8"),
+      );
+      assert.equal(stored.permanentRejected, true);
+      assert.deepEqual(stored.receipt, receipt());
+      const restored = new RuntimeOutcomeDelivery(options);
+      await restored.drain();
+      await restored.submit(receipt(), client, "duplicate");
+      assert.equal(attempts, 1);
+      assert.deepEqual(await pendingFiles(spoolDirectory), files);
+    });
+  });
+}
+
 test("runtime outcome delivery persists before submitting and removes on success", async () => {
   await withSpool(async (spoolDirectory) => {
     let pendingDuringSubmit = 0;

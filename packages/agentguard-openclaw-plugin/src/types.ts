@@ -14,6 +14,9 @@ export type AgentGuardPluginConfig = {
   officialProfileDigest: string;
   /** Protected local Product identity/inventory manifest; never supplied by the API. */
   productManifestPath?: string;
+  /** Product receipts use a separate encrypted queue and a key outside it. */
+  productReceiptDirectory?: string;
+  productReceiptKeyPath?: string;
   restrictedAskReleaseEnabled: boolean;
   activationAckMaxAgeMs: number;
   /** Trusted local provisioning value; never learned from Guard API output. */
@@ -36,6 +39,8 @@ export type OpenClawPluginConfigInput =
       officialProfileId?: string;
       officialProfileDigest?: string;
       productManifestPath?: string;
+      productReceiptDirectory?: string;
+      productReceiptKeyPath?: string;
       restrictedAskReleaseEnabled?: boolean;
       activationAckMaxAgeMs?: number;
       runtimeBindingId?: string;
@@ -197,19 +202,13 @@ export type DecisionAuthorityProjection = {
   matched_path_ids: string[];
   legacy_floor_applied: boolean;
   activation_ref_digest: string;
-  approval_release:
-    | "not_applicable"
-    | "strong_binding_required"
-    | "forbidden";
+  approval_release: "not_applicable" | "strong_binding_required" | "forbidden";
 };
 
 export type ApprovalReleaseDirectiveV2 = {
   schema_version: "2.0";
   mode:
-    | "not_applicable"
-    | "forbidden"
-    | "strong_binding"
-    | "restricted_allow_once";
+    "not_applicable" | "forbidden" | "strong_binding" | "restricted_allow_once";
   required_runtime_profile: "C1" | "C3" | null;
   human_only: true;
   single_use: true;
@@ -253,11 +252,7 @@ export type EnforcementGateState =
   | "binding_failed";
 
 export type BindingCheckStatus =
-  | "not_applicable"
-  | "not_performed"
-  | "passed"
-  | "failed"
-  | "unknown";
+  "not_applicable" | "not_performed" | "passed" | "failed" | "unknown";
 
 export type LeaseConsumeOutcome =
   | "not_applicable"
@@ -430,7 +425,10 @@ export type RuntimeOutcomeReceipt = Omit<
     outcome_kind: RuntimeReceiptKind;
     /** Public ACK projection only; the credential is held in a private carrier. */
     activation_ack?: Readonly<
-      Omit<import("./runtime/activation-ack.js").OpenClawActivationAckV1, "ack_token">
+      Omit<
+        import("./runtime/activation-ack.js").OpenClawActivationAckV1,
+        "ack_token"
+      >
     >;
   };
   evidence: {

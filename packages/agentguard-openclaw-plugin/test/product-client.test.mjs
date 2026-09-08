@@ -15,7 +15,8 @@ const synthetic = await createSyntheticProductPackage({
 });
 const moduleUrl = (relative) =>
   pathToFileURL(join(synthetic.packageRoot, "dist", relative)).href;
-const { GuardApiClient } = await import(synthetic.clientModuleUrl);
+const { GuardApiClient, buildPluginConfig, validateProductReceiptPaths } =
+  await import(synthetic.clientModuleUrl);
 const { OpenClawProductManifest, readOpenClawProductRuntimeObservation } =
   await import(synthetic.manifestModuleUrl);
 const { readOpenClawProductEvaluation } = await import(
@@ -260,6 +261,8 @@ async function fixture(t, handler = () => undefined) {
     officialProfileId: payload().profile_id,
     officialProfileDigest: payload().profile_digest,
     productManifestPath: path,
+    productReceiptDirectory: join(root, "receipts"),
+    productReceiptKeyPath: join(root, "keys", "receipt.key"),
     restrictedAskReleaseEnabled: false,
     activationAckMaxAgeMs: 120_000,
     runtimeBindingId: payload().runtime_binding_id,
@@ -276,6 +279,7 @@ async function fixture(t, handler = () => undefined) {
         path: new URL(url).pathname,
         init,
         body: init.body ? JSON.parse(init.body) : undefined,
+        signalAbortedAtSend: init.signal?.aborted,
       };
       requests.push(request);
       const intercepted = await handler(request);
@@ -311,7 +315,10 @@ async function fixture(t, handler = () => undefined) {
       assert.fail("Unexpected transport fixture route");
     },
   });
-  t.after(() => client.closeProductSession());
+  t.after(async () => {
+    client.closeProductSession();
+    await client.closeProductDelivery();
+  });
   const observed = readOpenClawProductRuntimeObservation(observation());
   return {
     client,
@@ -791,7 +798,7 @@ test("frozen original transport preserves historical ACK after refresh, config m
     "Bearer original-adapter-token",
   );
   assert.equal(request.body.metadata.activation_ack.ack_token, TOKEN_A);
-  assert.equal(request.init.signal.aborted, false);
+  assert.equal(request.signalAbortedAtSend, false);
   assert.deepEqual(
     request.body.metadata.activation_ack,
     runtimeOutcomeToWire(receipt).metadata.activation_ack,
@@ -822,4 +829,204 @@ test("official submit rejects missing private history before any HTTP", async (t
     code("receipt_ack_context_missing"),
   );
   assert.equal(env.requests.length, count);
+});
+
+test("Product submission freezes original wire before async queue initialization", async (t) => {
+  const env = await fixture(t);
+  await env.start();
+  const input = event();
+  const { evaluation } = await env.client.evaluateProductEvent(input);
+  const receipt = buildRuntimeOutcomeAuditEvent(
+    input,
+    evaluation,
+    "pre_execution_deny",
+  );
+  const original = restrictedCanonicalJson(runtimeOutcomeToWire(receipt));
+  const pending = env.client.submitRuntimeOutcome(receipt);
+  receipt.reason = "mutated while opening queue";
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.equal(result.delivery_status, "recorded");
+  assert.equal(env.requests.at(-1).init.body, original);
+});
+
+test("Product without required durable paths returns failed and makes no audit HTTP", async (t) => {
+  const env = await fixture(t);
+  await env.start();
+  const input = event();
+  const { evaluation } = await env.client.evaluateProductEvent(input);
+  const receipt = buildRuntimeOutcomeAuditEvent(
+    input,
+    evaluation,
+    "pre_execution_deny",
+  );
+  const config = { ...env.config };
+  delete config.productReceiptDirectory;
+  delete config.productReceiptKeyPath;
+  let calls = 0;
+  const client = new GuardApiClient({
+    config,
+    fetchImpl: async () => {
+      calls++;
+      throw new Error();
+    },
+  });
+  t.after(() => client.closeProductDelivery());
+  const result = await client.submitRuntimeOutcome(receipt);
+  assert.equal(result.ok, false);
+  assert.equal(result.delivery_status, "failed");
+  assert.equal(calls, 0);
+});
+
+for (const [status, body, expected] of [
+  [200, "confirmed", "recorded"],
+  [201, "confirmed", "recorded"],
+  [204, null, "failed"],
+  [200, { ok: false }, "failed"],
+  [200, { ok: true, audit_id: "wrong" }, "failed"],
+  [200, { ok: "true" }, "failed"],
+  [200, "skipped", "failed"],
+  [200, "malformed", "failed"],
+  [200, "oversized", "failed"],
+  [301, "malformed", "permanent_rejected"],
+  [401, "malformed", "permanent_rejected"],
+  [403, "malformed", "permanent_rejected"],
+  [409, "malformed", "permanent_rejected"],
+  [422, "oversized", "permanent_rejected"],
+  [408, "malformed", "retryable"],
+  [429, "malformed", "retryable"],
+  [503, "oversized", "retryable"],
+]) {
+  test(`Product typed audit transport classifies ${status}/${body?.ok ?? body}`, async (t) => {
+    const env = await fixture(t, (request) => {
+      if (request.path !== "/v1/audit/events") return;
+      const responseBody =
+        body === "confirmed"
+          ? JSON.stringify({ ok: true, audit_id: request.body.audit_id })
+          : body === "skipped"
+            ? JSON.stringify({
+                ok: true,
+                audit_id: request.body.audit_id,
+                skipped: false,
+              })
+            : body === "malformed"
+              ? "not JSON"
+              : body === "oversized"
+                ? "x".repeat(1024 * 1024 + 1)
+                : body === null
+                  ? null
+                  : JSON.stringify(body);
+      return new Response(responseBody, { status });
+    });
+    await env.start();
+    const input = event();
+    const { evaluation } = await env.client.evaluateProductEvent(input);
+    const receipt = buildRuntimeOutcomeAuditEvent(
+      input,
+      evaluation,
+      "pre_execution_deny",
+    );
+    const original = restrictedCanonicalJson(runtimeOutcomeToWire(receipt));
+    const count = env.requests.length;
+    env.client.closeProductSession();
+    const result = await env.client.submitProductReceiptWire(original);
+    assert.equal(result.status, expected);
+    assert.equal(result.auditId, receipt.audit_id);
+    assert.equal(result.httpStatus, status);
+    assert.equal(env.requests.length, count + 1);
+    const request = env.requests.at(-1);
+    assert.equal(request.init.body, original);
+    assert.equal(request.init.redirect, "manual");
+    assert.equal(request.signalAbortedAtSend, false);
+    assert.equal(
+      request.init.headers["X-AgentGuard-Activation-Ack"],
+      undefined,
+    );
+    assert.equal(JSON.stringify(result).includes(TOKEN_A), false);
+    assert.equal(JSON.stringify(result).includes("not JSON"), false);
+  });
+}
+
+for (const fault of ["network", "timeout", "unexpected"]) {
+  test(`Product typed audit transport is bounded and private: ${fault}`, async (t) => {
+    const env = await fixture(t, (request) => {
+      if (request.path !== "/v1/audit/events") return;
+      if (fault === "network") throw new TypeError(`network ${TOKEN_A}`);
+      if (fault === "unexpected") throw new Error(`unexpected ${TOKEN_A}`);
+      return new Promise(() => {});
+    });
+    await env.start();
+    const input = event();
+    const { evaluation } = await env.client.evaluateProductEvent(input);
+    const receipt = buildRuntimeOutcomeAuditEvent(
+      input,
+      evaluation,
+      "pre_execution_deny",
+    );
+    const result = await bounded(
+      env.client.submitProductReceiptWire(
+        restrictedCanonicalJson(runtimeOutcomeToWire(receipt)),
+      ),
+    );
+    assert.equal(
+      result.status,
+      fault === "unexpected" ? "failed" : "retryable",
+    );
+    assert.equal(
+      env.requests.filter((request) => request.path === "/v1/audit/events")
+        .length,
+      1,
+    );
+    assert.equal(inspect(result).includes(TOKEN_A), false);
+  });
+}
+
+test("Product receipt paths are paired, absolute, separate and keep registration fused", () => {
+  validateProductReceiptPaths({});
+  validateProductReceiptPaths(
+    {
+      productReceiptDirectory: "/tmp/queue",
+      productReceiptKeyPath: "/tmp/keys/receipt.key",
+    },
+    true,
+  );
+  for (const paths of [
+    {},
+    { productReceiptDirectory: "/tmp/queue" },
+    { productReceiptKeyPath: "/tmp/key" },
+    { productReceiptDirectory: "queue", productReceiptKeyPath: "/tmp/key" },
+    {
+      productReceiptDirectory: "/tmp/queue",
+      productReceiptKeyPath: "/tmp/queue/key",
+    },
+    {
+      productReceiptDirectory: "/tmp/queue",
+      productReceiptKeyPath: "/tmp/queue",
+    },
+    { productReceiptDirectory: null, productReceiptKeyPath: "/tmp/key" },
+  ])
+    assert.throws(() => validateProductReceiptPaths(paths, true));
+  assert.throws(
+    () =>
+      buildPluginConfig({
+        adapterToken: "test-secret",
+        officialProfileId: payload().profile_id,
+        officialProfileDigest: payload().profile_digest,
+        productManifestPath: "/tmp/manifest.json",
+        runtimeBindingId: payload().runtime_binding_id,
+        productReceiptDirectory: "/tmp/queue",
+        productReceiptKeyPath: "/tmp/keys/key",
+      }),
+    /activation is not available/u,
+  );
+  assert.throws(
+    () =>
+      buildPluginConfig({
+        adapterToken: "test-secret",
+        strongApprovalBindingEnabled: false,
+        productReceiptDirectory: "/tmp/queue",
+        productReceiptKeyPath: "/tmp/key",
+      }),
+    /cannot be combined/u,
+  );
 });

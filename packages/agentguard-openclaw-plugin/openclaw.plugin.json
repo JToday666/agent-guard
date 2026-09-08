@@ -119,6 +119,16 @@
         "type": "string",
         "minLength": 1,
         "description": "Absolute protected local Product manifest file (0600 in a 0700 directory). Activation transport requires this trusted identity and inventory; plugin registration remains unavailable until full Product composition."
+      },
+      "productReceiptDirectory": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute private Product encrypted receipt directory. Requires productReceiptKeyPath outside this directory. Full Product registration remains unavailable."
+      },
+      "productReceiptKeyPath": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute path for the separate 0600 Product AES-256-GCM key in a 0700 directory. Never place this key inside the receipt queue."
       }
     }
   },
@@ -168,6 +178,14 @@
     "productManifestPath": {
       "label": "Protected Product manifest path",
       "help": "Provision the manifest locally. Identity and inventory must never be inferred from Guard API output."
+    },
+    "productReceiptDirectory": {
+      "label": "Product encrypted receipt directory",
+      "help": "Provide an absolute private directory with a separate productReceiptKeyPath. No defaults or plaintext fallback; Product registration remains unavailable."
+    },
+    "productReceiptKeyPath": {
+      "label": "Product receipt key path",
+      "help": "Provide an absolute 0600 key file outside the encrypted queue, in a 0700 directory. Keep the key for historical receipt recovery."
     }
   }
 }

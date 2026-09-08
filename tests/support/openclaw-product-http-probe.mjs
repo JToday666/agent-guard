@@ -13,7 +13,9 @@ let phase = "input";
 async function rejection(callback) {
   let rejected;
   await assert.rejects(callback, (error) => {
-    assert.ok(["OpenClawProductActivationError", "GuardApiError"].includes(error.name));
+    assert.ok(
+      ["OpenClawProductActivationError", "GuardApiError"].includes(error.name),
+    );
     rejected = error;
     return true;
   });
@@ -56,6 +58,15 @@ async function run(input) {
     officialProfileId: "agentguard-openclaw-v2-restricted",
     officialProfileDigest: input.profileDigest,
     productManifestPath: input.manifestPath,
+    productReceiptDirectory: path.join(
+      path.dirname(input.manifestPath),
+      "receipts",
+    ),
+    productReceiptKeyPath: path.join(
+      path.dirname(input.manifestPath),
+      "keys",
+      "receipt.key",
+    ),
   };
   const observed = readOpenClawProductRuntimeObservation(input.observation);
   const observe = () => observed;
@@ -75,7 +86,7 @@ async function run(input) {
       return {
         ok: true,
         rejected: true,
-        ...await rejection(() => client.evaluateProductEvent(input.event)),
+        ...(await rejection(() => client.evaluateProductEvent(input.event))),
       };
     }
     phase = "start-session";
@@ -84,7 +95,7 @@ async function run(input) {
         ok: true,
         rejected: true,
         syntheticPackageMetadata: false,
-        ...await rejection(() => client.startProductSession(observe)),
+        ...(await rejection(() => client.startProductSession(observe))),
       };
     }
     const originalAck = await client.startProductSession(observe);
@@ -92,25 +103,38 @@ async function run(input) {
     assert.equal(snapshot, originalAck);
     const originalToken = originalAck.headerValue();
     assert.equal(JSON.stringify(originalAck).includes(originalToken), false);
-    assert.equal(inspect(originalAck, { depth: 5 }).includes(originalToken), false);
+    assert.equal(
+      inspect(originalAck, { depth: 5 }).includes(originalToken),
+      false,
+    );
 
     if (input.scenario === "peer-drift") {
       phase = "drift-peer";
-      const drift = await fetch(`${input.baseUrl}/v1/adapters/langgraph/heartbeat`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${input.peerToken}`,
-          "Content-Type": "application/json",
+      const drift = await fetch(
+        `${input.baseUrl}/v1/adapters/langgraph/heartbeat`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${input.peerToken}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            ...input.peerHeartbeat,
+            host_inventory_digest: `sha256:${"0".repeat(64)}`,
+          }),
         },
-        body: JSON.stringify({
-          ...input.peerHeartbeat,
-          host_inventory_digest: `sha256:${"0".repeat(64)}`,
-        }),
-      });
+      );
       assert.equal(drift.status, 503);
       phase = "evaluate-after-peer-drift";
-      const rejected = await rejection(() => client.evaluateProductEvent(input.event));
-      return { ok: true, rejected: true, originalAckHash: hash(originalToken), ...rejected };
+      const rejected = await rejection(() =>
+        client.evaluateProductEvent(input.event),
+      );
+      return {
+        ok: true,
+        rejected: true,
+        originalAckHash: hash(originalToken),
+        ...rejected,
+      };
     }
 
     phase = "evaluate";
@@ -118,16 +142,21 @@ async function run(input) {
       return {
         ok: true,
         rejected: true,
-        ...await rejection(() => client.evaluateProductEvent(input.event)),
+        ...(await rejection(() => client.evaluateProductEvent(input.event))),
       };
     }
-    const { evaluation, activationAck } = await client.evaluateProductEvent(input.event);
+    const { evaluation, activationAck } = await client.evaluateProductEvent(
+      input.event,
+    );
     assert.equal(activationAck.headerValue(), originalToken);
     assert.equal(evaluation.decision_authority.source, "v21");
     assert.equal(evaluation.decision_authority.mode, "active");
     assert.equal(evaluation.decision_authority.selection_basis, "profile_all");
     assert.equal(JSON.stringify(evaluation).includes(originalToken), false);
-    assert.equal(inspect(evaluation, { depth: 5 }).includes(originalToken), false);
+    assert.equal(
+      inspect(evaluation, { depth: 5 }).includes(originalToken),
+      false,
+    );
     const result = {
       ok: true,
       syntheticPackageMetadata: true,
@@ -154,7 +183,15 @@ async function run(input) {
     // A real policy denial is the only runtime fact here. Never claim invocation
     // or completion of the executable-looking fixture supplied for evaluation.
     const receipt = buildRuntimeOutcomeAuditEvent(
-      input.event, receiptEvaluation(evaluation), "pre_execution_deny",
+      {
+        ...input.event,
+        security_context: {
+          ...input.event.security_context,
+          derived_paths: input.event.security_context.derived_paths ?? [],
+        },
+      },
+      receiptEvaluation(evaluation),
+      "pre_execution_deny",
     );
     assert.equal(JSON.stringify(receipt).includes(originalToken), false);
     assert.equal(inspect(receipt, { depth: 6 }).includes(originalToken), false);
@@ -172,6 +209,7 @@ async function run(input) {
     };
   } finally {
     client?.closeProductSession();
+    await client?.closeProductDelivery();
   }
 }
 
@@ -182,9 +220,13 @@ try {
   process.stdout.write(JSON.stringify(result));
 } catch (error) {
   // Keep failures useful without echoing request bodies or test credentials.
-  process.stdout.write(JSON.stringify({
-    ok: false, phase, errorType: error.name,
-    errorCode: error.code ?? error.failure ?? null,
-  }));
+  process.stdout.write(
+    JSON.stringify({
+      ok: false,
+      phase,
+      errorType: error.name,
+      errorCode: error.code ?? error.failure ?? null,
+    }),
+  );
   process.exitCode = 1;
 }
