@@ -1,0 +1,75 @@
+{
+  "schema_version": "1.0",
+  "phase": "isolated_product_runtime",
+  "tools": [
+    {
+      "tool_id": "agentguard_memory_read",
+      "fixture_id": "openclaw:agentguard_memory_read:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": { "key": "seed" },
+      "evidence": "sqlite_readback"
+    },
+    {
+      "tool_id": "agentguard_memory_write",
+      "fixture_id": "openclaw:agentguard_memory_write:restricted-v1",
+      "event_type": "memory_write_proposed",
+      "arguments": {
+        "key": "approval-note",
+        "value": "accepted fixture value"
+      },
+      "evidence": "sqlite_readback"
+    },
+    {
+      "tool_id": "edit",
+      "fixture_id": "openclaw:edit:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": {
+        "path": "seed.txt",
+        "edits": [
+          { "oldText": "original fixture", "newText": "edited fixture" }
+        ]
+      },
+      "evidence": "file_readback"
+    },
+    {
+      "tool_id": "exec",
+      "fixture_id": "openclaw:exec:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": { "command": "node marker.mjs" },
+      "evidence": "process_and_marker_readback"
+    },
+    {
+      "tool_id": "message",
+      "fixture_id": "openclaw:message:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": {
+        "action": "send",
+        "channel": "agentguard-fixture",
+        "target": "fixture-inbox",
+        "message": "fixture status"
+      },
+      "evidence": "loopback_inbox_readback"
+    },
+    {
+      "tool_id": "process",
+      "fixture_id": "openclaw:process:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": { "action": "list" },
+      "evidence": "host_process_result"
+    },
+    {
+      "tool_id": "read",
+      "fixture_id": "openclaw:read:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": { "path": "seed.txt" },
+      "evidence": "host_file_result"
+    },
+    {
+      "tool_id": "write",
+      "fixture_id": "openclaw:write:restricted-v1",
+      "event_type": "tool_call_proposed",
+      "arguments": { "path": "created.txt", "content": "created fixture" },
+      "evidence": "file_readback"
+    }
+  ]
+}
