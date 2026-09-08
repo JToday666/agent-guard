@@ -139,6 +139,7 @@ def create_product_evaluation_harness(
     tmp_path: Path,
     *,
     runtime: ProductReplayRuntime = "langgraph",
+    action_types: tuple[str, ...] = ("tool_call",),
 ) -> ProductEvaluationHarness:
     """Create one fully signed in-memory Product authority environment."""
 
@@ -199,7 +200,7 @@ def create_product_evaluation_harness(
             trace_id="trace:product-replay-task",
             session_id=PRODUCT_REPLAY_SESSION_ID,
             runtime_binding_id=entry.runtime_binding_id,
-            action_constraints=[ActionConstraint(action_types=["tool_call"])],
+            action_constraints=[ActionConstraint(action_types=list(action_types))],
             resource_constraints=[],
             destination_constraints=[],
         ),

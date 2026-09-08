@@ -53,6 +53,7 @@ def test_signed_parent_data_flows_through_actual_ct_and_core(
         task_id=rig.snapshot.task.task_id,
         product_tool=rig.tool,
         product_data=proof,
+        product_result=None,
     )
     inputs = service._build_inputs(
         rig.event, materials, rig.snapshot.scope.scope_digest

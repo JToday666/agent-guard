@@ -52,6 +52,11 @@ FACT_BUILDER_VERSION = "ct-fact-2"
 # ct-fact-1/2 digest interpretation remain unchanged.
 PRODUCT_FACT_BUILDER_VERSION = "ct-product-fact-1"
 PRODUCT_FACT_PRODUCER = "ct-product-fact-builder-1"
+PRODUCT_RESULT_FACT_BUILDER_VERSION = "ct-product-result-1"
+PRODUCT_RESULT_FACT_PRODUCER = "ct-product-result-builder-1"
+PRODUCT_FACT_VERSIONS = frozenset(
+    {PRODUCT_FACT_BUILDER_VERSION, PRODUCT_RESULT_FACT_BUILDER_VERSION}
+)
 
 #: Gate A 之前已持久化信封使用的 fact-builder 版本。旧审计记录没有
 #: 显式版本字段，replay/backfill 必须按该版本重算历史 bundle digest，
@@ -103,6 +108,10 @@ def fact_builder_version_for_bundle(bundle: TransientSecurityFacts) -> str:
     Product producers in one current-event bundle is not a supported contract.
     """
     producers = {flow.producer for flow in bundle.flow_facts}
+    if PRODUCT_RESULT_FACT_PRODUCER in producers:
+        if producers != {PRODUCT_RESULT_FACT_PRODUCER}:
+            raise ValueError("ct_product_fact_producer_mixed")
+        return PRODUCT_RESULT_FACT_BUILDER_VERSION
     if PRODUCT_FACT_PRODUCER in producers:
         if producers != {PRODUCT_FACT_PRODUCER}:
             raise ValueError("ct_product_fact_producer_mixed")

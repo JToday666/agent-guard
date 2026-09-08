@@ -9,6 +9,7 @@ import { attachRuntimeOutcomeActivationAck } from "../runtime/product-authority-
 import { productCanonicalActionId } from "./product-events.js";
 
 export type ProductReceiptOptions = {
+  observation?: "after_tool_call" | "native_tool_result_middleware";
   kind:
     | "pre_execution_deny"
     | "approval_release"
@@ -88,12 +89,14 @@ export function buildProductActionReceipt(
     event_type: "runtime_outcome",
     runtime: "openclaw",
     trace_id: event.trace_id,
+    case_id: event.case_id ?? null,
+    is_malicious: event.is_malicious ?? null,
     timestamp,
     stage: released
       ? "product_gate_released"
       : deny
         ? "product_gate_blocked"
-        : "after_tool_call",
+        : (options.observation ?? "after_tool_call"),
     summary: released
       ? "Product gate release recorded"
       : deny
@@ -102,10 +105,12 @@ export function buildProductActionReceipt(
     decision: evaluation.decision.decision,
     risk_score: evaluation.decision.risk_score!,
     severity: evaluation.decision.severity as RuntimeOutcomeReceipt["severity"],
-    blocked: deny,
+    blocked: evaluation.decision.decision !== "allow",
     reason: "Product runtime action evidence",
     resource_targets: [...event.security_context.derived_paths],
-    rule_hits: [],
+    rule_hits: (evaluation.decision.rule_hits ?? [])
+      .slice(0, 100)
+      .map((hit) => hit.rule_id),
     latency_ms: null,
     links: {
       event_id: event.event_id,

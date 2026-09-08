@@ -130,6 +130,7 @@ class ContextBuilderService:
                 bundle=bundle,
                 snapshot=snapshot,
                 require_memory_proof=self._product_memory_required,
+                product_runtime_isolation=self._product_memory_required,
                 verified_memory_indexes=(
                     frozenset(
                         source.sequence_index
@@ -148,10 +149,13 @@ class ContextBuilderService:
                         )
                     )
                     if isinstance(event.payload, ContextBuildPayload)
-                    and event.runtime == "langgraph"
+                    and event.runtime in {"langgraph", "openclaw"}
                     and (
                         self._product_memory_required
-                        or event.metadata.get("native_full_content") is True
+                        or (
+                            event.runtime == "langgraph"
+                            and event.metadata.get("native_full_content") is True
+                        )
                     )
                     else frozenset()
                 ),
@@ -294,6 +298,7 @@ def build_context_assembly(
     snapshot: SecuritySnapshot,
     verified_memory_indexes: frozenset[int] = frozenset(),
     require_memory_proof: bool = False,
+    product_runtime_isolation: bool = False,
 ) -> ContextBuildResult:
     """Pure context assembly over one already-verified transient bundle."""
 
@@ -336,6 +341,7 @@ def build_context_assembly(
             memory_by_ref=memory_by_ref,
             verified_memory_indexes=verified_memory_indexes,
             require_memory_proof=require_memory_proof,
+            product_runtime_isolation=product_runtime_isolation,
         )
         if not payload.will_enter_context:
             transform_state = "excluded"
@@ -523,6 +529,7 @@ def _classify_source(
     memory_by_ref: Mapping[str, MemoryFact],
     verified_memory_indexes: frozenset[int],
     require_memory_proof: bool,
+    product_runtime_isolation: bool,
 ) -> tuple[
     SourceFact,
     ContextCompartment,
@@ -616,7 +623,30 @@ def _classify_source(
                 }
             )
             return upgraded, "trusted_runtime_fact", "preserved", ()
-        return fact, "trusted_runtime_fact", "excluded", ("RUNTIME_FACT_UNVERIFIED",)
+        # An excluded claim must not occupy the trusted compartment: the
+        # manifest correctly requires an actual server binding there even for
+        # excluded chunks. Preserve its runtime provenance, add risk, and make
+        # the exclusion representable without granting any authority.
+        if not product_runtime_isolation or event.runtime != "openclaw":
+            return (
+                fact,
+                "trusted_runtime_fact",
+                "excluded",
+                ("RUNTIME_FACT_UNVERIFIED",),
+            )
+        unverified = fact.model_copy(
+            update={
+                "trust": "untrusted",
+                "authority": "untrusted_claim",
+                "taints": _ordered_taints((*taints, "UNTRUSTED")),
+            }
+        )
+        return (
+            unverified,
+            "untrusted_evidence",
+            "excluded",
+            ("RUNTIME_FACT_UNVERIFIED",),
+        )
 
     if fact.source_type in _UNTRUSTED_EVIDENCE_TYPES:
         strengthened_taints = _ordered_taints((*taints, "UNTRUSTED"))
@@ -654,10 +684,13 @@ def _classify_source(
         if memory_fact is None:
             return fact, "memory_context", "excluded", ("MEMORY_FACT_UNPROVED",)
         if (
-            event.runtime == "langgraph"
+            event.runtime in {"langgraph", "openclaw"}
             and (
                 require_memory_proof
-                or event.metadata.get("native_full_content") is True
+                or (
+                    event.runtime == "langgraph"
+                    and event.metadata.get("native_full_content") is True
+                )
             )
             and (
                 memory_fact.change_status != "committed"

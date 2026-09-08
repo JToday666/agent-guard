@@ -1101,6 +1101,11 @@ class EvaluationService:
                 if materials.product_data is not None
                 else None
             ),
+            product_tool_result=(
+                materials.product_result.model_dump(mode="json")
+                if materials.product_result is not None
+                else None
+            ),
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
@@ -1588,6 +1593,26 @@ class EvaluationService:
             and event.event_type
             in {"tool_call_proposed", "memory_write_proposed", "message_send_proposed"}
         )
+        needs_product_result = event.event_type == "tool_result_produced" and (
+            "product_tool_result" in event.metadata
+            or (
+                event.runtime == "openclaw"
+                and pipeline.product_tool_catalog is not None
+            )
+        )
+        if needs_product_result:
+            from .product_model_content import (
+                ProductModelContentUnavailable,
+                read_product_tool_result,
+            )
+
+            try:
+                if not read_product_tool_result(existing).matches_event(event):
+                    raise ProductModelContentUnavailable()
+            except ProductModelContentUnavailable:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_TOOL_RESULT_UNAVAILABLE"
+                ) from None
         if needs_product_data:
             from .product_model_content import (
                 ProductModelContentUnavailable,
@@ -1606,6 +1631,14 @@ class EvaluationService:
             auth_context,
             activation_ack_token=activation_ack_token,
         ) as locked:
+            if needs_product_result:
+                try:
+                    if not read_product_tool_result(locked).matches_event(event):
+                        raise ProductModelContentUnavailable()
+                except ProductModelContentUnavailable:
+                    raise V21OfficialEvaluationUnavailableError(
+                        "V21_PRODUCT_TOOL_RESULT_UNAVAILABLE"
+                    ) from None
             if needs_product_data:
                 try:
                     read_product_action_data(locked)

@@ -211,13 +211,30 @@ export function readNativeProductAfter(
   if (e.error !== undefined && typeof e.error !== "string")
     productActionError("native_terminal_invalid");
   const result =
-    e.result === undefined ? undefined : snapshotProductJson(e.result);
+    e.result === undefined ? undefined : snapshotNativeProductResult(e.result);
   return {
     failed:
       (typeof e.error === "string" && e.error.length > 0) ||
       nativeResultFailed(result),
     result,
   };
+}
+/** Pinned Host constructs these optional result-envelope fields with undefined.
+ * Only absent envelope values are omitted; content and nested details stay strict. */
+export function snapshotNativeProductResult(value: unknown): unknown {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    return snapshotProductJson(value);
+  const fields = readNativeProductFields(value);
+  const result: JsonObject = Object.create(null);
+  for (const [key, child] of Object.entries(fields)) {
+    if (
+      child === undefined &&
+      ["details", "isError", "terminate"].includes(key)
+    )
+      continue;
+    result[key] = child;
+  }
+  return snapshotProductJson(result);
 }
 /** Pinned Host tool-result-error contract, on already snapshotted JSON only.
  * Keep failure signals separate from falsy successful values and text content. */
@@ -394,6 +411,7 @@ export function buildProductToolEvent(
       source_type: "model",
       source_trust: "unknown",
       agent_id: profile.agentId,
+      session_id: call.sessionKey,
       session_key: call.sessionKey,
       run_id: call.runId,
       current_step: eventType,

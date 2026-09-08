@@ -430,6 +430,7 @@ def _assess_kernel(
     transient_facts: AssessmentTransientFacts | None = None,
     product_tool: VerifiedProductTool | None = None,
     product_data: VerifiedProductData | None = None,
+    product_model_output_observation: bool = False,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
@@ -451,9 +452,20 @@ def _assess_kernel(
         detection_results, event_id=event.event_id
     )
     consumed_overlay_digest: str | None = None
-    model_output_observation = _is_competition_model_output_observation(
-        event,
-        source_dataflow_not_required_actions,
+    if product_model_output_observation and not (
+        event.runtime in {"langgraph", "openclaw"}
+        and event.event_type == "model_output_produced"
+        and snapshot is not None
+        and transient_facts is not None
+        and "model_call" in source_dataflow_not_required_actions
+    ):
+        raise ValueError("product_model_observation_invalid")
+    # This explicit server input leaves the old competition/shadow recognizer
+    # unchanged. It never applies to an input event or a side-effect action.
+    model_output_observation = product_model_output_observation or (
+        _is_competition_model_output_observation(
+            event, source_dataflow_not_required_actions
+        )
     )
 
     # 1) ActionIR 构建（失败 → 全降级路径，保守 impact high）。
@@ -815,6 +827,7 @@ def shadow_assess_with_coverage(
     transient_facts: AssessmentTransientFacts | None = None,
     product_tool: VerifiedProductTool | None = None,
     product_data: VerifiedProductData | None = None,
+    product_model_output_observation: bool = False,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
@@ -833,6 +846,7 @@ def shadow_assess_with_coverage(
         transient_facts=transient_facts,
         product_tool=product_tool,
         product_data=product_data,
+        product_model_output_observation=product_model_output_observation,
         memory_not_required_actions=memory_not_required_actions,
         source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     )

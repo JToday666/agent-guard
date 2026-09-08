@@ -162,6 +162,29 @@ function evaluation(event, decision = "allow") {
     },
   };
 }
+
+test("ASK parent blocked status and matched rule remain on released and completed receipts", async (t) => {
+  const f = await fixture(t, {
+    decision: "ask",
+    evaluate: async (_event, value) => {
+      value.decision.rule_hits = [{ rule_id: "P005" }];
+    },
+  });
+  const { event, context } = native("read");
+  assert.deepEqual(await f.runtime.before(event, context), {
+    params: event.params,
+  });
+  await f.runtime.after(
+    { ...event, result: { content: [{ type: "text", text: "read" }] } },
+    context,
+  );
+  assert.equal(f.sent.length, 2);
+  for (const wire of f.sent) {
+    const receipt = JSON.parse(wire);
+    assert.equal(receipt.blocked, true);
+    assert.deepEqual(receipt.rule_hits, ["P005"]);
+  }
+});
 async function fixture(t, options = {}) {
   const directory = await mkdtemp(join(tmpdir(), "ag-product-actions-"));
   const sent = [],
@@ -292,6 +315,11 @@ for (const name of Object.keys(ARGS))
       assert.equal(f.events.length, 1);
       assert.equal(f.events[0].security_context.source_type, "model");
       assert.equal(f.events[0].security_context.source_trust, "unknown");
+      assert.equal(f.events[0].security_context.session_id, context.sessionKey);
+      assert.equal(
+        f.events[0].security_context.session_key,
+        context.sessionKey,
+      );
       if (decision === "deny") {
         assert.equal(before.block, true);
         await f.runtime.after({ ...event, error: "blocked by host" }, context);

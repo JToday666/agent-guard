@@ -93,8 +93,10 @@ from agentguard_core.decisions.revalidation import (
 from agentguard_core.decisions.results import DetectionResult
 from agentguard_core.decisions.shadow import (
     ABSENT_SNAPSHOT_ID,
+    compute_assessment_digest,
     shadow_assess_with_coverage,
 )
+from agentguard_core.signals.models import EvidenceRef
 from agentguard_core.security_context.snapshot import SecuritySnapshot
 from agentguard_core.security_context import (
     OnlineSecurityState,
@@ -108,6 +110,7 @@ from agentguard_core.security_context import (
 )
 
 from guard_api.security_state import SecurityStateNotReadyError, SecurityStateService
+from guard_api.security_state.product_result import ProductToolResultProof
 from guard_api.auth import AuthContext
 from guard_api.runtime_status import ProductRuntime
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
@@ -261,6 +264,7 @@ class V21PhaseAPrepared:
     runtime_binding: ResolvedRuntimeBinding | None = None
     product_tool: VerifiedProductTool | None = None
     product_data: VerifiedProductData | None = None
+    product_result: ProductToolResultProof | None = None
 
 
 @dataclass(frozen=True)
@@ -305,6 +309,7 @@ class V21PipelineMaterials:
     semantic_judgment: "SemanticJudgment | None" = None
     product_tool: VerifiedProductTool | None = None
     product_data: VerifiedProductData | None = None
+    product_result: ProductToolResultProof | None = None
 
 
 @dataclass(frozen=True)
@@ -528,6 +533,7 @@ def _phase_a_output_digest(
     semantic_judgment: "SemanticJudgment | None",
     product_tool: VerifiedProductTool | None = None,
     product_data: VerifiedProductData | None = None,
+    product_result: ProductToolResultProof | None = None,
 ) -> str:
     """Freeze mutable assessment outputs until Phase B consumes them."""
 
@@ -538,6 +544,11 @@ def _phase_a_output_digest(
             "coverage": coverage.model_dump(mode="json"),
             "action_ir": (
                 action_ir.model_dump(mode="json") if action_ir is not None else None
+            ),
+            **(
+                {"product_tool_result": product_result.model_dump(mode="json")}
+                if product_result is not None
+                else {}
             ),
             "consumed_overlay_digest": consumed_overlay_digest,
             "semantic_judgment": (
@@ -761,6 +772,35 @@ class V21PipelineService:
             raise V21OfficialEvaluationUnavailableError(
                 "V21_PRODUCT_ACTION_CONTENT_UNAVAILABLE"
             ) from exc
+
+    def _product_result_materials(
+        self,
+        event: GuardEvent,
+        snapshot: SecuritySnapshot | None,
+    ) -> ProductToolResultProof | None:
+        if not self.product_active or event.event_type != "tool_result_produced":
+            return None
+        # Preserve the B06 LangGraph contract until its native builder adopts
+        # this explicit carrier. OC Product results always require the proof.
+        if event.runtime != "openclaw" and "product_tool_result" not in event.metadata:
+            return None
+        if (
+            self._product_tool_catalog is None
+            and "product_tool_result" not in event.metadata
+        ):
+            return None
+        if snapshot is None or self._product_tool_catalog is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_TOOL_RESULT_UNAVAILABLE"
+            )
+        try:
+            from .product_model_content import verify_product_tool_result
+
+            return verify_product_tool_result(self._store, event, snapshot)
+        except Exception:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_TOOL_RESULT_UNAVAILABLE"
+            ) from None
 
     @property
     def product_active(self) -> bool:
@@ -1594,6 +1634,7 @@ class V21PipelineService:
             None if snapshot is not None else "snapshot_absent"
         )
         product_tool, product_data = self._product_action_materials(event, snapshot)
+        product_result = self._product_result_materials(event, snapshot)
         return V21PhaseAPrepared(
             event_id=event.event_id,
             event_digest=event_digest,
@@ -1629,6 +1670,7 @@ class V21PipelineService:
             runtime_binding=runtime_binding,
             product_tool=product_tool,
             product_data=product_data,
+            product_result=product_result,
         )
 
     def _finish_phase_a(
@@ -1689,8 +1731,10 @@ class V21PipelineService:
         product_tool, product_data = self._product_action_materials(
             event, prepared.snapshot
         )
+        product_result = self._product_result_materials(event, prepared.snapshot)
         if (
-            product_tool != prepared.product_tool
+            product_result != prepared.product_result
+            or product_tool != prepared.product_tool
             or product_data != prepared.product_data
         ):
             raise V21OfficialEvaluationUnavailableError(
@@ -1710,11 +1754,21 @@ class V21PipelineService:
         # overlay exercises the exact pre-Gate-A Core path.
         if transient_facts is not None:
             assess_kwargs["transient_facts"] = transient_facts
+        product_content_ready = bool(
+            self.product_active
+            and self.active
+            and self._product_tool_catalog is not None
+            and prepared.runtime_binding is not None
+            and transient_facts is not None
+        )
         memory_not_required = self._memory_not_required_actions
         if (
             self.product_active
             and self.active
-            and event.runtime == "langgraph"
+            and (
+                event.runtime == "langgraph"
+                or (event.runtime == "openclaw" and product_content_ready)
+            )
             and event.event_type in {"model_input_prepared", "model_output_produced"}
         ):
             # A native model call without memory use must not require an
@@ -1729,11 +1783,12 @@ class V21PipelineService:
             (
                 self._competition_model_output_observation
                 or (self.product_active and event.runtime == "langgraph")
+                or (product_content_ready and event.runtime == "openclaw")
             )
             and self.active
             and event.event_type == "model_output_produced"
         ):
-            # The verified Product LangGraph profile likewise enforces output
+            # Both verified Product profiles enforce output
             # as post-execution isolation: it is an inbound observation, not a
             # second outbound call. An opaque model's possible-influence edge
             # cannot attest complete outbound provenance here. Detectors,
@@ -1743,6 +1798,10 @@ class V21PipelineService:
             assess_kwargs["source_dataflow_not_required_actions"] = frozenset(
                 {"model_call"}
             )
+            if product_content_ready:
+                # Binding is re-resolved above and Phase B rechecks the signed
+                # profile/capability and actual ACK before authority selection.
+                assess_kwargs["product_model_output_observation"] = True
         outcome = shadow_assess_with_coverage(
             event,
             prepared.bundle,
@@ -1750,6 +1809,28 @@ class V21PipelineService:
             **assess_kwargs,
         )
         assessment = outcome.assessment
+        if product_result is not None:
+            # Bind the separately persisted, hash-only server proof into the
+            # selected assessment as well as the immutable Phase A carrier.
+            assessment = assessment.model_copy(
+                update={
+                    "evidence_refs": [
+                        *assessment.evidence_refs,
+                        EvidenceRef(
+                            ref_id=f"product-result:{event.event_id}",
+                            kind="guard_event",
+                            record_type="product_tool_result",
+                            record_id=event.event_id,
+                            json_pointer="/evidence/product_tool_result",
+                            digest=product_result.proof_digest,
+                            redaction_state="summary_only",
+                        ),
+                    ]
+                }
+            )
+            assessment = assessment.model_copy(
+                update={"assessment_digest": compute_assessment_digest(assessment)}
+            )
         if prepared.degraded_kind == "component_failure":
             assessment = _recategorize_shadow_degradation(
                 assessment,
@@ -1784,6 +1865,7 @@ class V21PipelineService:
                 semantic_judgment=semantic_judgment,
                 product_tool=product_tool,
                 product_data=product_data,
+                product_result=product_result,
             ),
             bundle=prepared.bundle,
             policy_revision=prepared.policy_revision,
@@ -1806,6 +1888,7 @@ class V21PipelineService:
             semantic_judgment=semantic_judgment,
             product_tool=product_tool,
             product_data=product_data,
+            product_result=product_result,
         )
 
     def _resolve_snapshot_v(
@@ -1944,8 +2027,10 @@ class V21PipelineService:
         current_tool, current_data = self._product_action_materials(
             event, materials.snapshot
         )
+        current_result = self._product_result_materials(event, materials.snapshot)
         if (
-            current_tool != materials.product_tool
+            current_result != materials.product_result
+            or current_tool != materials.product_tool
             or current_data != materials.product_data
         ):
             raise V21OfficialEvaluationUnavailableError(
@@ -2241,6 +2326,7 @@ class V21PipelineService:
                 semantic_judgment=materials.semantic_judgment,
                 product_tool=materials.product_tool,
                 product_data=materials.product_data,
+                product_result=materials.product_result,
             ):
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID)
             if materials.runtime_binding is None:

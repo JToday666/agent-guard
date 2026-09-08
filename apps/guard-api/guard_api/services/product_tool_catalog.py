@@ -463,11 +463,10 @@ class ProductToolCatalog:
                         tool.source_plugin_id != source
                         or canonical_sha256(schema) != tool.input_schema_digest
                         or tool.event_type
-                        != (
-                            "memory_write_proposed"
-                            if tool.tool_id == "agentguard_memory_write"
-                            else "tool_call_proposed"
-                        )
+                        != {
+                            "agentguard_memory_write": "memory_write_proposed",
+                            "message": "message_send_proposed",
+                        }.get(tool.tool_id, "tool_call_proposed")
                     ):
                         raise ValueError
                     _validate_shape(tool.tool_id, schema)

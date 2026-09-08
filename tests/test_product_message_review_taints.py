@@ -56,6 +56,7 @@ def _project(case, results, *, product=True, wrong_proof=False):
         detection_results=results,
         product_tool=case.tool if product else None,
         product_data=proof if product else None,
+        product_result=None,
         task_id=case.ir.task_id,
         snapshot=SimpleNamespace(
             sources=sources,

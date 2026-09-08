@@ -288,7 +288,11 @@ def build_decision_evidence_v21(
         evidence_refs=[
             ref
             for ref in assessment.evidence_refs
-            if ref.record_type == "product_action_data"
+            # Product actions and post-execution results each carry a separate
+            # server-verified proof. Preserve both references when rebuilding
+            # selected evidence; their strict audit readers reject missing or
+            # conflicting references instead of trusting public metadata.
+            if ref.record_type in {"product_action_data", "product_tool_result"}
         ],
     )
 

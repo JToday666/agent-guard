@@ -120,6 +120,37 @@ Node 与真实 Guard API 的 HTTP 契约测试使用实际构建的 SDK 和 pinn
 
 旧 `RuntimeOutcomeDelivery` 已修复负确认或错误 audit ID 导致删除的问题，永久失败会保留并停止自动重试。旧 hook 的写盘回退和 `receiptQueued` 状态还不具备 Product 保证，将在动作链接线时处理；Product 回执不能进入旧队列。
 
+### Product 内容边界（内部组合，产品启动仍关闭）
+
+`OpenClawProductContentRuntime` 与动作运行时共享同一个 ACK 会话和加密 outbox。
+真实 Provider 的 `wrapStreamFn` 在调用前提交 `context_assembled` 和
+`model_input_prepared`，并在实际 transport 的 `onPayload` 再核对完整消息及工具清单。
+只有受保护任务原文与 Core 明确保留的来源能进入模型；宿主 system 内容保留真实
+`runtime` 来源、作为未验证内容排除，不提升为可信运行时事实。未知记忆不能通过
+重组计划、重新计算摘要或改成 annotation 进入下一轮。
+
+固定隔离配置关闭 `agents.defaults.envelopeTimestamp`，避免宿主自动添加的时间戳
+改变已签署任务原文；模型工具描述符按宿主实际次序冻结，工具来源顺序另行记录。
+Provider 的 `buildReplayPolicy` 保留原始调用 ID 和完整历史，关闭自动修复、合成
+工具结果及思考内容删除；这些配置也属于完整组合检查，不通过改写 ID 关联旧回执。
+产品动作与内容事件均将可信原生 `sessionKey` 显式传入 Core 的 `session_id`，
+与 TaskFact 的会话范围一致，并保留 `session_key` 用于宿主关联。
+
+模型流在内部缓冲，`model_output_produced` 获得 official 判定并确认回执后，
+才向宿主发布完整消息。输出中的单个工具请求关联原始模型审计、参数和真实
+`toolCallId`；随后进入既有动作评估、restricted approval、lease 与持久回执链。
+不接受并行工具请求，不在模型或工具结果不确定时重试执行。
+
+实际 `agentToolResultMiddleware` 在普通 after hook 和会话持久化之前评估
+`tool_result_produced`。服务端从原动作、模型承诺、终态回执及历史 ACK 验证关联；
+请求内的父审计 ID 只用于查找，不能自行证明权限。被隔离的结果不会发布到宿主，
+下一轮输入还会验证已确认结果的原文与身份。延迟 after hook 只接受匹配的安全结果，
+不能新增一次执行事实。内容检查回执与动作日志使用不同的私有记录类型，重启只补投。
+
+这些内部入口供固定隔离运行时组合使用。公开插件入口在七事件消费者、实际工具清单、
+Provider 与 middleware 注册、ACK、持久投递及熔断一起完成验证前继续拒绝启用。
+开发测试的受控模型、合成签署和测试包 metadata 均不构成最终候选验收。
+
 ## Windows 支持
 
 Windows 上安装脚本使用 env provider 而非 file provider：OpenClaw 的 file secret provider 在无法可靠校验文件 ACL 时会 fail-closed 拒绝加载（Windows 没有 POSIX 0600 权限语义），导致插件无法注册。作为折中，安装脚本把 adapter token 写入 OpenClaw state 目录下的 `.env`（键 `AGENTGUARD_OPENCLAW_ADAPTER_TOKEN`），并在 `secrets.providers` 中配置 `source: "env"` 且 allowlist 只含该键。

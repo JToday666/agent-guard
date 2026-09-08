@@ -1,4 +1,8 @@
 import { createHash } from "node:crypto";
+import {
+  ProductContentCheckpoint,
+  type ProductCheckpointRole,
+} from "../mapping/product-content-receipts.js";
 import { inspect, types } from "node:util";
 
 import type { RuntimeOutcomeReceipt } from "../types.js";
@@ -120,7 +124,8 @@ type Anchor = {
 };
 type ReceiptItem = { auditId: string; wire: string; wireDigest: string };
 type Pending = {
-  version: 1;
+  version: 1 | 2;
+  checkpointRole?: ProductCheckpointRole;
   type: "action" | "receipt";
   phase:
     | "prepared"
@@ -136,7 +141,8 @@ type Pending = {
   httpStatus: number | null;
 };
 type Tombstone = {
-  version: 1;
+  version: 1 | 2;
+  checkpointRole?: ProductCheckpointRole;
   type: "tombstone";
   ownerKind: "action" | "receipt";
   actionId: string | null;
@@ -307,10 +313,38 @@ export class OpenClawProductReceiptOutbox {
   async submitHistoricalWire(
     encoded: string,
   ): Promise<ProductReceiptDeliveryResult> {
+    return this.#submitWire(encoded);
+  }
+
+  /** A private builder-issued checkpoint can never release or complete an action. */
+  async submitCheckpoint(
+    checkpoint: ProductContentCheckpoint,
+  ): Promise<ProductReceiptDeliveryResult> {
+    try {
+      const { wire, role } = ProductContentCheckpoint.read(
+        checkpoint,
+        this.#store.namespace,
+      );
+      return await this.#submitWire(wire, role);
+    } catch {
+      this.#trip("receipt_invalid");
+      return failed("receipt_invalid");
+    }
+  }
+
+  async #submitWire(
+    encoded: string,
+    role?: ProductCheckpointRole,
+  ): Promise<ProductReceiptDeliveryResult> {
     let item: ReceiptItem;
     let wire: RuntimeOutcomeWire;
     try {
       wire = readHistoricalProductReceiptWire(encoded, this.#store.namespace);
+      if (
+        (checkpointStage(wire.stage) && !role) ||
+        (role && wire.stage !== `product_${role}`)
+      )
+        fail("receipt_invalid");
       item = {
         auditId: wire.audit_id,
         wire: encoded,
@@ -324,6 +358,7 @@ export class OpenClawProductReceiptOutbox {
       this.#assertOpen();
       this.#load();
       if (
+        !role &&
         ACTION_TERMINAL_KINDS.has(wire.metadata.outcome_kind) &&
         wire.links.action_id &&
         this.#records.has(recordId("action", wire.links.action_id))
@@ -333,13 +368,19 @@ export class OpenClawProductReceiptOutbox {
       const id = recordId("receipt", item.auditId);
       const previous = this.#records.get(id);
       if (previous) {
-        if (!matches(previous.record, item)) {
+        if (
+          previous.record.checkpointRole !== role ||
+          !matches(previous.record, item)
+        ) {
           this.#trip("outbox_receipt_conflict");
           return failed("outbox_receipt_conflict", item.auditId);
         }
         if (previous.record.type === "tombstone") return recorded(item.auditId);
       } else {
-        this.#create(id, pending("receipt", null, item));
+        this.#create(id, {
+          ...pending("receipt", null, item),
+          ...(role ? { version: 2 as const, checkpointRole: role } : {}),
+        });
       }
       return await this.#deliver(id);
     } catch (error) {
@@ -629,13 +670,16 @@ export class OpenClawProductReceiptOutbox {
           this.#store.namespace,
         );
         this.#replace(loaded, {
-          version: 1,
+          version: record.version,
+          ...(record.checkpointRole
+            ? { checkpointRole: record.checkpointRole }
+            : {}),
           type: "tombstone",
           ownerKind: record.type,
           actionId: confirmed.links.action_id ?? null,
-          actionTerminal: ACTION_TERMINAL_KINDS.has(
-            confirmed.metadata.outcome_kind,
-          ),
+          actionTerminal:
+            !record.checkpointRole &&
+            ACTION_TERMINAL_KINDS.has(confirmed.metadata.outcome_kind),
           auditId: item.auditId,
           wireDigest: item.wireDigest,
         });
@@ -796,6 +840,8 @@ export class OpenClawProductReceiptOutbox {
   }
 
   #readRecord(stored: OpenClawStoredEnvelope, value: unknown): JournalRecord {
+    const newer = (value as { version?: unknown })?.version === 2;
+    const roleFields = newer ? ["checkpointRole"] : [];
     if (stored.kind === "tombstone") {
       const data = object(value, [
         "version",
@@ -805,11 +851,19 @@ export class OpenClawProductReceiptOutbox {
         "actionTerminal",
         "auditId",
         "wireDigest",
+        ...roleFields,
       ]);
       if (
-        data.version !== 1 ||
+        (data.version !== 1 && data.version !== 2) ||
         data.type !== "tombstone" ||
         !["action", "receipt"].includes(data.ownerKind as string)
+      )
+        fail("outbox_storage_failed");
+      if (
+        newer &&
+        (data.ownerKind !== "receipt" ||
+          data.actionTerminal !== false ||
+          !checkpointRole(data.checkpointRole))
       )
         fail("outbox_storage_failed");
       identifier(data.auditId);
@@ -843,9 +897,10 @@ export class OpenClawProductReceiptOutbox {
       "nextAttemptAt",
       "errorCode",
       "httpStatus",
+      ...roleFields,
     ]);
     if (
-      data.version !== 1 ||
+      (data.version !== 1 && data.version !== 2) ||
       !["action", "receipt"].includes(data.type as string) ||
       data.type !== stored.kind ||
       ![
@@ -859,6 +914,11 @@ export class OpenClawProductReceiptOutbox {
       !nonnegative(data.nextAttemptAt) ||
       (data.errorCode !== null && !safeCode(data.errorCode)) ||
       (data.httpStatus !== null && !validHttpStatus(data.httpStatus))
+    )
+      fail("outbox_storage_failed");
+    if (
+      newer &&
+      (data.type !== "receipt" || !checkpointRole(data.checkpointRole))
     )
       fail("outbox_storage_failed");
     const anchor = data.anchor === null ? null : this.#readAnchor(data.anchor);
@@ -875,6 +935,11 @@ export class OpenClawProductReceiptOutbox {
         fail("outbox_storage_failed");
       wire = readHistoricalProductReceiptWire(item.wire, this.#store.namespace);
       if (wire.audit_id !== item.auditId) fail("outbox_storage_failed");
+      if (
+        (newer && wire.stage !== `product_${data.checkpointRole}`) ||
+        (!newer && checkpointStage(wire.stage))
+      )
+        fail("outbox_storage_failed");
       terminal = item as ReceiptItem;
     }
     if (data.type === "action") {
@@ -1163,4 +1228,20 @@ function transportFact(
       failed: "receipt_transport_failed",
     }[status],
   };
+}
+
+function checkpointRole(value: unknown): value is ProductCheckpointRole {
+  return [
+    "context_assembled",
+    "model_output_produced",
+    "tool_result_produced",
+  ].includes(value as string);
+}
+
+function checkpointStage(stage: string): boolean {
+  return [
+    "context_assembled",
+    "model_output_produced",
+    "tool_result_produced",
+  ].some((role) => stage === `product_${role}`);
 }
