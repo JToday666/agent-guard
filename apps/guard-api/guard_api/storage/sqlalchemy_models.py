@@ -448,6 +448,7 @@ enforcement_bindings = Table(
     Column("agent_id", Text, nullable=False),
     Column("policy_revision", Text, nullable=False),
     Column("requires_execution_lease", Boolean, nullable=False),
+    Column("release_mode", Text, nullable=False, server_default="strong_binding"),
     Column("grant_id", Text, nullable=True),
     Column("created_at", Text, nullable=False),
     ForeignKeyConstraint(
@@ -465,6 +466,11 @@ enforcement_bindings = Table(
     CheckConstraint(
         "requires_execution_lease",
         name="ck_enforcement_bindings_requires_execution_lease",
+    ),
+    CheckConstraint(
+        "release_mode IN ('strong_binding', 'restricted_allow_once') "
+        "AND (release_mode <> 'restricted_allow_once' OR runtime = 'openclaw')",
+        name="ck_enforcement_bindings_release_mode",
     ),
     Index("ix_enforcement_bindings_runtime_agent", "runtime", "agent_id"),
     Index("ix_enforcement_bindings_grant_id", "grant_id"),

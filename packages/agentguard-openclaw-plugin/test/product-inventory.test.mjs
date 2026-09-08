@@ -67,7 +67,7 @@ test("inventory matches independently generated Python frozen-contract digests",
     plugin_order_inventory_digest:
       "sha256:7a3b6bd031ddab5a605bb65880442ccee0da89c2adb062b5c8dc79525ef0461f",
     tool_inventory_digest:
-      "sha256:489229d091d8b98dd7c18d6b51f6bf447f34a5b8474dbc56d64ef49d47bc0484",
+      "sha256:5f6c0309ef46c50137a05b093ec9a5c0b10b742c77f749b680abc4ce750eab2f",
   });
   assert.equal(inventory.tools.length, 8);
   for (const tool of inventory.tools) {
@@ -80,7 +80,9 @@ test("inventory matches independently generated Python frozen-contract digests",
       tool.event_type,
       tool.tool_id === "agentguard_memory_write"
         ? "memory_write_proposed"
-        : "tool_call_proposed",
+        : tool.tool_id === "message"
+          ? "message_send_proposed"
+          : "tool_call_proposed",
     );
   }
 });

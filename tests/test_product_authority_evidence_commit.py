@@ -578,7 +578,9 @@ def test_approval_service_rejects_releasable_deny_only_product_intent() -> None:
     assert store.approvals == {}
 
 
-def test_restricted_directive_survives_approval_audit_and_response_rebuild() -> None:
+def test_restricted_directive_survives_approval_audit_and_response_rebuild(
+    tmp_path, monkeypatch
+) -> None:
     authority_evidence, decision_evidence = _restricted_authority_fixture()
     store = MemoryControlPlaneStore()
     settings = GuardApiSettings(storage_backend="memory")
@@ -617,7 +619,27 @@ def test_restricted_directive_survives_approval_audit_and_response_rebuild() -> 
         approval_service=approvals,
     )
 
-    response = service._rebuild_response(persisted)  # noqa: SLF001
+    # A hand-built approval/audit is not the evaluated private C1 handoff.
+    with pytest.raises(CriticalDecisionEvidenceError, match="restricted V2 ASK"):
+        service._rebuild_response(persisted)  # noqa: SLF001
+    assert store.enforcement_bindings == {}
+
+    # Rebuild the positive carrier from the real Product assessment/commit
+    # path, which owns the private fingerprint and original scope identity.
+    from tests.test_product_authority_replay import _restricted_replay_grant
+
+    harness, _real_event, original, real_audit, _approvals = _restricted_replay_grant(
+        tmp_path, monkeypatch
+    )
+    authority_evidence = parse_decision_authority_evidence_payload(
+        {"decision_authority": real_audit.evidence["decision_authority"]}
+    )
+    assert isinstance(authority_evidence, ProductDecisionAuthorityEvidenceV1)
+    response = harness.evaluation._rebuild_response(real_audit)  # noqa: SLF001
+    private = harness.store.get_enforcement_binding(original.approval.approval_id)
+    assert private is not None and private.release_mode == "restricted_allow_once"
+    assert private.policy_audit_id == real_audit.audit_id
+    assert private.authorization_fingerprint not in response.model_dump_json()
 
     assert response.approval is not None
     assert response.enforcement_binding is None

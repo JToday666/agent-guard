@@ -27,7 +27,8 @@ export type OpenClawFrozenProductTool = Readonly<{
   tool_id: OpenClawProductToolId;
   source_plugin_id: string;
   input_schema_digest: string;
-  event_type: "tool_call_proposed" | "memory_write_proposed";
+  event_type:
+    "tool_call_proposed" | "memory_write_proposed" | "message_send_proposed";
   fixture_id: string;
 }>;
 export type OpenClawProductInventory = Readonly<{
@@ -133,7 +134,9 @@ export function buildOpenClawProductInventory(
         event_type:
           toolId === "agentguard_memory_write"
             ? ("memory_write_proposed" as const)
-            : ("tool_call_proposed" as const),
+            : toolId === "message"
+              ? ("message_send_proposed" as const)
+              : ("tool_call_proposed" as const),
         fixture_id: `openclaw:${toolId}:restricted-v1`,
       });
     });

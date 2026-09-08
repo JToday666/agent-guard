@@ -161,6 +161,7 @@ def _binding_semantic_payload(record: EnforcementBindingRecord) -> tuple[Any, ..
         record.agent_id,
         record.policy_revision,
         record.requires_execution_lease,
+        record.release_mode,
         record.created_at,
     )
 
@@ -1271,7 +1272,14 @@ class MemoryControlPlaneStore:
     def save_enforcement_binding(
         self, record: EnforcementBindingRecord
     ) -> EnforcementBindingRecord:
-        if not record.requires_execution_lease:
+        if (
+            not record.requires_execution_lease
+            or record.release_mode not in {"strong_binding", "restricted_allow_once"}
+            or (
+                record.release_mode == "restricted_allow_once"
+                and record.runtime != "openclaw"
+            )
+        ):
             raise EnforcementBindingConflictError(
                 "rte-05:binding_conflict", "private binding is invalid"
             )
@@ -1428,6 +1436,11 @@ class MemoryControlPlaneStore:
         *,
         release_check: Callable[[datetime], ActivationAckV1] | None = None,
     ) -> GrantConsumptionResult:
+        if command.release_mode == "restricted_allow_once" and release_check is None:
+            raise ApprovalExecutionLeaseUnavailableError(
+                "v21:restricted_activation_required",
+                "product release authority is unavailable",
+            )
         runtime_lock = (
             self.product_runtime_status_lock
             if release_check is not None
@@ -1485,6 +1498,18 @@ class MemoryControlPlaneStore:
                     raise ApprovalLeaseAuthorizationError(
                         "rte-05:authorization_denied",
                         "credential or bound identity is not authorized",
+                    )
+                if (
+                    binding.release_mode != command.release_mode
+                    or command.release_mode
+                    not in {"strong_binding", "restricted_allow_once"}
+                    or (
+                        command.release_mode == "restricted_allow_once"
+                        and command.runtime != "openclaw"
+                    )
+                ):
+                    raise ApprovalLeaseConsumptionConflictError(
+                        "v21:release_mode_mismatch", "approval release mode mismatch"
                     )
                 if binding.action_id != command.action_id or not _safe_compare(
                     binding.authorization_fingerprint,

@@ -28,6 +28,9 @@ const { readOpenClawActivationAckHandle } = await import(
 const { buildRuntimeOutcomeAuditEvent } = await import(
   moduleUrl("mapping/audit-outcomes.js")
 );
+const { buildProductActionReceipt } = await import(
+  moduleUrl("mapping/product-receipts.js")
+);
 const { runtimeOutcomeToWire } = await import(
   moduleUrl("runtime/product-authority-context.js")
 );
@@ -151,7 +154,6 @@ function official(decision = "deny") {
         ? [...golden.openclaw_capability_projection.residual_boundaries]
         : [],
     },
-    ...(ask ? { enforcement_binding: binding() } : {}),
   };
 }
 
@@ -183,6 +185,10 @@ function event() {
     },
     metadata: {},
   };
+}
+
+function restrictedRequest(action_id = "action_product_client") {
+  return { mode: "restricted_allow_once", action_id };
 }
 
 function binding() {
@@ -392,7 +398,7 @@ test("official parser only accepts active profile_all with trusted ACK identity 
       x.decision_authority.matched_path_ids = ["some-path"];
     },
     (x) => {
-      x.decision_authority.legacy_floor_applied = true;
+      x.decision_authority.legacy_floor_applied = "false";
     },
     (x) => {
       x.decision_authority.activation_ref_digest = `sha256:${"f".repeat(64)}`;
@@ -465,7 +471,7 @@ test("official parser only accepts active profile_all with trusted ACK identity 
       x.approval_release_directive.residual_boundaries.pop();
     },
     (x) => {
-      x.enforcement_binding.runtime_binding_id = "different";
+      x.enforcement_binding = binding();
     },
   ]) {
     const value = official("ask");
@@ -522,7 +528,7 @@ for (const phase of ["heartbeat", "evaluate", "consume"]) {
             ? env.client.evaluate(event())
             : env.client.consumeProductExecutionLease(
                 evaluated.evaluation,
-                evaluated.evaluation.enforcement_binding,
+                restrictedRequest(),
                 Date.now() + 1_000,
               );
       await assert.rejects(operation, (error) => {
@@ -557,12 +563,12 @@ test("consume retries and duplicate method calls preserve the exact request body
   const { evaluation } = await env.client.evaluateProductEvent(event());
   const first = env.client.consumeProductExecutionLease(
     evaluation,
-    evaluation.enforcement_binding,
+    restrictedRequest(),
     Date.now() + 1_000,
   );
   const duplicate = env.client.consumeProductExecutionLease(
     evaluation,
-    evaluation.enforcement_binding,
+    restrictedRequest(),
     Date.now() + 2_000,
   );
   assert.equal(duplicate, first);
@@ -570,7 +576,7 @@ test("consume retries and duplicate method calls preserve the exact request body
   assert.deepEqual(
     await env.client.consumeProductExecutionLease(
       evaluation,
-      evaluation.enforcement_binding,
+      restrictedRequest(),
       Date.now() + 3_000,
     ),
     result,
@@ -579,6 +585,8 @@ test("consume retries and duplicate method calls preserve the exact request body
   const attempts = env.requests.filter((x) => x.path.endsWith("/consume"));
   assert.equal(attempts.length, 2);
   assert.equal(attempts[0].init.body, attempts[1].init.body);
+  assert.deepEqual(JSON.parse(attempts[0].init.body), restrictedRequest());
+  assert.equal(attempts[0].init.body.includes(FINGERPRINT), false);
   assert.equal(
     attempts[0].init.headers["X-AgentGuard-Activation-Ack"],
     TOKEN_B,
@@ -588,19 +596,18 @@ test("consume retries and duplicate method calls preserve the exact request body
     env.requests.filter((x) => x.path.endsWith("/heartbeat")).length,
     2,
   );
-  const outcome = buildRuntimeOutcomeAuditEvent(
-    event(),
-    evaluation,
-    "pre_execution_deny",
-    {
-      lease: { leaseId: result.leaseId, consumptionId: result.consumptionId },
-      enforcement: {
-        gate_state: "binding_failed",
-        binding_check_status: "failed",
-        lease_consume_outcome: "consumed",
-        reason_codes: ["rte-05:binding_mismatch", "rte-05:lease_consumed"],
-      },
-    },
+  const outcome = buildProductActionReceipt(event(), evaluation, {
+    kind: "pre_execution_deny",
+    lease: result,
+    approval: { status: "allowed", decision: "allow_once" },
+  });
+  assert.equal(
+    outcome.evidence.enforcement.release_mode,
+    "restricted_allow_once",
+  );
+  assert.equal(
+    outcome.evidence.enforcement.binding_check_status,
+    "not_performed",
   );
   assert.equal(
     runtimeOutcomeToWire(outcome).metadata.activation_ack.ack_token,
@@ -610,7 +617,7 @@ test("consume retries and duplicate method calls preserve the exact request body
     () =>
       env.client.consumeProductExecutionLease(
         evaluation,
-        { ...evaluation.enforcement_binding, action_id: "changed" },
+        { ...restrictedRequest(), action_id: "changed" },
         Date.now() + 1_000,
       ),
     code("consumption_request_conflict"),
@@ -627,14 +634,14 @@ test("an exhausted uncertain consumption stays cached and cannot refresh ACK to 
   const { evaluation } = await env.client.evaluateProductEvent(event());
   const first = env.client.consumeProductExecutionLease(
     evaluation,
-    evaluation.enforcement_binding,
+    restrictedRequest(),
     Date.now() + 1_000,
   );
   await assert.rejects(first, (error) => error.failure === "lease_unavailable");
   const count = env.requests.length;
   const duplicate = env.client.consumeProductExecutionLease(
     evaluation,
-    evaluation.enforcement_binding,
+    restrictedRequest(),
     Date.now() + 2_000,
   );
   assert.equal(duplicate, first);
@@ -690,7 +697,7 @@ test("close during an uncertain consume stops retries and never returns a releas
   const { evaluation } = await env.client.evaluateProductEvent(event());
   const pending = env.client.consumeProductExecutionLease(
     evaluation,
-    evaluation.enforcement_binding,
+    restrictedRequest(),
     Date.now() + 1_000,
   );
   const rejected = assert.rejects(pending);
@@ -750,7 +757,7 @@ test("local manifest drift between consume attempts stops retrying the old decis
   await assert.rejects(
     env.client.consumeProductExecutionLease(
       evaluation,
-      evaluation.enforcement_binding,
+      restrictedRequest(),
       Date.now() + 1_000,
     ),
     code("manifest_changed"),
@@ -1029,4 +1036,121 @@ test("Product receipt paths are paired, absolute, separate and keep registration
       }),
     /cannot be combined/u,
   );
+});
+
+test("restricted consume rejects fabricated strong bindings, wrong initial action and accessor fields without HTTP", async (t) => {
+  const env = await fixture(t, ({ path }) =>
+    path === "/v1/guard/evaluate" ? json(official("ask")) : undefined,
+  );
+  await env.start();
+  const { evaluation } = await env.client.evaluateProductEvent(event());
+  let reads = 0;
+  const accessor = {
+    mode: "restricted_allow_once",
+    get action_id() {
+      reads += 1;
+      return "action_product_client";
+    },
+  };
+  const before = env.requests.length;
+  for (const value of [
+    binding(),
+    { ...restrictedRequest(), authorization_fingerprint: FINGERPRINT },
+    { ...restrictedRequest(), mode: "strong_binding" },
+    accessor,
+  ]) {
+    assert.throws(
+      () =>
+        env.client.consumeProductExecutionLease(
+          evaluation,
+          value,
+          Date.now() + 1_000,
+        ),
+      code("consumption_request_invalid"),
+    );
+  }
+  assert.equal(reads, 0);
+  assert.throws(
+    () =>
+      env.client.consumeProductExecutionLease(
+        evaluation,
+        restrictedRequest("another_action"),
+        Date.now() + 1_000,
+      ),
+    code("consumption_identity_mismatch"),
+  );
+  await assert.rejects(
+    env.client.consumeExecutionLease(
+      evaluation.approval.approval_id,
+      binding(),
+      Date.now() + 1_000,
+    ),
+    code("consumption_authority_missing"),
+  );
+  assert.equal(env.requests.length, before);
+});
+
+test("restricted consumption identity belongs to this client's exact captured event", async (t) => {
+  const respond = ({ path }) =>
+    path === "/v1/guard/evaluate"
+      ? json(official("ask"))
+      : path.endsWith("/consume")
+        ? json(lease())
+        : undefined;
+  const env = await fixture(t, respond);
+  const other = await fixture(t, respond);
+  await env.start();
+  await other.start();
+  const input = event();
+  const pending = env.client.evaluateProductEvent(input);
+  input.payload.tool.call_id = "mutated_after_evaluate";
+  const { evaluation } = await pending;
+  assert.equal(
+    JSON.parse(
+      env.requests.find((x) => x.path === "/v1/guard/evaluate").init.body,
+    ).payload.tool.call_id,
+    "action_product_client",
+  );
+  const before = other.requests.length;
+  assert.throws(
+    () =>
+      other.client.consumeProductExecutionLease(
+        evaluation,
+        restrictedRequest(),
+        Date.now() + 1_000,
+      ),
+    code("consumption_authority_missing"),
+  );
+  assert.equal(other.requests.length, before);
+  const request = restrictedRequest();
+  const consumed = env.client.consumeProductExecutionLease(
+    evaluation,
+    request,
+    Date.now() + 1_000,
+  );
+  request.action_id = "mutated_after_consume";
+  await consumed;
+  assert.deepEqual(
+    JSON.parse(env.requests.find((x) => x.path.endsWith("/consume")).init.body),
+    restrictedRequest(),
+  );
+});
+
+test("official conservative floor accepts ASK and DENY but cannot authorize ALLOW", async (t) => {
+  const env = await fixture(t);
+  const ack = await env.start();
+  for (const decision of ["ask", "deny", "allow"]) {
+    const value = official(decision);
+    value.decision_authority.legacy_floor_applied = true;
+    if (decision === "allow")
+      assert.throws(
+        () => readOpenClawProductEvaluation(value, ack),
+        code("official_response_mismatch"),
+      );
+    else
+      assert.equal(
+        readOpenClawProductEvaluation(value, ack).decision.decision,
+        decision,
+      );
+  }
 });

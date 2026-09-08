@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { types } from "node:util";
 import { isAbsolute, relative, sep } from "node:path";
 
 import {
@@ -286,6 +287,11 @@ export type DecisionOutcome =
   | { kind: "pre_execution_deny"; approval: OutcomeApprovalEvidence | null }
   | { kind: "approval_release"; approval: OutcomeApprovalEvidence };
 
+export type RestrictedLeaseConsumeRequest = Readonly<{
+  mode: "restricted_allow_once";
+  action_id: string;
+}>;
+
 export class GuardApiClient {
   readonly #config: Readonly<AgentGuardPluginConfig>;
   readonly #fetchImpl: FetchLike;
@@ -300,6 +306,7 @@ export class GuardApiClient {
     Promise<ExecutionLeaseReference>
   >();
   #consumptionInputs = new WeakMap<GuardEvaluationResponse, string>();
+  #productActionIds = new WeakMap<GuardEvaluationResponse, string>();
 
   private get config(): Readonly<AgentGuardPluginConfig> {
     return this.#config;
@@ -431,17 +438,28 @@ export class GuardApiClient {
     activationAck: OpenClawActivationAckHandle;
   }> {
     this.assertProductConfiguration();
+    // Capture before the first await: caller mutation cannot change the event
+    // that establishes a later restricted action's consumption identity.
+    let body: string;
+    let captured: Record<string, unknown>;
+    try {
+      body = JSON.stringify(event);
+      captured = JSON.parse(body) as Record<string, unknown>;
+    } catch {
+      throw new OpenClawProductActivationError("event_identity_mismatch");
+    }
     if (
-      event.runtime !== "openclaw" ||
-      !isRecord(event.security_context) ||
-      event.security_context.agent_id !== this.#config.agentId
+      !isRecord(captured) ||
+      captured.runtime !== "openclaw" ||
+      !isRecord(captured.security_context) ||
+      captured.security_context.agent_id !== this.#config.agentId
     ) {
       throw new OpenClawProductActivationError("event_identity_mismatch");
     }
     const activationAck = await this.snapshotProductAck();
     const response = await this.request("/v1/guard/evaluate", {
       method: "POST",
-      body: JSON.stringify(event),
+      body,
       headers: { "X-AgentGuard-Activation-Ack": activationAck.headerValue() },
       signal: this.#productAbort.signal,
     });
@@ -453,6 +471,9 @@ export class GuardApiClient {
         activationAck,
       );
       bindEvaluationActivationAck(evaluation, activationAck);
+      const actionId = productActionId(captured);
+      if (actionId !== undefined)
+        this.#productActionIds.set(evaluation, actionId);
       return { evaluation, activationAck };
     } catch {
       this.closeProductSession();
@@ -866,7 +887,7 @@ export class GuardApiClient {
   /** Fresh ACK after approval; duplicate calls reuse the entire original attempt. */
   consumeProductExecutionLease(
     evaluation: GuardEvaluationResponse,
-    binding: EnforcementBinding,
+    request: RestrictedLeaseConsumeRequest,
     deadlineMs: number,
   ): Promise<ExecutionLeaseReference> {
     this.assertProductConfiguration();
@@ -875,15 +896,13 @@ export class GuardApiClient {
       !original ||
       evaluation.decision.decision !== "ask" ||
       evaluation.approval_release_directive?.mode !== "restricted_allow_once" ||
-      !evaluation.approval?.approval_id
+      !evaluation.approval?.approval_id ||
+      !this.#productActionIds.has(evaluation)
     ) {
       throw new OpenClawProductActivationError("consumption_authority_missing");
     }
-    const checked = parseEnforcementBinding(binding);
-    if (
-      checked.runtime_binding_id !== original.identity.runtime_binding_id ||
-      !Number.isFinite(deadlineMs)
-    ) {
+    const checked = parseRestrictedLeaseConsumeRequest(request);
+    if (!Number.isFinite(deadlineMs)) {
       throw new OpenClawProductActivationError("consumption_identity_mismatch");
     }
     const input = JSON.stringify([evaluation.approval.approval_id, checked]);
@@ -896,13 +915,17 @@ export class GuardApiClient {
       }
       return previous;
     }
+    if (checked.action_id !== this.#productActionIds.get(evaluation)) {
+      throw new OpenClawProductActivationError("consumption_identity_mismatch");
+    }
     const approvalId = evaluation.approval.approval_id;
+    const serializedBody = JSON.stringify(checked);
     const operation = (async () => {
       const ack = await this.refreshProductAck();
       bindConsumptionActivationAck(evaluation, ack);
-      return this.consumeExecutionLease(
+      return this.#consumeLeaseWire(
         approvalId,
-        checked,
+        serializedBody,
         Math.min(
           deadlineMs,
           Date.now() +
@@ -927,6 +950,26 @@ export class GuardApiClient {
     deadlineMs: number,
     activationAck?: OpenClawActivationAckHandle,
   ): Promise<ExecutionLeaseReference> {
+    if (this.productEnabled || activationAck !== undefined) {
+      throw new OpenClawProductActivationError("consumption_authority_missing");
+    }
+    const checked = parseEnforcementBinding(binding);
+    return this.#consumeLeaseWire(
+      approvalId,
+      JSON.stringify({
+        action_id: checked.action_id,
+        authorization_fingerprint: checked.authorization_fingerprint,
+      }),
+      deadlineMs,
+    );
+  }
+
+  async #consumeLeaseWire(
+    approvalId: string,
+    serializedBody: string,
+    deadlineMs: number,
+    activationAck?: OpenClawActivationAckHandle,
+  ): Promise<ExecutionLeaseReference> {
     if (this.productEnabled) {
       this.assertProductConfiguration();
       if (
@@ -935,8 +978,6 @@ export class GuardApiClient {
         activationAck.identity.agent_id !== this.#config.agentId ||
         activationAck.identity.runtime_binding_id !==
           this.#config.runtimeBindingId ||
-        binding.runtime_binding_id !==
-          activationAck.identity.runtime_binding_id ||
         Object.entries(this.#session.manifest.expectedAckIdentity).some(
           ([key, value]) =>
             activationAck.identity[
@@ -958,11 +999,6 @@ export class GuardApiClient {
       throw new OpenClawProductActivationError("product_configuration_invalid");
     }
     const path = `/v1/approvals/${encodeURIComponent(approvalId)}/execution-leases/consume`;
-    const serializedBody = JSON.stringify({
-      action_id: binding.action_id,
-      authorization_fingerprint: binding.authorization_fingerprint,
-    });
-
     for (
       let attempt = 0;
       attempt < MAX_LEASE_CONSUME_ATTEMPTS && Date.now() < deadlineMs;
@@ -1783,6 +1819,67 @@ function parseEvaluationResponse(value: unknown): GuardEvaluationResponse {
     // must not escape the response parser into runtime state or diagnostics.
     return { ...candidate, enforcement_binding: { invalid: true } };
   }
+}
+
+function parseRestrictedLeaseConsumeRequest(
+  value: unknown,
+): RestrictedLeaseConsumeRequest {
+  try {
+    if (
+      !isRecord(value) ||
+      types.isProxy(value) ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(value))
+    )
+      throw new Error();
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== 2 ||
+      !keys.includes("mode") ||
+      !keys.includes("action_id")
+    )
+      throw new Error();
+    const mode = Object.getOwnPropertyDescriptor(value, "mode");
+    const action = Object.getOwnPropertyDescriptor(value, "action_id");
+    if (
+      !mode ||
+      !("value" in mode) ||
+      mode.value !== "restricted_allow_once" ||
+      !action ||
+      !("value" in action) ||
+      typeof action.value !== "string" ||
+      !LEASE_IDENTIFIER.test(action.value)
+    )
+      throw new Error();
+    return Object.freeze({
+      mode: "restricted_allow_once",
+      action_id: action.value,
+    });
+  } catch {
+    throw new OpenClawProductActivationError("consumption_request_invalid");
+  }
+}
+
+function productActionId(event: Record<string, unknown>): string | undefined {
+  if (event.pre_execution !== true || !isRecord(event.payload)) return;
+  const payload = event.payload;
+  let action: unknown;
+  if (event.event_type === "tool_call_proposed") {
+    action = isRecord(payload.tool) ? payload.tool.call_id : undefined;
+  } else if (event.event_type === "memory_write_proposed") {
+    action =
+      payload.action_id ||
+      (typeof event.event_id === "string"
+        ? `act_${event.event_id}`
+        : undefined);
+  } else if (
+    event.event_type === "message_send_proposed" &&
+    typeof event.event_id === "string"
+  ) {
+    action = `act_${event.event_id}`;
+  }
+  return typeof action === "string" && LEASE_IDENTIFIER.test(action)
+    ? action
+    : undefined;
 }
 
 function parseEnforcementBinding(value: unknown): EnforcementBinding {

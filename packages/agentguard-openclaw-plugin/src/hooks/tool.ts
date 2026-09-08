@@ -45,12 +45,9 @@ import type {
   GuardEvent,
   ToolCallPayload,
 } from "../types.js";
-import type {
-  EnforcementGateState,
-  ToolCallState,
-} from "../runtime/state.js";
+import type { EnforcementGateState, ToolCallState } from "../runtime/state.js";
 import type { TerminalInterventionType } from "../mapping/audit-outcomes.js";
-import type { HookContext } from "./context.js";
+import { hasProductConfiguration, type HookContext } from "./context.js";
 
 export function registerBeforeToolCall(hookContext: HookContext): void {
   const {
@@ -65,6 +62,9 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
   api.on(
     "before_tool_call",
     async (event, context) => {
+      if (hookContext.productActions)
+        return hookContext.productActions.before(event, context);
+      if (hasProductConfiguration(hookContext)) return failClosedToolResult();
       if (isDisabled(config)) {
         return undefined;
       }
@@ -88,9 +88,7 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
           stringMaybe(asRecord(context).toolCallId) ??
           null;
         let stateRejection:
-          | "capacity_exhausted"
-          | "duplicate_active_id"
-          | undefined;
+          "capacity_exhausted" | "duplicate_active_id" | undefined;
         const remembered = rememberToolCallState(toolCallState, guardEvent, {
           nativeToolCallId,
           tracker: degradations,
@@ -127,19 +125,18 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
           ) {
             degradations.record("after_tool_call_local_fallback_correlation");
           }
-          const strongResult =
-            !remembered
+          const strongResult = !remembered
+            ? {
+                outcome: "blocked" as const,
+                approval: null,
+                enforcement: capacityFailureEvidence(),
+              }
+            : remembered.correlationSource !== "native_tool_call_id"
               ? {
                   outcome: "blocked" as const,
                   approval: null,
-                  enforcement: capacityFailureEvidence(),
+                  enforcement: correlationFailureEvidence(),
                 }
-              : remembered.correlationSource !== "native_tool_call_id"
-                ? {
-                    outcome: "blocked" as const,
-                    approval: null,
-                    enforcement: correlationFailureEvidence(),
-                  }
               : validation.ok
                 ? await consumeStrongApproval(
                     client,
@@ -153,10 +150,7 @@ export function registerBeforeToolCall(hookContext: HookContext): void {
                         context,
                       );
                       const latestGuardEvent = snapshotGuardEvent(
-                        buildToolCallGuardEvent(
-                          latest.event,
-                          latest.context,
-                        ),
+                        buildToolCallGuardEvent(latest.event, latest.context),
                       );
                       return (
                         strongHostInputSnapshot(
@@ -402,7 +396,12 @@ export function registerAfterToolCall(hookContext: HookContext): void {
   } = hookContext;
   api.on(
     "after_tool_call",
-    (event, context) => {
+    async (event, context) => {
+      if (hookContext.productActions) {
+        await hookContext.productActions.after(event, context);
+        return;
+      }
+      if (hasProductConfiguration(hookContext)) return;
       if (isDisabled(config)) {
         return;
       }
@@ -482,7 +481,8 @@ export function registerAfterToolCall(hookContext: HookContext): void {
           config,
           guardEvent: state.guardEvent,
           evaluation: state.evaluation,
-          kind: terminal === "failed" ? "execution_failed" : "execution_completed",
+          kind:
+            terminal === "failed" ? "execution_failed" : "execution_completed",
           approval,
           lease,
           enforcement: state.enforcement,
@@ -528,6 +528,22 @@ export function registerToolResultPersist(hookContext: HookContext): void {
   api.on(
     "tool_result_persist",
     (event, context) => {
+      if (hookContext.productActions)
+        return hookContext.productActions.resultForPersistence(
+          event,
+          context,
+        ) as never;
+      if (hasProductConfiguration(hookContext))
+        return {
+          message: {
+            role: "toolResult",
+            toolCallId: "unknown",
+            toolName: "product_boundary",
+            content: [{ type: "text", text: "Product result withheld" }],
+            isError: true,
+            timestamp: Date.now(),
+          } as never,
+        };
       if (isDisabled(config)) {
         return undefined;
       }

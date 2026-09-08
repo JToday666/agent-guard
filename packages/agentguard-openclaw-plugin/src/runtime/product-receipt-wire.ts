@@ -58,7 +58,7 @@ const REASONS = [
   "lease_consume_timed_out",
   "multiple_binding_conflict",
   "correlation_capacity_exhausted",
-].map((v) => `rte-05:${v}`);
+].map((v) => `rte-05:${v}`).concat(["v21:restricted_allow_once", "v21:restricted_host_mismatch"]);
 
 /** Freeze the genuine carrier before the first asynchronous storage operation. */
 export function captureProductReceiptWire(
@@ -317,6 +317,7 @@ export function readHistoricalProductReceiptWire(
         kind,
         execution.status,
         approval,
+        execution.invoked_at,
       );
     else if (hasLease) fail();
     const { ack_token: _secret, ...publicAck } = ack;
@@ -341,13 +342,14 @@ function validateEnforcement(
   kind: unknown,
   status: unknown,
   approval: Record<string, unknown>,
+  invokedAt: unknown,
 ): void {
   const e = object(value, [
     "gate_state",
     "binding_check_status",
     "lease_consume_outcome",
     "reason_codes",
-  ]);
+  ], ["release_mode"]);
   choice(e.gate_state, GATES);
   choice(e.binding_check_status, [
     "not_applicable",
@@ -373,10 +375,20 @@ function validateEnforcement(
   )
     fail();
   for (const reason of reasons) choice(reason, REASONS);
+  if ("release_mode" in e) choice(e.release_mode, ["strong_binding", "restricted_allow_once"]);
+  const restricted = e.release_mode === "restricted_allow_once";
+  if (restricted) {
+    equal(e.binding_check_status, "not_performed");
+    equal(invokedAt, null);
+    if (!reasons.includes("v21:restricted_allow_once") || reasons.includes("rte-05:binding_exact")) fail();
+  } else if (reasons.some((reason) => reason.startsWith("v21:restricted_"))) fail();
   const consumed = e.lease_consume_outcome === "consumed";
   const hasLease = "lease_id" in links;
-  const released =
-    e.gate_state === "approval_released" && e.binding_check_status === "passed";
+  const released = e.gate_state === "approval_released" && (
+    restricted
+      ? reasons.length === 2 && reasons.includes("rte-05:lease_consumed")
+      : e.binding_check_status === "passed"
+  );
   const deniedShapes: [string, string, string[]][] = [
     ["binding_failed", "failed", ["binding_mismatch", "lease_consumed"]],
     ["timed_out", "passed", ["binding_exact", "lease_consume_timed_out"]],
@@ -384,7 +396,7 @@ function validateEnforcement(
     ["binding_failed", "passed", ["binding_exact", "lease_response_invalid"]],
     ["binding_failed", "failed", ["multiple_binding_conflict"]],
   ];
-  const denied =
+  const strongDenied =
     kind === "pre_execution_deny" &&
     deniedShapes.some(
       ([gate, binding, expected]) =>
@@ -393,6 +405,15 @@ function validateEnforcement(
         reasons.length === expected.length &&
         expected.every((reason) => reasons.includes(`rte-05:${reason}`)),
     );
+  const restrictedDenied = restricted && kind === "pre_execution_deny" && reasons.length === 3
+    && reasons.includes("rte-05:lease_consumed")
+    && [
+      ["binding_failed", "v21:restricted_host_mismatch"],
+      ["binding_failed", "rte-05:lease_expired"],
+      ["binding_failed", "rte-05:lease_response_invalid"],
+      ["timed_out", "rte-05:lease_consume_timed_out"],
+    ].some(([gate, reason]) => e.gate_state === gate && reasons.includes(reason!));
+  const denied = restricted ? restrictedDenied : strongDenied;
   if (
     consumed &&
     (!hasLease ||

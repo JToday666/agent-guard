@@ -512,7 +512,17 @@ def test_product_ask_commits_runtime_specific_release_and_exact_carrier_parity(
         mode="json"
     )
     if runtime == "openclaw":
-        assert stack.store.enforcement_bindings == {}
+        private = stack.store.get_enforcement_binding(response.approval.approval_id)
+        assert private is not None and private.release_mode == "restricted_allow_once"
+        assert private.event_id == event.event_id
+        assert private.action_id == approval.action_id
+        assert private.policy_audit_id == audit.audit_id
+        assert (
+            private.runtime_binding_id
+            == stack.fixture.bundle.runtime_entry("openclaw").runtime_binding_id
+        )
+        assert private.authorization_fingerprint not in response.model_dump_json()
+        assert private.authorization_fingerprint not in audit.model_dump_json()
     else:
         assert response.enforcement_binding is not None
         assert response.enforcement_binding.runtime_binding_id == (
@@ -569,7 +579,18 @@ def test_product_side_effect_ask_release_applies_to_memory_and_message(
     )
     assert (response.enforcement_binding is not None) is (runtime == "langgraph")
     if runtime == "openclaw":
-        assert stack.store.enforcement_bindings == {}
+        private = stack.store.get_enforcement_binding(response.approval.approval_id)
+        assert private is not None and private.release_mode == "restricted_allow_once"
+        assert private.event_id == event.event_id
+        assert private.action_type == action_type
+        assert (
+            private.runtime_binding_id
+            == stack.fixture.bundle.runtime_entry("openclaw").runtime_binding_id
+        )
+        assert private.authorization_fingerprint not in response.model_dump_json()
+        audit = stack.store.get_policy_evaluation_by_event_id(event.event_id)
+        assert audit is not None and private.policy_audit_id == audit.audit_id
+        assert private.authorization_fingerprint not in audit.model_dump_json()
 
 
 def _force_current_decision(

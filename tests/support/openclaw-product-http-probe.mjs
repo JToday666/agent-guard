@@ -138,13 +138,6 @@ async function run(input) {
     }
 
     phase = "evaluate";
-    if (input.scenario === "legacy-floor-rejected") {
-      return {
-        ok: true,
-        rejected: true,
-        ...(await rejection(() => client.evaluateProductEvent(input.event))),
-      };
-    }
     const { evaluation, activationAck } = await client.evaluateProductEvent(
       input.event,
     );

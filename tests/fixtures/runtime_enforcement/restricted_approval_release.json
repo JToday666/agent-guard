@@ -1,0 +1,98 @@
+{
+  "audit_id": "audit_outcome_evt_rte_fixture_002_approval_release",
+  "schema_version": "0.4",
+  "record_type": "runtime_outcome",
+  "trace_id": "trace_rte_fixture_002",
+  "case_id": null,
+  "runtime": "openclaw",
+  "timestamp": "2026-08-15T08:05:02+00:00",
+  "stage": "runtime_enforcement",
+  "event_type": "runtime_outcome",
+  "attack_type": null,
+  "is_malicious": null,
+  "summary": "Restricted human approval gate released; invocation remains unknown.",
+  "decision": "ask",
+  "risk_score": 60,
+  "severity": "medium",
+  "blocked": false,
+  "resource_targets": [
+    "file:///workspace/export.csv"
+  ],
+  "rule_hits": [
+    "A002"
+  ],
+  "reason": "The human allow_once lease was consumed under C1 host checks.",
+  "links": {
+    "event_id": "evt_rte_fixture_002",
+    "decision_id": "dec_rte_fixture_002",
+    "policy_audit_id": "audit_policy_rte_fixture_002",
+    "action_id": "act_rte_fixture_002",
+    "approval_id": "apr_rte_fixture_002",
+    "lease_id": "lease_restricted_fixture",
+    "consumption_id": "cons_restricted_fixture"
+  },
+  "latency_ms": null,
+  "metadata": {
+    "agent_id": "agent_rte_fixture",
+    "outcome_kind": "approval_release",
+    "activation_ack": {
+      "schema_version": "1.0",
+      "runtime": "openclaw",
+      "runtime_version": "2026.7.1-2",
+      "plugin_version": "0.1.0-rc.1",
+      "agent_id": "agent_rte_fixture",
+      "runtime_binding_id": "binding:restricted:fixture",
+      "profile_id": "agentguard-openclaw-v2-restricted",
+      "activation_ref_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "capability_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "host_inventory_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "plugin_inventory_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+      "plugin_order_inventory_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+      "tool_inventory_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+      "issued_at": "2026-08-15T08:04:00+00:00",
+      "expires_at": "2026-08-15T08:06:00+00:00",
+      "ack_token": "hmac-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "evidence": {
+    "intervention": {
+      "type": "approval_gate",
+      "reason": "Restricted allow_once release."
+    },
+    "execution": {
+      "status": "unknown",
+      "receipt_recorded": true,
+      "invoked_at": null,
+      "completed_at": "2026-08-15T08:05:02+00:00",
+      "error": null,
+      "tool_result_entered_context": null,
+      "persisted": null
+    },
+    "side_effects": {
+      "measurement_status": "unknown",
+      "count": null,
+      "summary": "Side effects not yet observable at approval release time."
+    },
+    "result": {
+      "disposition": "unknown",
+      "summary": "No tool result available yet; the action was just released.",
+      "sanitized": null
+    },
+    "approval": {
+      "approval_id": "apr_rte_fixture_002",
+      "status": "allowed",
+      "decision": "allow_once",
+      "resolved_at": "2026-08-15T08:05:02+00:00"
+    },
+    "enforcement": {
+      "release_mode": "restricted_allow_once",
+      "gate_state": "approval_released",
+      "binding_check_status": "not_performed",
+      "lease_consume_outcome": "consumed",
+      "reason_codes": [
+        "v21:restricted_allow_once",
+        "rte-05:lease_consumed"
+      ]
+    }
+  }
+}

@@ -77,6 +77,8 @@ RuntimeLeaseConsumeOutcome = Literal[
     "unknown",
 ]
 RuntimeEnforcementReasonCode = Literal[
+    "v21:restricted_allow_once",
+    "v21:restricted_host_mismatch",
     "rte-05:binding_exact",
     "rte-05:binding_invalid",
     "rte-05:binding_mismatch",
@@ -406,6 +408,9 @@ class RuntimeOutcomeMetadata(BaseModel):
 class RuntimeEnforcementEvidence(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    release_mode: Literal["strong_binding", "restricted_allow_once"] = Field(
+        default="strong_binding", exclude_if=lambda value: value == "strong_binding"
+    )
     gate_state: RuntimeEnforcementGateState
     binding_check_status: RuntimeBindingCheckStatus
     lease_consume_outcome: RuntimeLeaseConsumeOutcome
@@ -415,7 +420,40 @@ class RuntimeEnforcementEvidence(BaseModel):
     def validate_reason_codes(self) -> "RuntimeEnforcementEvidence":
         if len(self.reason_codes) != len(set(self.reason_codes)):
             raise ValueError("enforcement reason_codes must be unique")
+        restricted = self.release_mode == "restricted_allow_once"
+        if restricted:
+            if (
+                self.binding_check_status != "not_performed"
+                or "v21:restricted_allow_once" not in self.reason_codes
+                or "rte-05:binding_exact" in self.reason_codes
+            ):
+                raise ValueError("restricted enforcement cannot claim strong binding")
+        elif any(code.startswith("v21:restricted_") for code in self.reason_codes):
+            raise ValueError("restricted evidence requires an explicit release mode")
         return self
+
+    def restricted_post_consume_deny(self) -> bool:
+        """Frozen C1 denial shapes; host checks never claim exact binding."""
+        return (
+            self.release_mode == "restricted_allow_once"
+            and self.binding_check_status == "not_performed"
+            and self.lease_consume_outcome == "consumed"
+            and (self.gate_state, frozenset(self.reason_codes))
+            in {
+                (
+                    gate,
+                    frozenset(
+                        {"v21:restricted_allow_once", "rte-05:lease_consumed", reason}
+                    ),
+                )
+                for gate, reason in (
+                    ("binding_failed", "v21:restricted_host_mismatch"),
+                    ("binding_failed", "rte-05:lease_expired"),
+                    ("binding_failed", "rte-05:lease_response_invalid"),
+                    ("timed_out", "rte-05:lease_consume_timed_out"),
+                )
+            }
+        )
 
 
 class RuntimeOutcomeEvidence(BaseModel):
@@ -551,8 +589,28 @@ class RuntimeOutcomeReceipt(AuditEvent):
                     }
                 )
             )
+            if enforcement.release_mode == "restricted_allow_once":
+                if (
+                    self.runtime != "openclaw"
+                    or self.metadata.activation_ack is None
+                    or self.evidence.execution.get("invoked_at") is not None
+                ):
+                    raise ValueError(
+                        "restricted outcomes require OpenClaw ACK and no invocation timestamp"
+                    )
+                released_consume = (
+                    enforcement.gate_state == "approval_released"
+                    and frozenset(enforcement.reason_codes)
+                    == frozenset({"v21:restricted_allow_once", "rte-05:lease_consumed"})
+                )
+                blocked_after_consume = (
+                    self.metadata.outcome_kind == "pre_execution_deny"
+                    and enforcement.restricted_post_consume_deny()
+                )
             if consumed and (
                 not has_execution_lease
+                or self.links.action_id is None
+                or self.links.approval_id is None
                 or not (released_consume or blocked_after_consume)
                 or self.evidence.approval.get("status") != "allowed"
                 or self.evidence.approval.get("decision") != "allow_once"

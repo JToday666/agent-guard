@@ -1,15 +1,42 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://agentguard.dev/schemas/execution_lease_consume_request.schema.json",
-  "title": "RTE-05 Execution Lease Consume Request",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["action_id", "authorization_fingerprint"],
-  "properties": {
-    "action_id": { "type": "string", "minLength": 1 },
-    "authorization_fingerprint": {
-      "type": "string",
-      "pattern": "^hmac-sha256:[0-9a-f]{64}$"
+  "title": "Execution Lease Consume Request",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action_id",
+        "authorization_fingerprint"
+      ],
+      "properties": {
+        "action_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "authorization_fingerprint": {
+          "type": "string",
+          "pattern": "^hmac-sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "action_id"
+      ],
+      "properties": {
+        "mode": {
+          "const": "restricted_allow_once"
+        },
+        "action_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     }
-  }
+  ]
 }

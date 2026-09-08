@@ -74,6 +74,13 @@ export function evaluationActivationAck(
   return evaluationContexts.get(evaluation)?.evaluation;
 }
 
+/** The original consume attempt ACK; never the session latest value. */
+export function consumptionActivationAck(
+  evaluation: GuardEvaluationResponse,
+): OpenClawActivationAckHandle | undefined {
+  return evaluationContexts.get(evaluation)?.consumption;
+}
+
 /** Copies no credential fields into the publicly inspectable correlation state. */
 export function copyProductAuthorityContext(
   from: GuardEvaluationResponse,

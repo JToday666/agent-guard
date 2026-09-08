@@ -285,10 +285,11 @@ export type Rte05ReasonCode =
   | "rte-05:correlation_capacity_exhausted";
 
 export type RuntimeEnforcementEvidence = {
+  release_mode?: "strong_binding" | "restricted_allow_once";
   gate_state: EnforcementGateState;
   binding_check_status: BindingCheckStatus;
   lease_consume_outcome: LeaseConsumeOutcome;
-  reason_codes: Rte05ReasonCode[];
+  reason_codes: (Rte05ReasonCode | "v21:restricted_allow_once" | "v21:restricted_host_mismatch")[];
 };
 
 export type GuardDecision = {

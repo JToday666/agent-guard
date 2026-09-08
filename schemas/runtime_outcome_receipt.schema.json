@@ -351,6 +351,7 @@
           "type": "object",
           "required": ["gate_state", "binding_check_status", "lease_consume_outcome", "reason_codes"],
           "properties": {
+            "release_mode": { "enum": ["strong_binding", "restricted_allow_once"], "default": "strong_binding" },
             "gate_state": {
               "enum": [
                 "evaluating",
@@ -384,6 +385,8 @@
               "uniqueItems": true,
               "items": {
                 "enum": [
+                  "v21:restricted_allow_once",
+                  "v21:restricted_host_mismatch",
                   "rte-05:binding_exact",
                   "rte-05:binding_invalid",
                   "rte-05:binding_mismatch",
@@ -539,6 +542,220 @@
         },
         "required": ["links", "evidence"],
         "anyOf": [
+          {
+            "anyOf": [
+              {
+                "properties": {
+                  "evidence": {
+                    "properties": {
+                      "enforcement": {
+                        "properties": {
+                          "release_mode": {
+                            "const": "restricted_allow_once"
+                          },
+                          "gate_state": {
+                            "const": "approval_released"
+                          },
+                          "reason_codes": {
+                            "minItems": 2,
+                            "maxItems": 2,
+                            "allOf": [
+                              {
+                                "contains": {
+                                  "const": "v21:restricted_allow_once"
+                                }
+                              },
+                              {
+                                "contains": {
+                                  "const": "rte-05:lease_consumed"
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "release_mode",
+                          "gate_state",
+                          "reason_codes"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "enforcement"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence"
+                ]
+              },
+              {
+                "properties": {
+                  "evidence": {
+                    "properties": {
+                      "enforcement": {
+                        "properties": {
+                          "release_mode": {
+                            "const": "restricted_allow_once"
+                          }
+                        },
+                        "required": [
+                          "release_mode"
+                        ],
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "gate_state": {
+                                "const": "binding_failed"
+                              },
+                              "reason_codes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "allOf": [
+                                  {
+                                    "contains": {
+                                      "const": "v21:restricted_allow_once"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_consumed"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "v21:restricted_host_mismatch"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "gate_state",
+                              "reason_codes"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "gate_state": {
+                                "const": "binding_failed"
+                              },
+                              "reason_codes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "allOf": [
+                                  {
+                                    "contains": {
+                                      "const": "v21:restricted_allow_once"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_consumed"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_expired"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "gate_state",
+                              "reason_codes"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "gate_state": {
+                                "const": "binding_failed"
+                              },
+                              "reason_codes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "allOf": [
+                                  {
+                                    "contains": {
+                                      "const": "v21:restricted_allow_once"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_consumed"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_response_invalid"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "gate_state",
+                              "reason_codes"
+                            ]
+                          },
+                          {
+                            "properties": {
+                              "gate_state": {
+                                "const": "timed_out"
+                              },
+                              "reason_codes": {
+                                "minItems": 3,
+                                "maxItems": 3,
+                                "allOf": [
+                                  {
+                                    "contains": {
+                                      "const": "v21:restricted_allow_once"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_consumed"
+                                    }
+                                  },
+                                  {
+                                    "contains": {
+                                      "const": "rte-05:lease_consume_timed_out"
+                                    }
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "gate_state",
+                              "reason_codes"
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "enforcement"
+                    ]
+                  },
+                  "metadata": {
+                    "properties": {
+                      "outcome_kind": {
+                        "const": "pre_execution_deny"
+                      }
+                    },
+                    "required": [
+                      "outcome_kind"
+                    ]
+                  }
+                },
+                "required": [
+                  "evidence",
+                  "metadata"
+                ]
+              }
+            ]
+          },
           {
             "properties": {
               "evidence": {
@@ -757,6 +974,100 @@
           }
         },
         "required": ["evidence"]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "enforcement": {
+                "properties": {
+                  "release_mode": {
+                    "const": "restricted_allow_once"
+                  }
+                },
+                "required": [
+                  "release_mode"
+                ]
+              }
+            },
+            "required": [
+              "enforcement"
+            ]
+          }
+        },
+        "required": [
+          "evidence"
+        ]
+      },
+      "then": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "enforcement": {
+                "properties": {
+                  "binding_check_status": {
+                    "const": "not_performed"
+                  },
+                  "reason_codes": {
+                    "contains": {
+                      "const": "v21:restricted_allow_once"
+                    },
+                    "not": {
+                      "contains": {
+                        "const": "rte-05:binding_exact"
+                      }
+                    }
+                  }
+                }
+              },
+              "execution": {
+                "properties": {
+                  "invoked_at": {
+                    "type": "null"
+                  }
+                }
+              }
+            },
+            "required": [
+              "enforcement"
+            ]
+          },
+          "runtime": {
+            "const": "openclaw"
+          },
+          "metadata": {
+            "required": [
+              "activation_ack"
+            ]
+          }
+        },
+        "required": [
+          "evidence"
+        ]
+      },
+      "else": {
+        "properties": {
+          "evidence": {
+            "properties": {
+              "enforcement": {
+                "properties": {
+                  "reason_codes": {
+                    "not": {
+                      "contains": {
+                        "enum": [
+                          "v21:restricted_allow_once",
+                          "v21:restricted_host_mismatch"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   ],

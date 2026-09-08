@@ -81,7 +81,8 @@ export function readOpenClawProductEvaluation(
       authority.source !== "v21" ||
       authority.mode !== "active" ||
       authority.selection_basis !== "profile_all" ||
-      authority.legacy_floor_applied !== false ||
+      typeof authority.legacy_floor_applied !== "boolean" ||
+      (authority.legacy_floor_applied && decision.decision === "allow") ||
       !Array.isArray(authority.matched_path_ids) ||
       authority.matched_path_ids.length !== 0 ||
       authority.activation_ref_digest !== ack.identity.activation_ref_digest ||
@@ -146,25 +147,7 @@ export function readOpenClawProductEvaluation(
       response.enforcement_binding !== undefined &&
       response.enforcement_binding !== null
     ) {
-      const binding = exactObject(response.enforcement_binding, [
-        "schema_version",
-        "action_id",
-        "authorization_fingerprint",
-        "runtime_binding_id",
-        "requires_execution_lease",
-      ]);
-      if (
-        !restricted ||
-        binding.schema_version !== "2.1" ||
-        !identifier(binding.action_id) ||
-        typeof binding.authorization_fingerprint !== "string" ||
-        !/^hmac-sha256:[0-9a-f]{64}$/u.test(
-          binding.authorization_fingerprint,
-        ) ||
-        binding.runtime_binding_id !== ack.identity.runtime_binding_id ||
-        binding.requires_execution_lease !== true
-      )
-        fail();
+      fail(); // C1 restricted authority never projects a C3 EnforcementBinding.
     }
     // Freeze server authority and the decision identity before correlation aliases exist.
     return deepFreeze(response) as unknown as GuardEvaluationResponse;

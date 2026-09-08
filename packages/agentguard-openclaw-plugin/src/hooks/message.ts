@@ -28,14 +28,24 @@ import {
   validateStrongBinding,
 } from "../runtime/strong-binding.js";
 import { FINAL_ENFORCEMENT_HOOK_PRIORITY } from "../runtime/host-capabilities.js";
-import type { HookContext } from "./context.js";
+import { hasProductConfiguration, type HookContext } from "./context.js";
 
 export function registerMessageSending(hookContext: HookContext): void {
-  const { api, config, makeClient, outcomeDelivery, sessionState, degradations } =
-    hookContext;
+  const {
+    api,
+    config,
+    makeClient,
+    outcomeDelivery,
+    sessionState,
+    degradations,
+  } = hookContext;
   api.on(
     "message_sending",
     async (event, context) => {
+      if (hookContext.productActions)
+        return hookContext.productActions.messageSending(event, context);
+      if (hasProductConfiguration(hookContext))
+        return failClosedMessageResult();
       if (isDisabled(config)) {
         return undefined;
       }
@@ -78,10 +88,7 @@ export function registerMessageSending(hookContext: HookContext): void {
                     context,
                   );
                   const latestGuardEvent = snapshotGuardEvent(
-                    buildMessageSendGuardEvent(
-                      latest.event,
-                      latest.context,
-                    ),
+                    buildMessageSendGuardEvent(latest.event, latest.context),
                   );
                   return (
                     strongHostInputSnapshot(
