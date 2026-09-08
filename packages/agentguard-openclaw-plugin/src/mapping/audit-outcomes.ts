@@ -7,6 +7,7 @@ import type {
   RuntimeOutcomeReceipt,
   RuntimeReceiptKind,
 } from "../types.js";
+import { attachRuntimeOutcomeActivationAck } from "../runtime/product-authority-context.js";
 
 const ENFORCEMENT_GATE_STATES = new Set([
   "evaluating",
@@ -163,7 +164,7 @@ export function buildRuntimeOutcomeAuditEvent(
     throw new Error("runtime execution lease links require enforcement evidence");
   }
 
-  return {
+  const receipt: RuntimeOutcomeReceipt = {
     // 确定性派生：同一逻辑评估 + 同一干预类型重试时保持稳定（§12.3 幂等）。
     audit_id: `audit_outcome_${guardEvent.event_id}_${outcomeKind}`,
     schema_version: "0.4",
@@ -212,6 +213,8 @@ export function buildRuntimeOutcomeAuditEvent(
         : {}),
     },
   };
+  attachRuntimeOutcomeActivationAck(receipt, evaluation);
+  return receipt;
 }
 
 export function validateEnforcementEvidence(

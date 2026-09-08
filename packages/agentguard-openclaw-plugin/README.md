@@ -77,22 +77,25 @@ OpenClaw plugin config 示例：
 
 `agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`runtimeBindingId` 是与该 credential principal 一起可信下发的 `binding:<principal_id>`，不得从 evaluate 响应或工具参数学习；服务端一旦声明 execution lease，缺失或不匹配会在等待/consume 前 fail closed。`strongApprovalBindingEnabled` 已弃用，保留旧配置兼容，默认 `false`；它仅启用历史 canary 处理，不代表 Strong Binding。当前 OpenClaw hook API 无法在最终调用边界原子地 replace-and-seal 参数/消息，因此 heartbeat 的 C3 始终保持 false。插件会在 consume 前后复验完整 action snapshot，在成功时返回批准内容的深拷贝，并以最低安全整数优先级尽量成为最后修改 hook；同优先级或更低优先级的其他插件仍是明确的残余信任边界。`approvalTimeoutMs` 是审批等待与 consume 重试共享的唯一 deadline；每个 Guard API 请求的 `requestTimeoutMs` 同时覆盖 headers 和有界 body 读取/解析，JSON 响应最大 1 MiB，停滞、超限或无效响应均在插件内安全分类。409/410 不重试，网络、429、5xx/503 仅以完全相同请求在 deadline 内有界重试。插件只保留 lease/consumption ID，明文 lease token 在响应解析栈内验证后丢弃。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
 
-### P0 V2 配置迁移与 ACK reader（尚未运行时接线）
+### V2.1 Product ACK 传输（产品启动仍关闭）
 
-本批仅提供配置校验与纯 `ActivationAckV1` reader，尚未接入 heartbeat、evaluate、lease 或 receipt。显式配置 official profile 会在插件注册前以 `officialProfileId activation is not available in this build` 拒绝，避免静默使用旧决策链；不能用这些字段提前开启 V2。包版本仍为 `0.1.0-beta.1`，不构成真实 Host / Internal RC 证据。
+已接入受保护本地清单、Product heartbeat、ACK 会话、evaluate/consume 请求头和历史 receipt carrier。传输只接受 `source=v21 / mode=active / selection_basis=profile_all`；响应身份来自本地清单的预期值，不从服务端输出反推。显式配置 official profile 仍在插件注册前拒绝，直到七事件消费者、加密持久投递和熔断完整接通。当前实际包仍是 `0.1.0-beta.1`，真实版本检查会在 HTTP 前拒绝 Product 握手。
 
 | 字段 | 默认与约束 |
 | --- | --- |
-| `officialProfileId` | 未配置为空；schema 仅接受 `agentguard-openclaw-v2-restricted`，本构建尚不允许启用 |
-| `officialProfileDigest` | 未配置为空；必须与 profile ID 成对配置，接受小写 `sha256:` + 64 位摘要 |
-| `restrictedAskReleaseEnabled` | 默认 `false`；本构建配置 `true` 直接拒绝插件注册，不能打开未完成的放行链 |
-| `activationAckMaxAgeMs` | 默认 `120000`；仅接受 `1..120000` 的整数，不延长服务端 expiry |
+| `officialProfileId` | 未配置为空；仅接受 `agentguard-openclaw-v2-restricted`，当前注册限制保留 |
+| `officialProfileDigest` | 与 profile ID 成对配置，小写 `sha256:` + 64 位摘要 |
+| `productManifestPath` | 显式提供绝对路径；规范 JSON、文件 `0600`、父目录 `0700`，校验所有者、链接和变更 |
+| `restrictedAskReleaseEnabled` | 默认 `false`；当前配置 `true` 直接拒绝插件注册 |
+| `activationAckMaxAgeMs` | 默认 `120000`；`1..120000` 的整数，服务端更短 expiry 优先 |
 
-profile 还要求可信、非空的 `runtimeBindingId` 和 `enforcementMode=enforce`。旧 `strongApprovalBindingEnabled` 与上述任一新字段同时显式出现都会配置失败，包括 `false` 与 `false`。迁移时先删除旧字段，不要在旧示例上直接追加新字段。Host 会自动填入 schema defaults，因此这五个迁移字段均不在 schema 设置 `default`，而由插件配置构建器补齐默认值，避免 Host 制造虚假的配置冲突。
+profile 还要求可信非空 `runtimeBindingId`、`agentId` 和 `enforcementMode=enforce`。旧 `strongApprovalBindingEnabled` 与任一新字段同时显式出现都会失败，包括显式 `false`。迁移字段不设置 Host schema defaults，避免注入虚假的配置冲突。
 
-`src/runtime/activation-ack.ts` 仅检查精确 16 字段、由调用方独立提供的 11 项可信身份/清单值和时间窗口；ACK Host pin 为 `2026.7.1-2`、候选插件 pin 为 `0.1.0-rc.1`。时间检查保留亚毫秒精度，最大有效期 120 秒，过期时刻不包含在有效窗口内。它不持有服务端密钥、不验证 HMAC 真伪；服务端仍须验证回传 token。返回的冻结对象包含原始 token，仅供后续内存传输，不得写入日志、状态或普通 spool；读取错误只包含固定错误码。Python/TS golden vectors 的通过只证明契约一致，不证明运行时接线完成。
+`GuardApiClient.startProductSession(observe)` 从本地清单加载身份和四类 inventory 预期，独立 observer 提供实际安装版本、能力和清单观察值；使用既有 heartbeat 接口。默认每 30 秒刷新，单次并发请求，ACK 最长 120 秒。`refreshProductAck`、`snapshotProductAck`、`closeProductSession` 管理会话；身份、版本、清单或 activation 漂移后阻断新动作。
 
-后续必须原子接入可信 inventory/profile handshake、ACK 生命周期和 required receipt carrier，再配合 durable spool 与 breaker 才能移除 restricted release fuse。OpenClaw 的 C3 仍为 false、CF-13 仍为 `NOT_SUPPORTED`。
+`evaluateProductEvent` 保存不可变 ACK；审批后的 `consumeProductExecutionLease` 刷新一次并固定请求体和 ACK，重复调用保留原消费结果。历史回执使用 evaluate 或 consume 当时的 ACK，关闭/刷新会话后仍通过原传输发送；普通 JSON、日志和 correlation state 不带 ACK token，只有显式 `runtimeOutcomeToWire` 才生成完整传输载体。旧明文 spool 明确拒绝 Product 回执，不降级直接投递；后续加密队列完成前不能启动产品动作。
+
+Node 与真实 Guard API 的 HTTP 契约测试使用实际构建的 SDK 和 pinned Host 包，测试专用副本采用合成 RC metadata；不修改生产版本检查，不构成候选签署、真实宿主副作用或 Product Active 验收。OpenClaw 保持 restricted allow_once、五项残余边界、`C3=false` 和 `CF-13=NOT_SUPPORTED`。
 
 ## Windows 支持
 

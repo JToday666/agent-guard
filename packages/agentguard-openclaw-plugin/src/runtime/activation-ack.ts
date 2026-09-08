@@ -245,7 +245,7 @@ function readClockOptions(value: unknown): {
 }
 
 /** Preserve fractional precision instead of Date.parse's millisecond truncation. */
-function rfc3339Nanoseconds(value: unknown): bigint | null {
+export function rfc3339Nanoseconds(value: unknown): bigint | null {
   if (typeof value !== "string") {
     return null;
   }

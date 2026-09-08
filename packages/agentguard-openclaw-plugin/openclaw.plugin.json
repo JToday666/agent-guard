@@ -85,7 +85,7 @@
       "officialProfileId": {
         "type": "string",
         "enum": ["agentguard-openclaw-v2-restricted"],
-        "description": "Trusted V2 profile metadata, paired with officialProfileDigest and runtimeBindingId in enforce mode. Activation is not available in this reader-only build; configured profiles refuse plugin registration."
+        "description": "Trusted V2 profile metadata, paired with officialProfileDigest, productManifestPath and runtimeBindingId in enforce mode. Plugin activation remains unavailable until durable delivery, breaker and seven event consumers are complete."
       },
       "officialProfileDigest": {
         "type": "string",
@@ -114,6 +114,11 @@
         "type": "string",
         "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
         "default": "main"
+      },
+      "productManifestPath": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Absolute protected local Product manifest file (0600 in a 0700 directory). Activation transport requires this trusted identity and inventory; plugin registration remains unavailable until full Product composition."
       }
     }
   },
@@ -144,7 +149,7 @@
     },
     "restrictedAskReleaseEnabled": {
       "label": "Experimental restricted ASK release",
-      "help": "Defaults to false. Enabling is not available in this build; handshake, required spool and breaker are not yet wired. C3 remains false."
+      "help": "Defaults to false. Enabling is not available until durable delivery, breaker and runtime consumers are complete. C3 remains false."
     },
     "activationAckMaxAgeMs": {
       "label": "Activation ACK maximum age (ms)",
@@ -159,6 +164,10 @@
     },
     "agentId": {
       "label": "Bound agent ID"
+    },
+    "productManifestPath": {
+      "label": "Protected Product manifest path",
+      "help": "Provision the manifest locally. Identity and inventory must never be inferred from Guard API output."
     }
   }
 }

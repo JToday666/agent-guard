@@ -1,4 +1,5 @@
 import { redactUnknownCredentials, stringPreview } from "../security.js";
+import { copyProductAuthorityContext } from "./product-authority-context.js";
 import type {
   DerivedResource,
   GuardEvaluationResponse,
@@ -530,11 +531,19 @@ export function rememberToolCallState(
 export function receiptEvaluation(
   evaluation: GuardEvaluationResponse,
 ): ReceiptEvaluation {
-  return {
+  const result: ReceiptEvaluation = {
     decision: evaluation.decision,
     approval: evaluation.approval,
     policy_audit_id: evaluation.policy_audit_id,
+    ...(evaluation.decision_authority
+      ? { decision_authority: evaluation.decision_authority }
+      : {}),
+    ...(evaluation.approval_release_directive
+      ? { approval_release_directive: evaluation.approval_release_directive }
+      : {}),
   };
+  copyProductAuthorityContext(evaluation, result);
+  return result;
 }
 
 export function mergeRuntimeFields(

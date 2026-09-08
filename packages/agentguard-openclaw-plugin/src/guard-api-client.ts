@@ -1,10 +1,31 @@
 import { isIP } from "node:net";
+import { isAbsolute } from "node:path";
 
 import {
   OPENCLAW_REQUIRED_HOOK_COUNT,
   OPENCLAW_REQUIRED_HOOKS,
 } from "../hook-contract.mjs";
 import { OPENCLAW_EFFECTIVE_FAIL_CLOSED_HOOKS } from "./runtime/host-capabilities.js";
+import {
+  OpenClawActivationSession,
+  type OpenClawActivationSessionOptions,
+} from "./runtime/activation-session.js";
+import {
+  isOpenClawActivationAckHandle,
+  type OpenClawActivationAckHandle,
+} from "./runtime/activation-ack-handle.js";
+import {
+  OpenClawProductManifest,
+  OpenClawProductActivationError,
+} from "./runtime/product-manifest.js";
+import {
+  bindEvaluationActivationAck,
+  bindConsumptionActivationAck,
+  evaluationActivationAck,
+  runtimeOutcomeToWire,
+  hasProductReceiptCarrier,
+} from "./runtime/product-authority-context.js";
+import { readOpenClawProductEvaluation } from "./runtime/product-evaluation.js";
 import type {
   AgentGuardPluginConfig,
   AdapterHeartbeatInput,
@@ -46,6 +67,11 @@ const RFC3339_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u;
 const MAX_LEASE_CONSUME_ATTEMPTS = 5;
 const MAX_GUARD_API_RESPONSE_BYTES = 1024 * 1024;
+const PRODUCT_DRIFT_CODES = new Set([
+  "V21_PRODUCT_ACTIVATION_NOT_CURRENT",
+  "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH",
+  "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH",
+]);
 
 type GuardApiJsonResponse = {
   ok: boolean;
@@ -77,10 +103,7 @@ export class GuardApiError extends Error {
   }
 }
 
-export type GuardApiResponseFailure =
-  | "timed_out"
-  | "too_large"
-  | "malformed";
+export type GuardApiResponseFailure = "timed_out" | "too_large" | "malformed";
 
 /** Stable, body-free classification for bounded response handling failures. */
 export class GuardApiResponseError extends GuardApiError {
@@ -254,20 +277,180 @@ export type DecisionOutcome =
   | { kind: "approval_release"; approval: OutcomeApprovalEvidence };
 
 export class GuardApiClient {
-  private readonly config: AgentGuardPluginConfig;
-  private readonly fetchImpl: FetchLike;
+  readonly #config: Readonly<AgentGuardPluginConfig>;
+  readonly #fetchImpl: FetchLike;
+  #session: OpenClawActivationSession | undefined;
+  #sessionCreation: Promise<OpenClawActivationSession> | undefined;
+  #productClosed = false;
+  #productAbort = new AbortController();
+  #consumptions = new WeakMap<
+    GuardEvaluationResponse,
+    Promise<ExecutionLeaseReference>
+  >();
+  #consumptionInputs = new WeakMap<GuardEvaluationResponse, string>();
+
+  private get config(): Readonly<AgentGuardPluginConfig> {
+    return this.#config;
+  }
+  private get fetchImpl(): FetchLike {
+    return this.#fetchImpl;
+  }
 
   constructor(params: ClientParams) {
-    this.config = {
+    this.#config = Object.freeze({
       ...params.config,
       guardApiBaseUrl: validateGuardApiBaseUrl(params.config.guardApiBaseUrl),
-    };
-    this.fetchImpl = params.fetchImpl ?? fetch;
+    });
+    this.#fetchImpl = params.fetchImpl ?? fetch;
+  }
+
+  get productEnabled(): boolean {
+    return Boolean(
+      this.#config.officialProfileId ||
+      this.#config.officialProfileDigest ||
+      this.#config.productManifestPath ||
+      this.#config.restrictedAskReleaseEnabled,
+    );
+  }
+
+  /** Transport lifecycle only. Plugin registration remains fused until composition is complete. */
+  async startProductSession(
+    observe: OpenClawActivationSessionOptions["observe"],
+  ): Promise<OpenClawActivationAckHandle> {
+    this.assertProductConfiguration();
+    if (!this.#sessionCreation) {
+      this.#sessionCreation = (async () => {
+        const manifest = await OpenClawProductManifest.fromFile(
+          this.#config.productManifestPath!,
+        );
+        if (
+          manifest.data.agent_id !== this.#config.agentId ||
+          manifest.data.runtime_binding_id !== this.#config.runtimeBindingId ||
+          manifest.data.profile_id !== this.#config.officialProfileId ||
+          manifest.data.profile_digest !== this.#config.officialProfileDigest
+        ) {
+          throw new OpenClawProductActivationError(
+            "configuration_identity_mismatch",
+          );
+        }
+        this.assertProductConfiguration();
+        const session = new OpenClawActivationSession({
+          manifest,
+          observe,
+          maxAckAgeMs: this.#config.activationAckMaxAgeMs,
+          refreshIntervalMs: Math.max(
+            1,
+            Math.min(
+              30_000,
+              Math.floor(this.#config.activationAckMaxAgeMs / 2),
+            ),
+          ),
+          sendHeartbeat: async (body, { signal }) => {
+            this.assertProductConfiguration();
+            const response = await this.request(
+              "/v1/adapters/openclaw/heartbeat",
+              {
+                method: "POST",
+                body: JSON.stringify(body),
+                signal,
+              },
+            );
+            return response.body;
+          },
+        });
+        this.#session = session;
+        return session;
+      })();
+    }
+    const session = await this.#sessionCreation;
+    this.assertProductConfiguration();
+    return session.start();
+  }
+
+  async refreshProductAck(): Promise<OpenClawActivationAckHandle> {
+    this.assertProductConfiguration();
+    if (!this.#session)
+      throw new OpenClawProductActivationError("session_not_started");
+    return this.#session.refresh();
+  }
+
+  async snapshotProductAck(): Promise<OpenClawActivationAckHandle> {
+    this.assertProductConfiguration();
+    if (!this.#session)
+      throw new OpenClawProductActivationError("session_not_started");
+    return this.#session.snapshot();
+  }
+
+  closeProductSession(): void {
+    this.#productClosed = true;
+    this.#productAbort.abort();
+    this.#session?.close();
+  }
+
+  private assertProductConfiguration(): void {
+    const config = this.#config;
+    if (this.#productClosed)
+      throw new OpenClawProductActivationError("session_closed");
+    if (
+      !this.productEnabled ||
+      config.officialProfileId !== "agentguard-openclaw-v2-restricted" ||
+      !/^sha256:[0-9a-f]{64}$/u.test(config.officialProfileDigest) ||
+      !config.productManifestPath ||
+      !isAbsolute(config.productManifestPath) ||
+      !config.adapterToken ||
+      !config.agentId ||
+      !config.runtimeBindingId ||
+      config.enforcementMode !== "enforce" ||
+      config.strongApprovalBindingEnabled ||
+      !Number.isSafeInteger(config.activationAckMaxAgeMs) ||
+      config.activationAckMaxAgeMs < 1 ||
+      config.activationAckMaxAgeMs > 120_000
+    ) {
+      throw new OpenClawProductActivationError("product_configuration_invalid");
+    }
+  }
+
+  async evaluateProductEvent(
+    event: GuardEvent | Record<string, unknown>,
+  ): Promise<{
+    evaluation: GuardEvaluationResponse;
+    activationAck: OpenClawActivationAckHandle;
+  }> {
+    this.assertProductConfiguration();
+    if (
+      event.runtime !== "openclaw" ||
+      !isRecord(event.security_context) ||
+      event.security_context.agent_id !== this.#config.agentId
+    ) {
+      throw new OpenClawProductActivationError("event_identity_mismatch");
+    }
+    const activationAck = await this.snapshotProductAck();
+    const response = await this.request("/v1/guard/evaluate", {
+      method: "POST",
+      body: JSON.stringify(event),
+      headers: { "X-AgentGuard-Activation-Ack": activationAck.headerValue() },
+      signal: this.#productAbort.signal,
+    });
+    await this.snapshotProductAck();
+    activationAck.assertFresh(Date.now(), this.#config.activationAckMaxAgeMs);
+    try {
+      const evaluation = readOpenClawProductEvaluation(
+        response.body,
+        activationAck,
+      );
+      bindEvaluationActivationAck(evaluation, activationAck);
+      return { evaluation, activationAck };
+    } catch {
+      this.closeProductSession();
+      throw new OpenClawProductActivationError("official_response_mismatch");
+    }
   }
 
   async evaluate(
     event: GuardEvent | Record<string, unknown>,
   ): Promise<GuardEvaluationResponse> {
+    if (this.productEnabled)
+      return (await this.evaluateProductEvent(event)).evaluation;
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -319,10 +502,15 @@ export class GuardApiClient {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
 
+    if (this.productEnabled && !hasProductReceiptCarrier(event)) {
+      throw new OpenClawProductActivationError("receipt_ack_context_missing");
+    }
+    const wire = runtimeOutcomeToWire(event);
+
     try {
       const response = await this.request("/v1/audit/events", {
         method: "POST",
-        body: JSON.stringify(event),
+        body: JSON.stringify(wire),
       });
       return response.body as AuditSubmitResponse;
     } catch (error) {
@@ -353,6 +541,8 @@ export class GuardApiClient {
   async submitHeartbeat(
     input: AdapterHeartbeatInput,
   ): Promise<Record<string, unknown>> {
+    if (this.productEnabled)
+      throw new OpenClawProductActivationError("legacy_heartbeat_forbidden");
     if (!this.config.adapterToken) {
       throw new GuardApiError("AgentGuard adapter token is not configured");
     }
@@ -388,17 +578,26 @@ export class GuardApiClient {
     approvalId: string,
     deadlineMs = this.approvalDeadlineMs(),
   ): Promise<ApprovalWaitResponse> {
+    if (this.productEnabled) this.assertProductConfiguration();
     const deadline = deadlineMs;
     while (Date.now() < deadline) {
+      if (this.productEnabled) await this.snapshotProductAck();
       const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) return timeoutApproval();
       let response: GuardApiJsonResponse;
       try {
         response = await this.request(
           `/v1/approvals/${encodeURIComponent(approvalId)}/wait`,
-          { method: "GET" },
+          {
+            method: "GET",
+            ...(this.productEnabled
+              ? { signal: this.#productAbort.signal }
+              : {}),
+          },
           Math.min(this.config.requestTimeoutMs, remainingMs),
         );
       } catch (error) {
+        if (this.productEnabled) this.assertProductConfiguration();
         if (Date.now() >= deadline) {
           return timeoutApproval();
         }
@@ -414,12 +613,10 @@ export class GuardApiClient {
         ) {
           throw error;
         }
-        await delayWithinDeadline(
-          this.config.approvalPollIntervalMs,
-          deadline,
-        );
+        await delayWithinDeadline(this.config.approvalPollIntervalMs, deadline);
         continue;
       }
+      if (this.productEnabled) await this.snapshotProductAck();
       const parsed = parseApprovalWaitResponse(response.body);
       if (parsed.status !== "pending") {
         return parsed;
@@ -427,6 +624,59 @@ export class GuardApiClient {
       await delayWithinDeadline(this.config.approvalPollIntervalMs, deadline);
     }
     return timeoutApproval();
+  }
+
+  /** Fresh ACK after approval; duplicate calls reuse the entire original attempt. */
+  consumeProductExecutionLease(
+    evaluation: GuardEvaluationResponse,
+    binding: EnforcementBinding,
+    deadlineMs: number,
+  ): Promise<ExecutionLeaseReference> {
+    this.assertProductConfiguration();
+    const original = evaluationActivationAck(evaluation);
+    if (
+      !original ||
+      evaluation.decision.decision !== "ask" ||
+      evaluation.approval_release_directive?.mode !== "restricted_allow_once" ||
+      !evaluation.approval?.approval_id
+    ) {
+      throw new OpenClawProductActivationError("consumption_authority_missing");
+    }
+    const checked = parseEnforcementBinding(binding);
+    if (
+      checked.runtime_binding_id !== original.identity.runtime_binding_id ||
+      !Number.isFinite(deadlineMs)
+    ) {
+      throw new OpenClawProductActivationError("consumption_identity_mismatch");
+    }
+    const input = JSON.stringify([evaluation.approval.approval_id, checked]);
+    const previous = this.#consumptions.get(evaluation);
+    if (previous) {
+      if (this.#consumptionInputs.get(evaluation) !== input) {
+        throw new OpenClawProductActivationError(
+          "consumption_request_conflict",
+        );
+      }
+      return previous;
+    }
+    const approvalId = evaluation.approval.approval_id;
+    const operation = (async () => {
+      const ack = await this.refreshProductAck();
+      bindConsumptionActivationAck(evaluation, ack);
+      return this.consumeExecutionLease(
+        approvalId,
+        checked,
+        Math.min(
+          deadlineMs,
+          Date.now() +
+            ack.assertFresh(Date.now(), this.#config.activationAckMaxAgeMs),
+        ),
+        ack,
+      );
+    })();
+    this.#consumptionInputs.set(evaluation, input);
+    this.#consumptions.set(evaluation, operation);
+    return operation;
   }
 
   /**
@@ -438,7 +688,38 @@ export class GuardApiClient {
     approvalId: string,
     binding: EnforcementBinding,
     deadlineMs: number,
+    activationAck?: OpenClawActivationAckHandle,
   ): Promise<ExecutionLeaseReference> {
+    if (this.productEnabled) {
+      this.assertProductConfiguration();
+      if (
+        !isOpenClawActivationAckHandle(activationAck) ||
+        !this.#session ||
+        activationAck.identity.agent_id !== this.#config.agentId ||
+        activationAck.identity.runtime_binding_id !==
+          this.#config.runtimeBindingId ||
+        binding.runtime_binding_id !==
+          activationAck.identity.runtime_binding_id ||
+        Object.entries(this.#session.manifest.expectedAckIdentity).some(
+          ([key, value]) =>
+            activationAck.identity[
+              key as keyof typeof activationAck.identity
+            ] !== value,
+        )
+      ) {
+        throw new OpenClawProductActivationError("consumption_ack_missing");
+      }
+      deadlineMs = Math.min(
+        deadlineMs,
+        Date.now() +
+          activationAck.assertFresh(
+            Date.now(),
+            this.#config.activationAckMaxAgeMs,
+          ),
+      );
+    } else if (activationAck !== undefined) {
+      throw new OpenClawProductActivationError("product_configuration_invalid");
+    }
     const path = `/v1/approvals/${encodeURIComponent(approvalId)}/execution-leases/consume`;
     const serializedBody = JSON.stringify({
       action_id: binding.action_id,
@@ -450,15 +731,31 @@ export class GuardApiClient {
       attempt < MAX_LEASE_CONSUME_ATTEMPTS && Date.now() < deadlineMs;
       attempt += 1
     ) {
+      if (this.productEnabled) await this.snapshotProductAck();
       const remainingMs = deadlineMs - Date.now();
+      if (remainingMs <= 0) throw new ExecutionLeaseConsumeError("timed_out");
       let response: GuardApiJsonResponse;
       try {
         response = await this.requestRaw(
           path,
-          { method: "POST", body: serializedBody },
+          {
+            method: "POST",
+            body: serializedBody,
+            ...(activationAck
+              ? {
+                  headers: {
+                    "X-AgentGuard-Activation-Ack": activationAck.headerValue(),
+                  },
+                }
+              : {}),
+            ...(this.productEnabled
+              ? { signal: this.#productAbort.signal }
+              : {}),
+          },
           Math.min(this.config.requestTimeoutMs, remainingMs),
         );
       } catch (error) {
+        if (this.productEnabled) this.assertProductConfiguration();
         if (error instanceof GuardApiResponseError) {
           if (error.failure !== "timed_out") {
             throw new ExecutionLeaseConsumeError("invalid_response");
@@ -480,6 +777,8 @@ export class GuardApiClient {
         continue;
       }
 
+      this.rejectProductDrift(response);
+      if (this.productEnabled) await this.snapshotProductAck();
       if (response.ok) {
         return parseExecutionLeaseResponse(response.body);
       }
@@ -573,6 +872,7 @@ export class GuardApiClient {
     timeoutMs = this.config.requestTimeoutMs,
   ): Promise<GuardApiJsonResponse> {
     const response = await this.requestRaw(path, init, timeoutMs);
+    this.rejectProductDrift(response);
     try {
       if (!response.ok) {
         logDiagnostic(
@@ -625,7 +925,13 @@ export class GuardApiClient {
         once: true,
       });
     });
+    const outerAbort = () => controller.abort();
+    init.signal?.addEventListener("abort", outerAbort, { once: true });
     try {
+      if (init.signal?.aborted) {
+        controller.abort();
+        await abortPromise;
+      }
       const response = await Promise.race([
         this.fetchImpl(
           `${trimTrailingSlash(this.config.guardApiBaseUrl)}${path}`,
@@ -668,9 +974,21 @@ export class GuardApiClient {
       throw new GuardApiError("Guard API request failed");
     } finally {
       clearTimeout(timeout);
+      init.signal?.removeEventListener("abort", outerAbort);
       if (abortListener) {
         controller.signal.removeEventListener("abort", abortListener);
       }
+    }
+  }
+
+  private rejectProductDrift(response: GuardApiJsonResponse): void {
+    if (!this.productEnabled || response.ok) return;
+    const body = response.body;
+    const detail = isRecord(body) ? body.error : undefined;
+    const code = isRecord(detail) ? detail.code : undefined;
+    if (typeof code === "string" && PRODUCT_DRIFT_CODES.has(code)) {
+      this.closeProductSession();
+      throw new OpenClawProductActivationError(code);
     }
   }
 }
@@ -785,6 +1103,7 @@ export function buildPluginConfig(
   const v2Fields = [
     "officialProfileId",
     "officialProfileDigest",
+    "productManifestPath",
     "restrictedAskReleaseEnabled",
     "activationAckMaxAgeMs",
   ];
@@ -794,7 +1113,18 @@ export function buildPluginConfig(
     );
   }
   const hasProfile =
-    hasField("officialProfileId") || hasField("officialProfileDigest");
+    hasField("officialProfileId") ||
+    hasField("officialProfileDigest") ||
+    hasField("productManifestPath");
+  if (
+    hasField("productManifestPath") &&
+    (typeof input?.productManifestPath !== "string" ||
+      !isAbsolute(input.productManifestPath))
+  ) {
+    throw new GuardApiError(
+      "productManifestPath must be an absolute protected file path",
+    );
+  }
   if (hasProfile) {
     if (input?.officialProfileId !== "agentguard-openclaw-v2-restricted") {
       throw new GuardApiError(
@@ -810,7 +1140,9 @@ export function buildPluginConfig(
       );
     }
     if (hasField("enforcementMode") && input?.enforcementMode !== "enforce") {
-      throw new GuardApiError("officialProfileId requires enforcementMode=enforce");
+      throw new GuardApiError(
+        "officialProfileId requires enforcementMode=enforce",
+      );
     }
   }
   if (
@@ -861,12 +1193,14 @@ export function buildPluginConfig(
       input?.approvalTimeoutMs,
       DEFAULT_CONFIG.approvalTimeoutMs,
     ),
-    strongApprovalBindingEnabled:
-      input?.strongApprovalBindingEnabled === true,
+    strongApprovalBindingEnabled: input?.strongApprovalBindingEnabled === true,
     officialProfileId:
       input?.officialProfileId ?? DEFAULT_CONFIG.officialProfileId,
     officialProfileDigest:
       input?.officialProfileDigest ?? DEFAULT_CONFIG.officialProfileDigest,
+    ...(input?.productManifestPath === undefined
+      ? {}
+      : { productManifestPath: input.productManifestPath }),
     restrictedAskReleaseEnabled: false,
     activationAckMaxAgeMs:
       input?.activationAckMaxAgeMs ?? DEFAULT_CONFIG.activationAckMaxAgeMs,
@@ -875,7 +1209,9 @@ export function buildPluginConfig(
     agentId: nonEmptyString(input?.agentId, DEFAULT_CONFIG.agentId),
   };
   if (hasProfile && !config.runtimeBindingId) {
-    throw new GuardApiError("officialProfileId requires a trusted runtimeBindingId");
+    throw new GuardApiError(
+      "officialProfileId requires a trusted runtimeBindingId",
+    );
   }
   if (!config.adapterToken) {
     throw new GuardApiError(
@@ -1115,10 +1451,7 @@ function optionalRuntimeBindingId(value: unknown): string {
   if (value === undefined || value === null || value === "") {
     return "";
   }
-  if (
-    typeof value !== "string" ||
-    !RUNTIME_BINDING_IDENTIFIER.test(value)
-  ) {
+  if (typeof value !== "string" || !RUNTIME_BINDING_IDENTIFIER.test(value)) {
     throw new GuardApiError(
       "runtimeBindingId must be a 1-256 character trusted runtime identifier",
     );
@@ -1219,11 +1552,7 @@ function parseApprovalWaitResponse(value: unknown): ApprovalWaitResponse {
   }
   const decision = value.decision;
   const resolutionSource = value.resolution_source;
-  if (
-    decision !== "allow_once" &&
-    decision !== "deny" &&
-    decision !== null
-  ) {
+  if (decision !== "allow_once" && decision !== "deny" && decision !== null) {
     throw new GuardApiError("Guard API approval response is invalid");
   }
   if (
@@ -1281,9 +1610,20 @@ function strictRfc3339EpochMs(value: string): number {
   if (!match) {
     return Number.NaN;
   }
-  const [, yearText, monthText, dayText, hourText, minuteText, secondText,
-    fractionText = "", zoneText, signText, offsetHourText, offsetMinuteText] =
-    match;
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText,
+    fractionText = "",
+    zoneText,
+    signText,
+    offsetHourText,
+    offsetMinuteText,
+  ] = match;
   const year = Number(yearText);
   const month = Number(monthText);
   const day = Number(dayText);
@@ -1314,8 +1654,8 @@ function strictRfc3339EpochMs(value: string): number {
     if (offsetHour > 23 || offsetMinute > 59) {
       return Number.NaN;
     }
-    offsetMinutes = (offsetHour * 60 + offsetMinute) *
-      (signText === "+" ? 1 : -1);
+    offsetMinutes =
+      (offsetHour * 60 + offsetMinute) * (signText === "+" ? 1 : -1);
   }
   const expected = local.getTime() - offsetMinutes * 60_000;
   const parsed = Date.parse(value);

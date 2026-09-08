@@ -23,6 +23,8 @@ import type {
   RuntimeOutcomeReceipt,
 } from "../types.js";
 import { unrefTimer } from "./heartbeat.js";
+import { hasProductReceiptCarrier } from "./product-authority-context.js";
+import { OpenClawProductActivationError } from "./product-manifest.js";
 
 const SPOOL_VERSION = 1;
 const SPOOL_FILE_SUFFIX = ".json";
@@ -73,6 +75,7 @@ export class RuntimeOutcomeDelivery {
   private readonly now: () => number;
   private readonly retryBaseMs: number;
   private readonly drainIntervalMs: number;
+  private readonly productDeliveryRequired: boolean;
   private readonly inFlight = new Set<string>();
   private drainPromise: Promise<void> | null = null;
   private drainTimer: ReturnType<typeof setInterval> | null = null;
@@ -84,6 +87,7 @@ export class RuntimeOutcomeDelivery {
     this.now = options.now ?? Date.now;
     this.retryBaseMs = options.retryBaseMs ?? DEFAULT_RETRY_BASE_MS;
     this.drainIntervalMs = options.drainIntervalMs ?? DEFAULT_DRAIN_INTERVAL_MS;
+    this.productDeliveryRequired = productDeliveryConfigured(options.config);
   }
 
   start(): void {
@@ -109,6 +113,15 @@ export class RuntimeOutcomeDelivery {
     client: GuardApiClient,
     logLabel: string,
   ): Promise<void> {
+    // This legacy queue writes plaintext and can fall back to direct send.
+    // Product receipts require the separate encrypted delivery implementation.
+    if (
+      this.productDeliveryRequired ||
+      productDeliveryConfigured(this.config) ||
+      hasProductReceiptCarrier(receipt)
+    ) {
+      throw new OpenClawProductActivationError("product_delivery_unavailable");
+    }
     try {
       validateReceipt(receipt);
     } catch (error) {
@@ -156,6 +169,12 @@ export class RuntimeOutcomeDelivery {
   }
 
   private async drainPending(): Promise<void> {
+    if (
+      this.productDeliveryRequired ||
+      productDeliveryConfigured(this.config)
+    ) {
+      throw new OpenClawProductActivationError("product_delivery_unavailable");
+    }
     if (!existsSync(this.spoolDirectory)) {
       return;
     }
@@ -309,7 +328,19 @@ export class RuntimeOutcomeDelivery {
   }
 }
 
+function productDeliveryConfigured(config: AgentGuardPluginConfig): boolean {
+  return Boolean(
+    config.officialProfileId ||
+    config.officialProfileDigest ||
+    config.productManifestPath ||
+    config.restrictedAskReleaseEnabled,
+  );
+}
+
 function validateReceipt(receipt: RuntimeOutcomeReceipt): void {
+  if (hasProductReceiptCarrier(receipt)) {
+    throw new OpenClawProductActivationError("product_delivery_unavailable");
+  }
   const expectedAuditId = `audit_outcome_${receipt.links?.event_id}_${receipt.metadata?.outcome_kind}`;
   const leaseId = receipt.links?.lease_id;
   const consumptionId = receipt.links?.consumption_id;

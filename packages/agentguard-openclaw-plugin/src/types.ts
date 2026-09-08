@@ -12,6 +12,8 @@ export type AgentGuardPluginConfig = {
   /** Trusted provisioning metadata; does not activate Product authority by itself. */
   officialProfileId: string;
   officialProfileDigest: string;
+  /** Protected local Product identity/inventory manifest; never supplied by the API. */
+  productManifestPath?: string;
   restrictedAskReleaseEnabled: boolean;
   activationAckMaxAgeMs: number;
   /** Trusted local provisioning value; never learned from Guard API output. */
@@ -29,10 +31,11 @@ export type OpenClawPluginConfigInput =
       requestTimeoutMs?: number;
       approvalPollIntervalMs?: number;
       approvalTimeoutMs?: number;
-      /** @deprecated Do not mix with the four V2 configuration fields. */
+      /** @deprecated Do not mix with V2 configuration fields. */
       strongApprovalBindingEnabled?: boolean;
       officialProfileId?: string;
       officialProfileDigest?: string;
+      productManifestPath?: string;
       restrictedAskReleaseEnabled?: boolean;
       activationAckMaxAgeMs?: number;
       runtimeBindingId?: string;
@@ -425,6 +428,10 @@ export type RuntimeOutcomeReceipt = Omit<
   metadata: {
     agent_id: string;
     outcome_kind: RuntimeReceiptKind;
+    /** Public ACK projection only; the credential is held in a private carrier. */
+    activation_ack?: Readonly<
+      Omit<import("./runtime/activation-ack.js").OpenClawActivationAckV1, "ack_token">
+    >;
   };
   evidence: {
     intervention: JsonObject;
