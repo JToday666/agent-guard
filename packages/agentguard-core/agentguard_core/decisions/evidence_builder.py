@@ -285,7 +285,11 @@ def build_decision_evidence_v21(
         ),
         mode=mode,
         divergence_category=divergence_category,
-        evidence_refs=[],
+        evidence_refs=[
+            ref
+            for ref in assessment.evidence_refs
+            if ref.record_type == "product_action_data"
+        ],
     )
 
 

@@ -1780,6 +1780,13 @@ current_state_version == delta.base_state_version
 - capability projection；
 - coverage computation。
 
+2026-09-08 [Product 数据证明修正](11_Product数据与控制影响修正.md)采用独立的
+产品规范化、数据证明、必检计划和 `ct-product-fact-1` 动作事实映射版本。
+新映射只作用于完整证明绑定的当前 Product 动作，不改写 CT 已持久化事实或
+旧记录的 coverage 含义；事实容器不变，因此不重标历史 `projector_version`。
+新证明及其完整摘要必须随决策保留，缺失时保持旧保守规则；任何实际修改历史
+事实构造、污点传播或重放解释的后续变更仍适用上述 projector 升版要求。
+
 ---
 
 ## 5. OnlineSecurityState 容器
@@ -5411,3 +5418,279 @@ Benign ASK <= 10%
 - [x] D1 ExecutionLease 权威存储（C5 选项 b）— 已确认（2026-08-15，仓库所有者确认）
 - [x] D2 Projector Version 升级与 reprojection 策略（C7）— 策略已冻结；Phase 2 集成 PR 实施验收完成（2026-08-15：PROJECTOR_VERSION bump 至 v21-07.projector.2、懒 legacy decoder 接线、reprojection state_digest 确定性测试全过）
 - [x] V21-05/06/07 中央闸门一次性接线（IMPLEMENTATION）— 验收完成（2026-08-15：11 handler 分发表 + 六域 coverage dispatch 装配、非空 typed delta 正常 apply、集成验收测试与全量回归 1185 passed）
+
+---
+
+# 10 — 决策记录：V21-05/06/07 前置（Phase -1b / -1c）
+
+本文件记录 V21-05/06/07 实施前及三维评审后的 IMPLEMENTATION 级解释性决策（D1/D2 为
+实施前置决策，D3/D4/D5 为评审后回修阶段补充的归属与回滚约束决策）。全部决策均不修改
+01/02 已签字冻结正文（逐字不动），仅对既有契约语义做解释性收敛与实施策略冻结。
+
+- 依据文档：`01_F1字段与契约冻结.md`、`02_状态投影_Provenance_Authority.md`、`04_兼容迁移与实施计划.md`、`09_冻结清单.md`。
+- 对应调研缺口编号：C5（ExecutionLease 存储缺口）、C7（Projector version 升级与 reprojection 策略）。
+- 实施阶段结构：Phase -1（前置）→ Phase 0（structure-only）→ Phase 1（三路并行纯新增）→ Phase 2（单一集成 PR）。
+
+---
+
+## D1：ExecutionLease 权威存储（C5，选项 b）
+
+### 决策
+
+ExecutionLease 只存在于权威 lease store（Guard API 独立表），**不进入** `OnlineSecurityState`：
+
+1. `OnlineSecurityState.execution_leases` 字段保留，但语义恒空；
+2. 不改动 digest 白名单，T-Replay 锚点不变；
+3. 由契约测试断言 `execution_leases` 恒空、且不存在任何 delta 写入路径。
+
+### 背景
+
+- `SecurityStateDeltaV21` 的冻结字段清单（01 §27）中**不存在** `execution_lease_upserts` 容器，
+  delta 无法承载 lease 写入；
+- `ExecutionLease.status ∈ {consumed, expired, revoked}`，无 `active` 态
+  （`packages/agentguard-core/agentguard_core/security_context/facts.py` L565）。
+  ExecutionLease 是**终态回执模型**，不是可被持续投影的活跃状态。
+
+### 否决的替代
+
+**选项 (a)**：为 `SecurityStateDeltaV21` 新增并冻结 `execution_lease_upserts` 容器。
+
+否决理由：需要修改 01 §27/§29 已签字冻结字段清单，并额外解决 `status` 枚举缺少 `active`
+态的表达问题（投影进 state 的 lease 需要活跃态，与终态回执模型语义冲突），触发
+DESIGN 级两级连锁契约变更（09 冻结清单 DESIGN/IMPLEMENTATION 双级签字规则），收益不成比例。
+
+### 依据
+
+1. **02 L168**："安全相关内容必须由 `SecurityStateDeltaV21` 的 typed update 重建，不允许
+   只存在于进程内私有字段。"——lease 不经 delta 直填 state，天然满足该约束（lease 根本不进
+   state，而非绕过 delta 进 state）；
+2. **先例同构**：task 域已采用"snapshot 构建时直读权威 TaskFact head"而非经 delta 投影的
+   模式（V21-04 已验证实施先例），lease 直存权威表与之同构；
+3. **判定能力无损**：capability coverage 判定（02 §6.3）只要求 grant / revocation /
+   consumption 状态已知。consumption（`GrantConsumption`）经 delta 既有容器进入 state，
+   lease 本体仅是执行回执，不参与 coverage 判定输入；
+4. **01 §31**（L1236-1263）：Execution Lease API 本就在 Guard API 单个原子事务中写入
+   权威表 `GrantConsumption + ExecutionLease` 并令 remaining uses 从 1 变为 0，权威存储
+   是冻结 API 的既有语义。
+
+### 状态
+
+**已确认（2026-08-15，仓库所有者确认）**（IMPLEMENTATION 级解释性决策；01/02 正文逐字不动，不触发 DESIGN 级变更）。
+
+---
+
+## D2：Projector Version 升级与 reprojection 策略（C7）
+
+### 关键事实
+
+现存全部 `v21-04.projector.1` envelope 的 `delta_payload` 只含 watermark——typed 容器被
+unwired fail-closed 机制强制为空（`packages/agentguard-core/agentguard_core/security_context/projector.py`
+`_UNWIRED_TYPED_UPSERT_CONTAINERS` 非空即抛 `typed_upsert_not_wired`）。因此重投影无安全
+内容损失，**当前是升级成本最低的窗口**；一旦 V21-05/06/07 开始写入 typed 容器，版本升级
+将需要真实数据迁移。
+
+### 策略
+
+1. **懒 legacy decoder**：在 guard-api `rebuild.py` 的 `_committed_from_projection` 前置
+   纯函数 decoder：识别旧版本行 → 断言全部 typed 容器为空（否则 fail-closed）→ 以新
+   `PROJECTOR_VERSION` 重组 CommittedRecord。**不做存储层数据迁移**：可逆、有界、不落盘。
+2. **唯一一次 bump**：V21-05/06/07 期间 `PROJECTOR_VERSION` 恒为 `v21-04.projector.1`；
+   仅 Phase 2 集成 PR bump 一次（目标值如 `v21-07.projector.2`）。Phase 1 三分支各自维护
+   `_PENDING_VERSION_BUMP` 标记，不修改常量。
+3. **rebuild 版本过滤**：调用方过滤旧版本行；过滤后不足有效 limit → `needs_more` →
+   dirty fail-closed（不静默）。**不修改 `list_rebuild_inputs` 协议签名**。
+4. **decoder 失败兜底**：全域 dirty → coverage unknown，fail-closed。
+
+### 实现时点
+
+Phase 2 集成 PR 一次性落地（含唯一一次 bump + reprojection）。本文档先行冻结策略；
+Phase -1/0/1 期间版本字符串与 rebuild 行为零变化。
+
+### 状态
+
+**策略冻结**（IMPLEMENTATION 级；实施与验收在 Phase 2 集成 PR 中完成，回滚路径：整体
+revert 后回到 V21-04 已验证状态）。
+
+---
+
+## D3：flow strength 三级判定的推导责任归属（V21-05 三维评审后补充）
+
+### 决策
+
+flow strength（`exact / possible / 其他`三级）的**推导责任归属上游 flow producer**
+（后续阶段实施）；V21-05 投影层只做：
+
+1. **字段透传**：`FlowFact.strength` 由 producer 签发时给定，投影不重算、不推断；
+2. **消费侧降级语义**：`strength == "possible"` 在 dataflow 判定中降 `partial`
+   （无法证明强链路，02 §6.5 fail-closed），不得升格为 exact 语义。
+
+2026-09-08 Product 修正：[独立数据与控制影响契约](11_Product数据与控制影响修正.md)
+允许在服务器提供完整、版本化参数数据证明时单独识别控制影响边。
+此时 `possible` 原值与污点仍保留，不再单独代表实际参数复制缺证；
+无新证明、数据边或不完整依赖闭包继续执行本节原有降级规则。
+
+### 背景
+
+三维评审确认：strength 推导需要 producer 侧证据链（代码级依赖分析 / 运行时观测），
+不属于状态投影职责；投影层若自行推断会与 T-Replay 确定性冲突（同输入不同推导时机
+产生分叉 digest）。
+
+### 状态
+
+**已冻结**（IMPLEMENTATION 级；producer 侧推导实施属后续阶段，不影响 V21-05 验收）。
+
+---
+
+## D4：LLM Approval Reviewer "V2 路径只能 deny 或保持 pending" 约束归属（V21-06 三维评审后补充）
+
+### 决策
+
+LLM Approval Reviewer 的"V2 路径只能 deny 或保持 pending"约束**归属 Approval 服务阶段**
+（V21-08/09 接线范围）；本阶段（V21-06）仅在投影层执行：
+
+1. **拒绝非 human grant**：`source_type != "human_approval"` 的授权在 verdict 判定中
+   不得作为人工批准证据（投影层 fail-closed）；
+2. 不在投影层实现 Reviewer 的 deny/pending 状态机（属 Approval 服务运行时语义）。
+
+### 背景
+
+评审确认该约束是 Approval 服务的决策面语义（何时能 approve），而投影层只消费已签发
+grant 的 provenance；两者分层实施避免把决策面规则提前冻结进投影 digest 链。
+
+### 状态
+
+**已冻结**（IMPLEMENTATION 级；Approval 服务接线在 V21-08/09 阶段承接该约束）。
+
+---
+
+## D5：上线后回滚窗口约束（三维评审后补充）
+
+### 决策
+
+若 `v21-07.projector.2` 已产生投影记录（`projection_records` 含新版本行），代码回滚前
+**须先处置新版本 projection_records**（删除或回译到旧版本 envelope 语义），否则旧版本
+rebuild 的版本校验会 fail-closed（未知版本行不可重放）。约束边界：
+
+1. **上线后回滚**：受本约束限制，回滚预案必须包含 projection_records 处置步骤；
+2. **合入前 revert**：无此负担（仓库未产生任何新版本投影记录，revert 即回到
+   V21-04 已验证状态，与 D2 回滚路径一致）。
+
+### 背景
+
+D2 的懒 legacy decoder 只覆盖"旧→新"方向（`v21-04.projector.1` → 新版本）；"新→旧"
+方向无 decoder，旧版本 rebuild 遇新版本行只能 fail-closed（02 §3：不得静默降级）。
+
+### 状态
+
+**已冻结**（IMPLEMENTATION 级；作为上线回滚预案的前置检查项留痕）。
+
+---
+
+## 关联条目
+
+- `09_冻结清单.md` IMPLEMENTATION 节新增对应确认项（D1 已确认 / D2 策略冻结）。
+- 动态测试基线工具：`scripts/v21-contract-tools.py baseline-count`（Phase -1d，基线
+  953 tests 不再硬编码于脚本逻辑，改由命令行参数传入）。
+
+---
+
+# Product 数据与控制影响修正
+
+本修正属于 Core V2.1 official 双真实运行时接入的独立 06a 批次。
+授权来源：2026-09-08 本次隔离验收任务中，用户明确允许独立契约修正，
+并要求保留 LangGraph strong binding 和 OpenClaw 全部残余边界。
+授权不等于实现、独立审查或最终验收已经通过。
+
+## 不变的安全约束
+
+数据传递不能授予权限，模型仍为 `trust=unknown / authority=model_judgment`。
+已认证的运行时不自动拥有任务授权；真实工具语义须来自服务端验证的清单。
+缺少必检证据不能解释为安全，敏感污点不能因字节复制得到清除。
+审批仍需完整必检 coverage、权限绑定和原子 lease consume。
+
+LangGraph 保留 strong binding。OpenClaw 保留 restricted allow_once、
+`C3=false`、`CF-13=NOT_SUPPORTED` 及五项既有残余边界。
+本修正不新增激活接口，不允许 shadow/current 作为 Product Active 回退。
+
+## 可信工具语义与参数承诺
+
+服务端读取受保护的本地运行清单，重新计算 descriptor/schema/来源摘要，
+并与既有签署 activation 和当前 ACK 的 inventory、binding、候选身份匹配。
+只有清单中经过代码审核的真实工具画像可以选择新的规范化路径。
+事件自报 `descriptor_digest`、工具名字、`readonly` 或 `derived_resources`
+均不能单独授予该语义。未知、重复、缺失、版本或来源漂移均阻断。
+
+冻结隔离工具为 `read/write/edit/exec/process/message` 及 SQLite 记忆读写。
+`process` 仅允许清单的只读查询画像；`exec` 保留代码执行与持久副作用，
+只绑定固定脚本和效果目标。文件落盘不等同于 Memory 域依赖。
+Memory 写入为本轮限定的首次写入，不声明真实回滚；消息仅发送本机测试收件端。
+
+授权指纹必须覆盖真实工具身份、清单语义身份、全部安全参数和最终资源。
+Memory 的 key/value、message 的 channel/target/全文均纳入参数承诺，
+不能沿用空参数摘要。改变内容、目的地、工具 schema 或语义会改变授权绑定。
+
+## 模型内容证据
+
+服务端在实际完整模型输出上生成有界摘要承诺，绑定模型输出事件、输入动作、
+call ID、真实工具名、整份 arguments 及必需字段摘要。常规审计只保留摘要和引用，
+不新增原始敏感内容日志。脱敏 preview、截断内容或客户端自签证明不能补足该证据。
+
+后续动作必须引用原始模型输出。服务端验证原 Product 判定、输出检查回执和
+模型动作终态均已接受，且 task/scope/trace/runtime/binding/profile 一致。
+重新计算当前实际 arguments 的完整摘要与逐字段摘要；只换目标、加删字段、
+重复 call ID、缺任一回执或跨作用域复用均拒绝。
+
+当前动作的完整摘要证明保存在 policy Audit 的 `evidence.product_action_data`。
+其 `EvidenceRef` 使用 `record_type=product_action_data` 和原 `event_id`，
+由服务端的 event → policy Audit 唯一索引解析；`digest` 为完整证明摘要。
+该引用参与 assessment/decision 摘要，避免最终 Audit ID 对自身摘要产生循环。
+模型输出承诺使用独立的 `evidence.product_model_content`；两类记录均由服务端写入。
+
+精确绑定仅证明“已观察的模型参数被原样传给当前工具”，不证明模型生成过程
+与上下文之间存在精确复制关系。上下文到模型及动作的 `influenced_by/possible`
+控制影响和所有污点继续保留。
+
+## Coverage、风险与审批
+
+在独立数据证明完整、依赖闭包有界且无缺失的条件下，已识别的模型控制边
+不再单独构成数据复制缺证。来源身份与分类已验证可以具有完整 source coverage，
+同时保持模型不可信。未知 producer、歧义来源、截断、状态缺口或未验证参数仍阻断。
+
+数据完整性不等于 ALLOW。所有控制影响仍参与风险融合；未解决的敏感或恶意
+依赖不能通过 ASK 补足。真实 ALLOW 仍需全部现有放行条件，合法 ASK 仅用于
+证据齐全、目标可界定之后的策略审批。
+
+`CREDENTIAL`、`SENSITIVE`、`EXTERNAL_INSTRUCTION`、`PERSISTENT_UNTRUSTED`
+或 hostile instruction 均禁止此证明产生可审批资格。`UNTRUSTED` 不单独代替
+策略判定，仍完整参与风险融合，审批不能清除标签或升级来源信任。
+
+Memory 仅在可信语义和完整依赖闭包证明没有记忆依赖时为不适用；真实或未解析
+memory refs 始终必检。模型生成的记忆内容不能提升为 user/trusted 或 clean；
+后续 context 隔离保留，unknown/quarantined 内容不得借本修正自动进入模型。
+
+## 版本与重放
+
+新 Product 路径使用以下独立版本；历史无新证明的记录保留原保守含义。
+
+| 契约 | 新 Product 版本 | 历史路径 |
+| --- | --- | --- |
+| 工具语义 | `isolated-product-tools-1` | 不从事件自报选择 |
+| 工具规范化 | `v21-product-tool-normalizer-1` | 原 normalizer 保留 |
+| 完整数据证明 | `product-data-1` | 无证明不得升级 coverage |
+| 证明 coverage | `product-data-coverage-1` | 原 coverage 保留 |
+| 必检计划 | `v21-04-plan-5` | `v21-04-plan-4` 保留 |
+| 动作事实映射 | `ct-product-fact-1` | `ct-fact-1/2` 保留 |
+
+只有完整证明匹配真实 ActionIR 的三个 Product 动作事件使用新事实映射。
+模型输出到当前参数、当前内容到清单最终目标的实际传输可记为 `exact/observed`；
+上下文和祖先到模型或动作的控制影响仍为 `possible/semantic_inferred`。
+新动作 FlowFact 使用固定 producer `ct-product-fact-builder-1`，其信封声明和
+bundle 摘要必须匹配 `ct-product-fact-1`，混合 producer 或版本替换均拒绝。
+原 CT 数据容器和 projector 不变，不能把历史 `possible` 投影重写为 `exact`。
+Memory 仅继承当前直接依赖，完整祖先闭包的污点继续保留；无关历史不是当前输入。
+
+新增决策证据绑定其完整输入摘要，版本或摘要不匹配时拒绝重放。
+最终候选必须重新构建、签署并完成真实验收。
+
+本批只交付契约与执行前验证；双运行时 Product Active 的公开启用限制持续保留，
+最终状态以固定 `dev` SHA 上的完整闭环报告为准。

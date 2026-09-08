@@ -32,6 +32,7 @@ from typing import Iterable, Sequence
 from ...actions.models import ActionIR
 from ...signals.models import CoverageStatus, FlowStrength, FlowVerdict, TaintLabel
 from ..facts import FlowFact, StickyTaintSummary
+from ..product_data import VerifiedProductData
 from ..snapshot import SecuritySnapshot
 from ..state import OnlineSecurityState
 
@@ -117,6 +118,7 @@ def compute_flow_verdict(
     action_ir: ActionIR,
     *,
     dataflow_status: CoverageStatus | None = None,
+    product_data: VerifiedProductData | None = None,
 ) -> FlowVerdict:
     """由 ``SecuritySnapshot``（flows / sticky taint summaries）与
     ``ActionIR`` sink 信息生成 ``FlowVerdict``。
@@ -164,6 +166,7 @@ def compute_flow_verdict(
             if dataflow_status is not None
             else snapshot.coverage.dataflow.status
         ),
+        product_data=product_data,
     )
 
 
@@ -172,6 +175,7 @@ def compute_flow_verdict_from_state(
     action_ir: ActionIR,
     *,
     dataflow_status: CoverageStatus,
+    product_data: VerifiedProductData | None = None,
 ) -> FlowVerdict:
     """Evaluate the current action against an ephemeral online-state view.
 
@@ -186,6 +190,7 @@ def compute_flow_verdict_from_state(
         dirty_domains=state.dirty_domains,
         action_ir=action_ir,
         dataflow_status=dataflow_status,
+        product_data=product_data,
     )
 
 
@@ -196,8 +201,11 @@ def _compute_flow_verdict(
     dirty_domains: Sequence[str],
     action_ir: ActionIR,
     dataflow_status: CoverageStatus,
+    product_data: VerifiedProductData | None = None,
 ) -> FlowVerdict:
     """Shared pure implementation for Snapshot and state-based entrypoints."""
+    if product_data is not None and not product_data.matches_action(action_ir):
+        raise ValueError("product_data_action_mismatch")
     external_sink = _external_sink(action_ir)
     dangerous_flows = [flow for flow in flows if _is_dangerous(flow)]
 
@@ -220,8 +228,22 @@ def _compute_flow_verdict(
 
     dataflow_status_resolved = dataflow_status
     sticky_dangerous = _dangerous_sticky_taints(sticky_taint_summaries)
+    if product_data is not None:
+        sticky_dangerous = sorted(
+            set(sticky_dangerous) | DANGEROUS_TAINTS.intersection(product_data.taints)
+        )
 
-    if dataflow_status_resolved == "not_applicable" and not sticky_dangerous:
+    if (
+        dataflow_status_resolved == "not_applicable"
+        and not sticky_dangerous
+        and not (
+            product_data is not None
+            and (
+                product_data.hostile_instruction
+                or "EXTERNAL_INSTRUCTION" in product_data.taints
+            )
+        )
+    ):
         return FlowVerdict(
             status="not_applicable",
             strongest_strength=None,
@@ -231,7 +253,11 @@ def _compute_flow_verdict(
             evidence_refs=[],
         )
 
-    possible_link_present = any(flow.strength == "possible" for flow in flows)
+    possible_link_present = any(
+        flow.strength == "possible"
+        and not (product_data is not None and product_data.covers_control_flow(flow))
+        for flow in flows
+    )
     safe = (
         dataflow_status_resolved == "complete"
         and not _flow_data_truncated(
@@ -240,6 +266,22 @@ def _compute_flow_verdict(
         )
         and not possible_link_present
         and not sticky_dangerous
+        and not (
+            product_data is not None
+            and (
+                product_data.hostile_instruction
+                or "EXTERNAL_INSTRUCTION" in product_data.taints
+            )
+        )
+        and not (
+            product_data is not None
+            and any(
+                flow.scope_digest != product_data.scope_digest
+                or not set(flow.taints).issubset(product_data.taints)
+                or not product_data.covers_flow_endpoints(flow)
+                for flow in flows
+            )
+        )
     )
     if safe:
         return FlowVerdict(

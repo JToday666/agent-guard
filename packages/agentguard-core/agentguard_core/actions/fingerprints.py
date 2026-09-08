@@ -22,7 +22,7 @@ import hmac as hmac_module
 from typing import Any
 
 from .canonical_json import canonical_json_bytes, canonical_sha256
-from .models import ActionIR, CanonicalResource
+from .models import ActionIR, CanonicalResource, PRODUCT_TOOL_NORMALIZER_VERSION
 
 __all__ = [
     "AUTHORIZATION_DOMAIN_TAG",
@@ -50,7 +50,7 @@ def _resource_projection(resource: CanonicalResource) -> dict[str, Any]:
 
 def authorization_projection(ir: ActionIR) -> dict[str, Any]:
     """authorization_fingerprint 的白名单投影（测试与审计可复用）。"""
-    return {
+    projection = {
         "schema_version": ir.schema_version,
         "principal_id": ir.principal_id,
         "task_id": ir.task_id,
@@ -70,6 +70,10 @@ def authorization_projection(ir: ActionIR) -> dict[str, Any]:
         "scope_digest": ir.scope_digest,
         "argument_digest": ir.argument_digest,
     }
+    if ir.normalizer_version == PRODUCT_TOOL_NORMALIZER_VERSION:
+        projection["normalizer_version"] = ir.normalizer_version
+        projection["tool_name"] = ir.tool_name
+    return projection
 
 
 def authorization_fingerprint(server_secret: bytes, ir: ActionIR) -> str:

@@ -31,6 +31,7 @@ from typing import TYPE_CHECKING
 from ..coverage import RequiredHistoryWindow
 from ..facts import GapRange, StateWatermarks
 from ..projector import PROJECTOR_VERSION
+from ..product_data import PRODUCT_DATA_COVERAGE_VERSION, VerifiedProductData
 from ..state import OnlineSecurityState
 from ...decisions.evidence import DomainCoverage
 from ...signals.models import (
@@ -121,14 +122,49 @@ def _result(
     domain: CoverageDomain,
     status: CoverageStatus,
     reason_codes: list[str],
+    *,
+    product: bool = False,
 ) -> DomainCoverage:
     return DomainCoverage(
         domain=domain,
         status=status,
         as_of_sequence=state.watermarks.projected_sequence,
-        projector_version=PROJECTOR_VERSION,
+        projector_version=(
+            PRODUCT_DATA_COVERAGE_VERSION if product else PROJECTOR_VERSION
+        ),
         reason_codes=reason_codes,
     )
+
+
+def _verified_product_data(
+    state: OnlineSecurityState, ctx: CoverageContext
+) -> VerifiedProductData | None:
+    proof = ctx.product_data
+    if proof is None or not proof.integrity_valid():
+        return None
+    sources = {source.source_id: source for source in state.source_index}
+    if set(_required_refs(ctx)) != set(proof.direct_source_refs):
+        return None
+    for ref in proof.source_refs:
+        source = sources.get(ref)
+        if (
+            source is None
+            or sum(item.source_id == ref for item in state.source_index) != 1
+            or source.scope_digest != proof.scope_digest
+            or not source.producer
+        ):
+            return None
+        if not set(source.taints).issubset(proof.taints):
+            return None
+    model = sources.get(proof.model_source_ref)
+    if (
+        model is None
+        or model.source_type != "model"
+        or model.authority != "model_judgment"
+        or model.trust != "unknown"
+    ):
+        return None
+    return proof
 
 
 def _watermark_for(
@@ -223,7 +259,16 @@ def source_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
     if early is not None:
         return early
 
-    refs = _required_refs(ctx)
+    proof = _verified_product_data(state, ctx)
+    if ctx.product_data is not None and proof is None:
+        return _result(
+            state,
+            domain,
+            "unknown",
+            ["product-data:source_proof_invalid"],
+            product=True,
+        )
+    refs = list(proof.source_refs) if proof is not None else _required_refs(ctx)
     if not refs:
         return _result(state, domain, "unknown", ["v21-05:source_refs_unresolvable"])
 
@@ -245,7 +290,17 @@ def source_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
         return _result(state, domain, "partial", ["v21-05:source_refs_missing"])
 
     weak = [
-        ref for ref in refs if index[ref].trust == "unknown" or not index[ref].producer
+        ref
+        for ref in refs
+        if not index[ref].producer
+        or (
+            index[ref].trust == "unknown"
+            and not (
+                proof is not None
+                and index[ref].source_type == "model"
+                and index[ref].authority == "model_judgment"
+            )
+        )
     ]
     if weak:
         return _result(
@@ -254,7 +309,17 @@ def source_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
             "partial",
             ["v21-05:source_trust_mapping_incomplete"],
         )
-    return _result(state, domain, "complete", ["v21-05:source_complete"])
+    return _result(
+        state,
+        domain,
+        "complete",
+        (
+            ["product-data:source_classification_proved"]
+            if proof is not None
+            else ["v21-05:source_complete"]
+        ),
+        product=proof is not None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -290,13 +355,39 @@ def dataflow_coverage(
         return _result(state, domain, "stale", ["v21-05:flow_watermark_behind"])
 
     flows = state.relevant_flows
+    proof = _verified_product_data(state, ctx)
+    if ctx.product_data is not None and proof is None:
+        return _result(
+            state,
+            domain,
+            "unknown",
+            ["product-data:source_proof_invalid"],
+            product=True,
+        )
     refs = _required_refs(ctx)
     if not flows:
         if refs:
             return _result(state, domain, "partial", ["v21-05:no_relevant_flows"])
         return _result(state, domain, "unknown", ["v21-05:flow_refs_unresolvable"])
 
-    if any(flow.strength == "possible" for flow in flows):
+    if proof is not None and any(
+        flow.scope_digest != proof.scope_digest
+        or not set(flow.taints).issubset(proof.taints)
+        or not proof.covers_flow_endpoints(flow)
+        for flow in flows
+    ):
+        return _result(
+            state,
+            domain,
+            "partial",
+            ["product-data:dependency_closure_mismatch"],
+            product=True,
+        )
+    if any(
+        flow.strength == "possible"
+        and not (proof is not None and proof.covers_control_flow(flow))
+        for flow in flows
+    ):
         return _result(state, domain, "partial", ["v21-05:possible_flow_link"])
 
     if refs:
@@ -305,7 +396,17 @@ def dataflow_coverage(
         }
         if any(ref not in flow_refs for ref in refs):
             return _result(state, domain, "partial", ["v21-05:unresolved_artifact_ref"])
-    return _result(state, domain, "complete", ["v21-05:dataflow_complete"])
+    return _result(
+        state,
+        domain,
+        "complete",
+        (
+            ["product-data:field_bindings_complete"]
+            if proof is not None
+            else ["v21-05:dataflow_complete"]
+        ),
+        product=proof is not None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +440,24 @@ def memory_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
         return _result(state, domain, "unknown", ["v21-05:memory_state_unavailable"])
 
     facts = {fact.memory_id: fact for fact in state.memory_index}
-    refs = _required_refs(ctx)
+    proof = _verified_product_data(state, ctx)
+    if ctx.product_data is not None and proof is None:
+        return _result(
+            state,
+            domain,
+            "unknown",
+            ["product-data:source_proof_invalid"],
+            product=True,
+        )
+    refs = list(proof.memory_refs) if proof is not None else _required_refs(ctx)
+    if proof is not None and not refs:
+        return _result(
+            state,
+            domain,
+            "partial",
+            ["product-data:memory_dependency_unproved"],
+            product=True,
+        )
     if refs:
         matched = [facts[ref] for ref in refs if ref in facts]
         # required refs 必须全量命中：任一缺失（含全部缺失）→ partial，
@@ -350,6 +468,26 @@ def memory_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
     else:
         considered = list(facts.values())
 
+    if proof is not None and any(
+        sum(item.memory_id == fact.memory_id for item in state.memory_index) != 1
+        or not set(fact.taints).issubset(proof.taints)
+        or not set(fact.source_refs).issubset(
+            {*proof.source_refs, *proof.artifact_refs, f"action:{proof.action_id}"}
+        )
+        or (fact.trust_state == "clean" and bool(fact.taints))
+        or (
+            fact.memory_id != proof.first_write_memory_ref
+            and (fact.change_status != "committed" or not fact.change_id)
+        )
+        for fact in considered
+    ):
+        return _result(
+            state,
+            domain,
+            "partial",
+            ["product-data:memory_dependency_closure_mismatch"],
+            product=True,
+        )
     if any(fact.change_status is None or not fact.source_refs for fact in considered):
         return _result(
             state,
@@ -357,6 +495,28 @@ def memory_coverage(state: OnlineSecurityState, ctx: CoverageContext) -> DomainC
             "partial",
             ["v21-05:memory_lifecycle_or_source_link_missing"],
         )
-    if any(fact.trust_state == "unknown" for fact in considered):
+    if any(
+        fact.trust_state == "unknown"
+        and not (
+            proof is not None
+            and fact.memory_id == proof.first_write_memory_ref
+            and fact.change_status == "proposed"
+            and fact.change_id is None
+            and set(fact.source_refs)
+            == {*proof.direct_source_refs, f"action:{proof.action_id}"}
+            and set(fact.taints) == set(proof.taints)
+        )
+        for fact in considered
+    ):
         return _result(state, domain, "partial", ["v21-05:memory_trust_unknown"])
-    return _result(state, domain, "complete", ["v21-05:memory_complete"])
+    return _result(
+        state,
+        domain,
+        "complete",
+        (
+            ["product-data:memory_state_classification_proved"]
+            if proof is not None
+            else ["v21-05:memory_complete"]
+        ),
+        product=proof is not None,
+    )

@@ -1,0 +1,437 @@
+{
+  "runtime_version": "2026.7.1-2",
+  "evidence_scope": "B01 actual pinned SDK factory and native model-visible capture; no tool execution or Product Active qualification",
+  "tools": [
+    {
+      "tool_id": "agentguard_memory_read",
+      "source_plugin_id": "agentguard-product-runtime-fixture",
+      "input_schema_digest": "sha256:3339d5553a7f8e8c6c8296f1f52978353c34d6440457e860428bbd4687d1a960",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:agentguard_memory_read:restricted-v1"
+    },
+    {
+      "tool_id": "agentguard_memory_write",
+      "source_plugin_id": "agentguard-product-runtime-fixture",
+      "input_schema_digest": "sha256:5662b8d1a458c8b8f39358d4633a3cdb9d6f7264ae585461876f2a06859bb5fa",
+      "event_type": "memory_write_proposed",
+      "fixture_id": "openclaw:agentguard_memory_write:restricted-v1"
+    },
+    {
+      "tool_id": "edit",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:35f838a1c312a5795b1fc1f7b36fba400cc87229a0025c42c248f12f43ff6d6f",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:edit:restricted-v1"
+    },
+    {
+      "tool_id": "exec",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:9aaa693011a4296aa192917cc5f04e38c7ddfcad525b8ff7e0de633c7fd5e8f4",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:exec:restricted-v1"
+    },
+    {
+      "tool_id": "message",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:2c511c7972c9294b4899a66b3f1bdcc68ebeed4489b2747ddd75c45aaf7d00d6",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:message:restricted-v1"
+    },
+    {
+      "tool_id": "process",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:5343155751d4a8889347cf88f926ce566c04915e7f4a0c8088158de566c7cab6",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:process:restricted-v1"
+    },
+    {
+      "tool_id": "read",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:5fad0fa7493528bc4284f5c447781325f67099f5fc018206efdc461d33962e85",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:read:restricted-v1"
+    },
+    {
+      "tool_id": "write",
+      "source_plugin_id": "openclaw-core",
+      "input_schema_digest": "sha256:7e51d1de0f2ccb5fe8de82d51ee3a1d9065e3c4f7c53497ce12f283d6f2f5aa0",
+      "event_type": "tool_call_proposed",
+      "fixture_id": "openclaw:write:restricted-v1"
+    }
+  ],
+  "input_schemas": {
+    "agentguard_memory_read": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        }
+      }
+    },
+    "agentguard_memory_write": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "value"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+        },
+        "value": {
+          "type": "string",
+          "maxLength": 32768
+        }
+      }
+    },
+    "edit": {
+      "type": "object",
+      "required": [
+        "path",
+        "edits"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the file to edit (relative or absolute)"
+        },
+        "edits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "oldText",
+              "newText"
+            ],
+            "properties": {
+              "oldText": {
+                "type": "string",
+                "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."
+              },
+              "newText": {
+                "type": "string",
+                "description": "Replacement text for this targeted edit."
+              }
+            },
+            "additionalProperties": false
+          },
+          "description": "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."
+        }
+      },
+      "additionalProperties": false
+    },
+    "exec": {
+      "type": "object",
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Shell command to execute"
+        },
+        "workdir": {
+          "type": "string",
+          "description": "Working directory. Blank/whitespace values are invalid; omit to use the default cwd."
+        },
+        "env": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "string"
+            }
+          }
+        },
+        "yieldMs": {
+          "type": "number",
+          "description": "Milliseconds to wait before backgrounding (default 10000)"
+        },
+        "background": {
+          "type": "boolean",
+          "description": "Run in background immediately"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "Timeout in seconds (optional, kills process on expiry)"
+        },
+        "pty": {
+          "type": "boolean",
+          "description": "Run in a pseudo-terminal (PTY) when available (TTY-required CLIs, coding agents)"
+        },
+        "elevated": {
+          "type": "boolean",
+          "description": "Run on the host with elevated permissions (if allowed)"
+        },
+        "host": {
+          "type": "string",
+          "enum": [
+            "auto",
+            "sandbox",
+            "gateway",
+            "node"
+          ],
+          "description": "Exec host/target (auto|sandbox|gateway|node)."
+        },
+        "security": {
+          "type": "string",
+          "description": "Ignored for normal calls; exec security is set by tools.exec.security and host approvals."
+        },
+        "ask": {
+          "type": "string",
+          "description": "Baseline ask comes from tools.exec.ask and host approvals; channel-origin calls ignore per-call ask when effective host ask is off."
+        },
+        "node": {
+          "type": "string",
+          "description": "Node id/name for host=node."
+        }
+      }
+    },
+    "message": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "send"
+          ]
+        },
+        "channel": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string",
+          "description": "Recipient/channel: E.164 for WhatsApp/Signal, Telegram chat id/@username, Discord/Slack/Mattermost <channelId|user:ID|channel:ID>, or iMessage handle/chat_id"
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "description": "Recipient/channel targets (same format as --target); accepts ids or names when the directory is available."
+          }
+        },
+        "accountId": {
+          "type": "string"
+        },
+        "dryRun": {
+          "type": "boolean"
+        },
+        "message": {
+          "type": "string"
+        },
+        "effectId": {
+          "type": "string",
+          "description": "Effect id/name for sendWithEffect."
+        },
+        "effect": {
+          "type": "string",
+          "description": "Alias for effectId."
+        },
+        "media": {
+          "type": "string",
+          "description": "Media URL/path. data: use buffer."
+        },
+        "filename": {
+          "type": "string"
+        },
+        "buffer": {
+          "type": "string",
+          "description": "Base64 attachment payload; data URL ok."
+        },
+        "contentType": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "caption": {
+          "type": "string"
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image",
+                  "audio",
+                  "video",
+                  "file"
+                ]
+              },
+              "media": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "mimeType": {
+                "type": "string"
+              }
+            }
+          },
+          "description": "Structured attachments; each entry uses media."
+        },
+        "replyTo": {
+          "type": "string"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "asVoice": {
+          "type": "boolean"
+        },
+        "silent": {
+          "type": "boolean"
+        },
+        "quoteText": {
+          "type": "string",
+          "description": "Telegram reply quote text."
+        },
+        "gifPlayback": {
+          "type": "boolean"
+        },
+        "forceDocument": {
+          "type": "boolean",
+          "description": "Send image/GIF/video as document; avoids compression."
+        },
+        "asDocument": {
+          "type": "boolean",
+          "description": "Alias for forceDocument."
+        },
+        "gatewayUrl": {
+          "type": "string"
+        },
+        "gatewayToken": {
+          "type": "string"
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "required": [
+        "action"
+      ],
+      "properties": {
+        "action": {
+          "type": "string",
+          "description": "Process action (list|poll|log|write|send-keys|submit|paste|kill|clear|remove)"
+        },
+        "sessionId": {
+          "type": "string",
+          "description": "Session id for actions other than list"
+        },
+        "data": {
+          "type": "string",
+          "description": "Data to write for write"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Key tokens to send for send-keys"
+        },
+        "hex": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Hex bytes to send for send-keys"
+        },
+        "literal": {
+          "type": "string",
+          "description": "Literal string for send-keys"
+        },
+        "text": {
+          "type": "string",
+          "description": "Text to paste for paste"
+        },
+        "bracketed": {
+          "type": "boolean",
+          "description": "Wrap paste in bracketed mode"
+        },
+        "eof": {
+          "type": "boolean",
+          "description": "Close stdin after write"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Log offset"
+        },
+        "limit": {
+          "type": "number",
+          "description": "Log length"
+        },
+        "timeout": {
+          "type": "number",
+          "description": "For poll: wait up to this many milliseconds before returning; max 30000 ms, higher values are clamped to 30000",
+          "minimum": 0
+        }
+      }
+    },
+    "read": {
+      "type": "object",
+      "required": [
+        "path"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the file to read (relative or absolute)"
+        },
+        "offset": {
+          "type": "number",
+          "description": "Line number to start reading from (1-indexed)"
+        },
+        "limit": {
+          "type": "number",
+          "description": "Maximum number of lines to read"
+        }
+      }
+    },
+    "write": {
+      "type": "object",
+      "required": [
+        "path",
+        "content"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the file to write (relative or absolute)"
+        },
+        "content": {
+          "type": "string",
+          "description": "Content to write to the file"
+        }
+      }
+    }
+  },
+  "plugin_order": [
+    "openclaw-core",
+    "agentguard-product-runtime-fixture"
+  ],
+  "digests": {
+    "schema_version": "1.0",
+    "host_inventory_digest": "sha256:6fa621a89b1bab2f7f764aa1e3fd9c032a1fcd39a449f962c0aa77292c93ebea",
+    "plugin_inventory_digest": "sha256:a8c756ec9043c01e7f2f251d070d0f42a2f8a53af73c5674797ce5950c414199",
+    "plugin_order_inventory_digest": "sha256:7a3b6bd031ddab5a605bb65880442ccee0da89c2adb062b5c8dc79525ef0461f",
+    "tool_inventory_digest": "sha256:5f80126a84952452e77ee37bf6edf24df4d0a010c27815a8450cddeca840103d"
+  }
+}

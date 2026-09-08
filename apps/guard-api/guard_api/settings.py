@@ -179,6 +179,11 @@ class GuardApiSettings:
     v21_product_activation_path: str | None = field(
         default_factory=lambda: _optional_env("AGENTGUARD_V21_PRODUCT_ACTIVATION_PATH")
     )
+    v21_product_tool_catalog_path: str | None = field(
+        default_factory=lambda: _optional_env(
+            "AGENTGUARD_V21_PRODUCT_TOOL_CATALOG_PATH"
+        )
+    )
     v21_product_activation_server_secret: str | None = field(
         default_factory=lambda: _optional_env(
             "AGENTGUARD_V21_PRODUCT_ACTIVATION_SERVER_SECRET"
@@ -535,6 +540,15 @@ class GuardApiSettings:
                 "AGENTGUARD_V21_PRODUCT_ACTIVATION_SIGNER_KEY_ID must be "
                 "configured together"
             )
+        if self.v21_product_tool_catalog_path is not None:
+            if not self.product_activation_configured():
+                raise GuardApiConfigurationError(
+                    "Product tool catalog requires Product activation"
+                )
+            if not Path(self.v21_product_tool_catalog_path).is_absolute():
+                raise GuardApiConfigurationError(
+                    "Product tool catalog path must be absolute"
+                )
         if self.product_activation_configured():
             assert self.v21_product_activation_path is not None
             assert self.v21_product_activation_signer_key_id is not None

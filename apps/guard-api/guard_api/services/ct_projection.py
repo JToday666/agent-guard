@@ -91,9 +91,11 @@ from guard_api.security_state.fact_builder import (
 from guard_api.security_state.transient import (
     FACT_BUILDER_VERSION,
     LEGACY_FACT_BUILDER_VERSION,
+    PRODUCT_FACT_BUILDER_VERSION,
     TransientSecurityFacts,
     compute_bundle_digest,
     compute_overlay_digest,
+    fact_builder_version_for_bundle,
 )
 from guard_api.settings import GuardApiConfigurationError, GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
@@ -203,7 +205,15 @@ def _fact_builder_version_for_envelope(
             return LEGACY_FACT_BUILDER_VERSION
         return None
     if schema_version == CT_FACTS_ENVELOPE_VERSION:
-        return FACT_BUILDER_VERSION if declared == FACT_BUILDER_VERSION else None
+        return (
+            declared
+            if declared
+            in (
+                FACT_BUILDER_VERSION,
+                PRODUCT_FACT_BUILDER_VERSION,
+            )
+            else None
+        )
     return None
 
 
@@ -375,6 +385,14 @@ def decode_ct_transient_facts(
         bundle, fact_builder_version=fact_builder_version
     )
     issues: list[str] = []
+    try:
+        actual_version = fact_builder_version_for_bundle(bundle)
+        if (fact_builder_version == PRODUCT_FACT_BUILDER_VERSION) != (
+            actual_version == PRODUCT_FACT_BUILDER_VERSION
+        ):
+            issues.append("ct-envelope:fact_producer_version_mismatch")
+    except ValueError:
+        issues.append("ct-envelope:fact_producer_version_mismatch")
     if bundle.bundle_digest != recomputed_digest:
         issues.append("ct-envelope:embedded_bundle_digest_mismatch")
     if expected_digest != recomputed_digest:
@@ -840,7 +858,13 @@ class CtProjectionService:
                 runtime_binding_id=(
                     snapshot.scope.runtime_binding_id if task_fact is not None else None
                 ),
+                product_tool=materials.product_tool,
             )
+            if (
+                materials.product_data is not None
+                and not materials.product_data.matches_action(action_ir)
+            ):
+                raise ValueError("ct_product_data_action_mismatch")
         except Exception:  # noqa: BLE001 - ActionIR 构造失败 → 无 ActionIR 口径。
             logger.warning(
                 "ct fact projection ActionIR construction failed for event %s; "
@@ -858,6 +882,7 @@ class CtProjectionService:
             server_credential_fingerprints=frozenset(),
             visible_refs=visible_refs,
             action_ir=action_ir,
+            product_data=materials.product_data,
             upstream_descriptors=upstream_descriptors,
             upstream_memory_facts=upstream_memory_facts,
             memory_change_status="proposed",
@@ -882,7 +907,7 @@ class CtProjectionService:
 
         return {
             "ct_delta_builder_version": CT_DELTA_BUILDER_VERSION,
-            "fact_builder_version": FACT_BUILDER_VERSION,
+            "fact_builder_version": fact_builder_version_for_bundle(bundle),
             "commit_id": f"ct-commit:{bundle.event_id}",
             "bundle_digest": bundle.bundle_digest,
             "overlay_digest": bundle.overlay_digest,
@@ -918,7 +943,7 @@ class CtProjectionService:
                     plan.source_record_id,
                     plan.bundle,
                     commit_base_state_version=plan.base_state_version,
-                    fact_builder_version=FACT_BUILDER_VERSION,
+                    fact_builder_version=fact_builder_version_for_bundle(plan.bundle),
                 )
             except Exception:  # noqa: BLE001 - 投影故障必须收敛，绝不上抛。
                 logger.warning(

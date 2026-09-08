@@ -22,6 +22,7 @@ from ..actions.canonical_json import canonical_sha256
 from ..actions.models import ActionEffect, ActionIR
 from ..decisions.evidence import RequiredCheckPlan
 from ..signals.models import CoverageDomain, ImpactClass
+from .product_data import VerifiedProductData
 
 __all__ = [
     "REQUIRED_CHECK_PLAN_VERSION",
@@ -31,6 +32,7 @@ __all__ = [
 
 #: plan 映射规则版本：任何表驱动规则变化必须升级，不得静默改变 plan_id。
 REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-4"
+PRODUCT_REQUIRED_CHECK_PLAN_VERSION = "v21-04-plan-5"
 
 #: CoverageMap 固定域顺序（01 §17）；plan 列表按此序稳定排序。
 _DOMAIN_ORDER: tuple[CoverageDomain, ...] = (
@@ -104,6 +106,8 @@ def _impact_default_required(impact: ImpactClass) -> set[CoverageDomain]:
 def build_required_check_plan(
     action: ActionIR | ImpactClass,
     policy: PolicyProfile,
+    *,
+    product_data: VerifiedProductData | None = None,
 ) -> RequiredCheckPlan:
     """表驱动确定性映射生成 ``RequiredCheckPlan``（无 LLM）。
 
@@ -139,6 +143,10 @@ def build_required_check_plan(
 
     required: set[CoverageDomain] = _impact_default_required(impact)
     reason_codes: list[str] = [f"v21-04:impact_{impact}"]
+    if product_data is not None and (
+        action_ir is None or not product_data.matches_action(action_ir)
+    ):
+        raise ValueError("product_data_action_mismatch")
 
     egress_domains: set[CoverageDomain] = {"source", "dataflow"}
     policy_na_domains: set[CoverageDomain] = {"source", "dataflow", "memory"}
@@ -188,6 +196,29 @@ def build_required_check_plan(
         required.discard("task")
         reason_codes.append("v21-04:policy_task_not_required")
 
+    if product_data is not None and action_ir is not None:
+        # A fully verified dependency closure can prove a persistent file is
+        # not a MemoryGuard operation. Persistence remains in the ActionIR and
+        # authorization fingerprint. Unknown/absent evidence never enters here.
+        memory_required = (
+            bool(product_data.memory_refs)
+            or action_type == "memory_write"
+            or any(resource.kind == "memory" for resource in action_ir.resources)
+            or any(
+                ref.startswith(("memory:", "memory://", "source:memory:"))
+                for ref in action_ir.data_refs
+            )
+        )
+        if memory_required:
+            required.add("memory")
+            reason_codes.append("product-data:memory_dependency_required")
+        else:
+            required.discard("memory")
+            reason_codes.append("product-data:no_memory_dependency_proved")
+        # A proved action always consumes its actual source/data commitments;
+        # observation exemptions cannot turn this into a global bypass.
+        required.update({"source", "dataflow"})
+
     required.discard("runtime_outcome")
 
     required_domains: list[CoverageDomain] = [
@@ -202,13 +233,19 @@ def build_required_check_plan(
     ] = (["task_alignment"] if "task" in required else [])
 
     projection: dict[str, Any] = {
-        "plan_version": REQUIRED_CHECK_PLAN_VERSION,
+        "plan_version": (
+            PRODUCT_REQUIRED_CHECK_PLAN_VERSION
+            if product_data is not None
+            else REQUIRED_CHECK_PLAN_VERSION
+        ),
         "impact": impact,
         "required_domains": required_domains,
         "optional_domains": optional_domains,
         "policy_revision": policy.policy_revision,
         "policy_digest": policy.policy_digest,
     }
+    if product_data is not None:
+        projection["product_data_digest"] = product_data.proof_digest
     plan_id = f"v21-04-plan:{canonical_sha256(projection)}"
 
     return RequiredCheckPlan(

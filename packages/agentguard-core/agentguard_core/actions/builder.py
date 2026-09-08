@@ -42,7 +42,15 @@ from .canonical_resources import (
     SymlinkResolver,
 )
 from .fingerprints import audit_fingerprint, authorization_fingerprint
-from .models import NORMALIZER_VERSION, ActionEffect, ActionIR, CanonicalResource
+from .models import (
+    NORMALIZER_VERSION,
+    PRODUCT_TOOL_NORMALIZER_VERSION,
+    ActionEffect,
+    ActionIR,
+    CanonicalResource,
+    ToolResource,
+)
+from .product_tools import VerifiedProductTool, product_tool_resource_identity
 from .normalize import normalize_arguments
 
 __all__ = [
@@ -464,6 +472,7 @@ def build_action_ir(
     runtime_binding_id: str | None = None,
     resolver: SymlinkResolver | None = None,
     model_output_observation: bool = False,
+    product_tool: VerifiedProductTool | None = None,
 ) -> ActionIR:
     """把 GuardEvent 编排为确定性 ActionIR。
 
@@ -475,6 +484,10 @@ def build_action_ir(
         raise ValueError(
             "model_output_observation requires event_type=model_output_produced"
         )
+    if product_tool is not None:
+        if type(product_tool) is not VerifiedProductTool or model_output_observation:
+            raise ValueError("product_tool_binding_mismatch")
+        product_tool.assert_matches(event, runtime_binding_id=runtime_binding_id)
 
     reason_codes: list[str] = []
     agent_id = event.security_context.agent_id
@@ -511,15 +524,55 @@ def build_action_ir(
         else None
     )
     action_type = _ACTION_TYPE_BY_EVENT.get(event.event_type, event.event_type)
-    effects = ActionEffect() if model_output_observation else _effects_for_event(event)
+    if product_tool is not None:
+        tool_name = product_tool.tool_name
+    effects = (
+        product_tool.effects()
+        if product_tool is not None
+        else ActionEffect() if model_output_observation else _effects_for_event(event)
+    )
     impact = _impact_for_effects(effects)
 
     normalized_arguments = normalize_arguments(
-        payload.arguments if isinstance(payload, ToolCallPayload) else {}
+        product_tool.arguments()
+        if product_tool is not None
+        else payload.arguments if isinstance(payload, ToolCallPayload) else {}
     )
     reason_codes.extend(normalized_arguments.reason_codes)
 
-    produced = _payload_resources(event, reason_codes=reason_codes, resolver=resolver)
+    if product_tool is None:
+        produced = _payload_resources(
+            event, reason_codes=reason_codes, resolver=resolver
+        )
+    else:
+        # Retain actual tool identity as well as all verified execution targets.
+        # Client-derived resources never override this server catalog mapping.
+        produced: list[CanonicalResource] = [
+            ToolResource(
+                resource_id=f"{event.event_id}:product-tool",
+                canonical_id=product_tool_resource_identity(
+                    product_tool.tool_name,
+                    product_tool.descriptor_digest,
+                    product_tool.semantics_digest,
+                ),
+                display_summary=product_tool.tool_name,
+                resolution_status="resolved",
+                normalizer_version=PRODUCT_TOOL_NORMALIZER_VERSION,
+                tool_name=product_tool.tool_name,
+                tool_schema_digest=product_tool.input_schema_digest,
+                provider_binding_id=runtime_binding_id,
+            )
+        ]
+        for index, resource in enumerate(product_tool.resource_inputs(), start=1):
+            produced.append(
+                _normalize_one(
+                    event,
+                    index=index,
+                    reason_codes=reason_codes,
+                    resolver=resolver,
+                    **resource,
+                )
+            )
     resources = [item for item in produced if item.kind not in _DESTINATION_KINDS]
     destinations = [item for item in produced if item.kind in _DESTINATION_KINDS]
 
@@ -573,9 +626,13 @@ def build_action_ir(
         authorization_fingerprint="",
         audit_fingerprint="",
         normalizer_version=(
-            _MODEL_OUTPUT_OBSERVATION_NORMALIZER_VERSION
-            if model_output_observation
-            else NORMALIZER_VERSION
+            PRODUCT_TOOL_NORMALIZER_VERSION
+            if product_tool is not None
+            else (
+                _MODEL_OUTPUT_OBSERVATION_NORMALIZER_VERSION
+                if model_output_observation
+                else NORMALIZER_VERSION
+            )
         ),
     )
     return placeholder.model_copy(

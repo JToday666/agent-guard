@@ -33,6 +33,8 @@ if TYPE_CHECKING:  # 仅类型标注：不在运行时污染 legacy 导入隔离
     # ``FastAssessment`` 经 ``decisions`` 包导出层引入（引用名不含
     # 禁词），不在本文件直接引用 ``decisions.evidence``。
     from .decisions import FastAssessment
+    from .actions.product_tools import VerifiedProductTool
+    from .security_context.product_data import VerifiedProductData
     from .security_context.assessment_overlay import AssessmentTransientFacts
     from .security_context.snapshot import SecuritySnapshot
     from .semantic.models import SemanticJudgment
@@ -141,6 +143,8 @@ class GuardEngine:
         detection_results: Sequence[DetectionResult] = (),
         revoked_grant_ids: Sequence[str] = (),
         transient_facts: "AssessmentTransientFacts | None" = None,
+        product_tool: "VerifiedProductTool | None" = None,
+        product_data: "VerifiedProductData | None" = None,
         memory_not_required_actions: frozenset[str] = frozenset(),
         source_dataflow_not_required_actions: frozenset[str] = frozenset(),
     ) -> "FastAssessment":
@@ -162,6 +166,8 @@ class GuardEngine:
             detection_results=detection_results,
             revoked_grant_ids=revoked_grant_ids,
             transient_facts=transient_facts,
+            product_tool=product_tool,
+            product_data=product_data,
             memory_not_required_actions=memory_not_required_actions,
             source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
         )

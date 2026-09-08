@@ -30,6 +30,7 @@ from .competition import (
 )
 from .evidence import CoverageMap, FastAssessment
 from .models import ApprovalIntent, Decision, GuardDecision
+from ..security_context.product_data import VerifiedProductData
 
 __all__ = [
     "ACTIVATION_ACK_SIGNATURE_DOMAIN",
@@ -1527,6 +1528,7 @@ def _reviewable(
     assessment: FastAssessment,
     coverage: CoverageMap,
     eligibility: V21SelectionEligibility,
+    product_data: VerifiedProductData | None = None,
 ) -> bool:
     fingerprints_complete = bool(
         assessment.authorization_fingerprint.startswith("hmac-sha256:")
@@ -1553,6 +1555,7 @@ def _reviewable(
             fingerprints_complete,
             task_complete,
             required_state_complete,
+            product_data is None or product_data.reviewable,
         )
     )
 
@@ -1572,6 +1575,7 @@ def select_product_v21_authority(
     scope_digest: str,
     event_type: GuardEventType,
     residual_boundaries: Sequence[str] = (),
+    product_data: VerifiedProductData | None = None,
 ) -> tuple[V21SelectionResult, ApprovalReleaseDirectiveV2]:
     """Select product V2 authority in active mode with no legacy fallback."""
 
@@ -1579,6 +1583,15 @@ def select_product_v21_authority(
         raise V21AuthoritySelectionError("v21-product:unsupported_event_type")
     if event_id != assessment.event_id:
         raise V21AuthoritySelectionError("v21-product:event_mismatch")
+    if product_data is not None and (
+        not product_data.integrity_valid()
+        or product_data.event_id != event_id
+        or product_data.action_id != assessment.action_id
+        or product_data.scope_digest != scope_digest
+        or product_data.runtime != runtime_entry.runtime
+        or product_data.runtime_binding_id != runtime_entry.runtime_binding_id
+    ):
+        raise V21AuthoritySelectionError("v21-product:data_proof_mismatch")
     if runtime_entry.runtime not in _RUNTIME_ORDER or (
         activation.runtime_entry(runtime_entry.runtime) != runtime_entry
     ):
@@ -1628,7 +1641,8 @@ def select_product_v21_authority(
         runtime=runtime_entry.runtime,
         decision=base.decision,
         reviewable=(
-            _reviewable(assessment, coverage, eligibility) and intent_allows_once
+            _reviewable(assessment, coverage, eligibility, product_data)
+            and intent_allows_once
         ),
         activation_ref_digest=activation.activation_ref_digest,
         scope_digest=scope_digest,
