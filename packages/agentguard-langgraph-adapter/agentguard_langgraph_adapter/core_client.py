@@ -2,18 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import json
 import re
 import time
-from typing import Any, Literal, Protocol
+from threading import Lock
+from typing import Any, Callable, Literal, Protocol
 
 import httpx
 
-from .config import DEFAULT_API_MODE, validate_api_mode
+from .activation_ack import ActivationAckV1, ProductActivationError
+from .activation_session import ProductActivationSession
+from .config import DEFAULT_API_MODE, product_configuration_digest, validate_api_mode
 from .endpoint_policy import GuardApiEndpointError, validate_guard_api_base_url
 from .event_models import PolicyDecision, RuleHit
+from .product_manifest import ProductActivationManifest, ProductRuntimeObservation
 from .strong_binding import (
     ExecutionLeaseConsumeError,
     ExecutionLeaseCorrelation,
@@ -30,6 +34,13 @@ _LEASE_RESPONSE_KEYS = frozenset(
     {"lease_id", "consumption_id", "lease_token", "expires_at"}
 )
 _MAX_LEASE_CONSUME_ATTEMPTS = 5
+_PRODUCT_DRIFT_CODES = frozenset(
+    {
+        "V21_PRODUCT_ACTIVATION_NOT_CURRENT",
+        "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH",
+        "V21_PRODUCT_RUNTIME_OBSERVATION_MISMATCH",
+    }
+)
 
 
 class CoreClientProtocol(Protocol):
@@ -64,19 +75,116 @@ class UnsupportedApiModeError(CoreClientError):
 @dataclass(slots=True)
 class AgentGuardCoreClient:
     config: Any
+    _product_manifest: ProductActivationManifest | None = field(
+        default=None, init=False, repr=False
+    )
+    _product_session: ProductActivationSession | None = field(
+        default=None, init=False, repr=False
+    )
+    _product_config_digest: str | None = field(default=None, init=False, repr=False)
+    _product_failed: bool = field(default=False, init=False, repr=False)
+    _product_transport: tuple[str, str, float] | None = field(
+        default=None, init=False, repr=False
+    )
+    _product_session_lock: Any = field(default_factory=Lock, init=False, repr=False)
 
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self.config.token}",
+    def __post_init__(self) -> None:
+        if getattr(self.config, "product_manifest_path", None) is not None:
+            self._product_config_digest = product_configuration_digest(self.config)
+            manifest = ProductActivationManifest.from_file(
+                self.config.product_manifest_path
+            )
+            if (
+                self.config.agent_id != manifest.agent_id
+                or self.config.runtime_binding_id != manifest.runtime_binding_id
+            ):
+                raise ProductActivationError("identity_mismatch")
+            self._product_manifest = manifest
+            self._product_transport = (
+                self.config.core_base_url,
+                self.config.token,
+                float(self.config.timeout),
+            )
+
+    @property
+    def product_enabled(self) -> bool:
+        # Keep the original opt-in even if the mutable compatibility config is
+        # subsequently changed to None or to defense-off.
+        return (
+            self._product_manifest is not None
+            or getattr(self.config, "product_manifest_path", None) is not None
+        )
+
+    def _check_product(self) -> ProductActivationManifest:
+        if self._product_failed or self._product_manifest is None:
+            raise ProductActivationError("session_unavailable")
+        try:
+            if product_configuration_digest(self.config) != self._product_config_digest:
+                raise ProductActivationError("configuration_drift")
+            self._product_manifest.assert_unchanged()
+        except Exception:
+            self._product_failed = True
+            if self._product_session is not None:
+                self._product_session.close()
+            raise ProductActivationError("configuration_drift") from None
+        return self._product_manifest
+
+    def start_product_session(
+        self, *, observe: Callable[[], ProductRuntimeObservation]
+    ) -> ActivationAckV1:
+        manifest = self._check_product()
+        with self._product_session_lock:
+            if self._product_session is None:
+                self._product_session = ProductActivationSession(
+                    manifest,
+                    send_heartbeat=self._send_product_heartbeat,
+                    observe=observe,
+                    refresh_interval_seconds=self.config.product_refresh_interval_seconds,
+                    max_ack_age_seconds=self.config.activation_ack_max_age_seconds,
+                )
+            session = self._product_session
+        return session.start()
+
+    def _send_product_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self._check_product()
+        return self._post_json("/v1/adapters/langgraph/heartbeat", payload)
+
+    def refresh_product_ack(self) -> ActivationAckV1:
+        self._check_product()
+        if self._product_session is None:
+            raise ProductActivationError("session_not_started")
+        return self._product_session.refresh()
+
+    def snapshot_product_ack(self) -> ActivationAckV1:
+        self._check_product()
+        if self._product_session is None:
+            raise ProductActivationError("session_not_started")
+        return self._product_session.snapshot()
+
+    def close_product_session(self) -> None:
+        self._product_failed = True
+        if self._product_session is not None:
+            self._product_session.close()
+
+    def _headers(self, activation_ack: ActivationAckV1 | None = None) -> dict[str, str]:
+        headers = {
+            "Authorization": f"Bearer {self._product_transport[1] if self._product_transport else self.config.token}",
             "Content-Type": "application/json",
         }
+        if activation_ack is not None:
+            headers["X-AgentGuard-Activation-Ack"] = activation_ack.header_value()
+        return headers
 
     def evaluate_tool_call(self, event: dict[str, Any]) -> dict[str, Any]:
+        if self.product_enabled:
+            return self.evaluate_product_event(_guard_api_v03_event(event))[0]
         if _api_mode(self.config) == "guard-api-v0.3":
             return self.evaluate_guard_event(_guard_api_v03_event(event))
         return self._post_json("/v1/evaluate/tool-call", event)
 
     def evaluate_guard_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        if self.product_enabled:
+            return self.evaluate_product_event(event)[0]
         if _api_mode(self.config) != "guard-api-v0.3":
             if event.get("event_type") == "tool_call_proposed":
                 return self.evaluate_tool_call(event)
@@ -90,14 +198,92 @@ class AgentGuardCoreClient:
             return _decision_with_top_level_approval(decision, response)
         return response
 
+    def evaluate_product_event(
+        self, event: dict[str, Any]
+    ) -> tuple[dict[str, Any], ActivationAckV1]:
+        """Return an official decision and the immutable ACK actually sent."""
+
+        manifest = self._check_product()
+        event = _guard_api_v03_event(event)
+        context = event.get("security_context")
+        if (
+            event.get("runtime") != manifest.runtime
+            or not isinstance(context, dict)
+            or context.get("agent_id") != manifest.agent_id
+        ):
+            raise ProductActivationError("event_identity_mismatch")
+        ack = self.snapshot_product_ack()
+        response = self._post_json("/v1/guard/evaluate", event, activation_ack=ack)
+        try:
+            raw = response.get("decision")
+            if (
+                not isinstance(raw, dict)
+                or not isinstance(raw.get("decision_id"), str)
+                or not raw["decision_id"].strip()
+            ):
+                raise ValueError
+            # Authority is a server-owned sibling. Do not accept a nested or
+            # absent projection left over from compatibility response shapes.
+            if not all(
+                name in response
+                for name in (
+                    "decision_authority",
+                    "approval_release_directive",
+                    "policy_audit_id",
+                )
+            ):
+                raise ValueError
+            for name in (
+                "approval",
+                "policy_audit_id",
+                "decision_authority",
+                "approval_release_directive",
+                "enforcement_binding",
+                "context_plan",
+            ):
+                if name in raw and raw[name] != response.get(name):
+                    raise ValueError
+            enriched = _decision_with_top_level_approval(raw, response)
+            decision = PolicyDecision.model_validate(enriched)
+            authority = decision.decision_authority
+            directive = decision.approval_release_directive
+            if (
+                authority is None
+                or directive is None
+                or authority.source != "v21"
+                or authority.mode != "active"
+                or authority.selection_basis != "profile_all"
+                or authority.matched_path_ids
+                or authority.legacy_floor_applied
+                or authority.activation_ref_digest != ack.activation_ref_digest
+                or directive.activation_ref_digest != ack.activation_ref_digest
+                or directive.capability_digest != ack.capability_digest
+                or directive.mode == "restricted_allow_once"
+                or not decision.policy_audit_id
+                or (
+                    decision.decision == "ask"
+                    and directive.mode == "strong_binding"
+                    and decision.enforcement_binding is None
+                )
+            ):
+                raise ValueError
+        except Exception:
+            self.close_product_session()
+            raise ProductActivationError("official_response_mismatch") from None
+        return enriched, ack
+
     def submit_audit_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        if _api_mode(self.config) == "guard-api-v0.3":
+        # Historical outcomes remain deliverable after session close/expiry.
+        # Keep the original endpoint/credential; never refresh their carrier.
+        if self.product_enabled or _api_mode(self.config) == "guard-api-v0.3":
             return self._post_json("/v1/audit/events", event)
         return self._post_json("/v1/audit/event", event)
 
     def wait_for_approval(
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]:
+        if self.product_enabled:
+            self._check_product()
         if _api_mode(self.config) != "guard-api-v0.3":
             raise UnsupportedApiModeError(
                 "legacy api_mode does not support Guard API approval waiting; "
@@ -114,8 +300,30 @@ class AgentGuardCoreClient:
         action_id: str,
         authorization_fingerprint: str,
         deadline: float,
+        activation_ack: ActivationAckV1 | None = None,
     ) -> ExecutionLeaseReference:
         """Consume an exact execution lease with bounded, same-body retries."""
+
+        if self.product_enabled:
+            manifest = self._check_product()
+            if activation_ack is None:
+                raise ProductActivationError("consume_ack_required")
+            ActivationAckV1.read(
+                activation_ack.to_wire(),
+                expected=manifest,
+                now=datetime.now(timezone.utc),
+                max_age_seconds=self.config.activation_ack_max_age_seconds,
+            )
+            deadline = min(
+                deadline,
+                time.monotonic()
+                + activation_ack.remaining_seconds(
+                    now=datetime.now(timezone.utc),
+                    max_age_seconds=self.config.activation_ack_max_age_seconds,
+                ),
+            )
+        elif activation_ack is not None:
+            raise ProductActivationError("unexpected_activation_ack")
 
         if _api_mode(self.config) != "guard-api-v0.3":
             raise UnsupportedApiModeError(
@@ -144,8 +352,21 @@ class AgentGuardCoreClient:
             sort_keys=True,
             separators=(",", ":"),
         ).encode("utf-8")
+        # ACK and request bytes are fixed for this consume, including retries.
+        headers = self._headers(activation_ack)
 
         for attempt in range(_MAX_LEASE_CONSUME_ATTEMPTS):
+            if self.product_enabled:
+                self._check_product()
+                assert activation_ack is not None
+                if (
+                    activation_ack.remaining_seconds(
+                        now=datetime.now(timezone.utc),
+                        max_age_seconds=self.config.activation_ack_max_age_seconds,
+                    )
+                    <= 0
+                ):
+                    raise ExecutionLeaseConsumeError("timed_out")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise ExecutionLeaseConsumeError("timed_out")
@@ -156,7 +377,7 @@ class AgentGuardCoreClient:
                 ) as client:
                     response = client.post(
                         url,
-                        headers=self._headers(),
+                        headers=headers,
                         content=body,
                     )
             except httpx.RequestError:
@@ -166,6 +387,7 @@ class AgentGuardCoreClient:
                 continue
 
             status = response.status_code
+            self._reject_product_drift(response, close_session=True)
             if response.is_redirect:
                 raise ExecutionLeaseConsumeError("rejected", status_code=status)
             if status in {408, 429} or status >= 500:
@@ -207,12 +429,39 @@ class AgentGuardCoreClient:
             timeout=timeout if timeout is not None else self.config.timeout,
         )
 
-    def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+    def _reject_product_drift(
+        self, response: httpx.Response, *, close_session: bool
+    ) -> None:
+        if not self.product_enabled or response.status_code < 400:
+            return
+        try:
+            rejected = response.json()
+            error = rejected.get("error") if isinstance(rejected, dict) else None
+            code = error.get("code") if isinstance(error, dict) else None
+        except ValueError:
+            code = None
+        if isinstance(code, str) and code in _PRODUCT_DRIFT_CODES:
+            if close_session:
+                self.close_product_session()
+            raise ProductActivationError(code)
+
+    def _post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        *,
+        activation_ack: ActivationAckV1 | None = None,
+    ) -> dict[str, Any]:
         return self._request_json(
             "POST",
             path,
             payload=payload,
-            timeout=self.config.timeout,
+            timeout=(
+                self._product_transport[2]
+                if self._product_transport
+                else self.config.timeout
+            ),
+            activation_ack=activation_ack,
         )
 
     def _request_json(
@@ -222,9 +471,14 @@ class AgentGuardCoreClient:
         *,
         payload: dict[str, Any] | None = None,
         timeout: float,
+        activation_ack: ActivationAckV1 | None = None,
     ) -> dict[str, Any]:
         try:
-            base_url = validate_guard_api_base_url(self.config.core_base_url)
+            base_url = validate_guard_api_base_url(
+                self._product_transport[0]
+                if self._product_transport
+                else self.config.core_base_url
+            )
         except GuardApiEndpointError as exc:
             raise CoreClientError(str(exc)) from exc
         url = base_url + path
@@ -233,21 +487,29 @@ class AgentGuardCoreClient:
                 if method == "GET":
                     response = client.get(url, headers=self._headers())
                 else:
-                    response = client.post(url, headers=self._headers(), json=payload)
+                    response = client.post(
+                        url, headers=self._headers(activation_ack), json=payload
+                    )
             if response.is_redirect:
                 raise CoreClientError("Guard API redirects are not allowed")
+            if path != "/v1/audit/events":
+                # Preserve only fixed authority-drift codes. Never echo an
+                # arbitrary server error or retain its response body as cause.
+                self._reject_product_drift(
+                    response, close_session=path != "/v1/adapters/langgraph/heartbeat"
+                )
             response.raise_for_status()
             data = response.json()
         except httpx.HTTPStatusError as exc:
             raise CoreClientError(
                 f"Core returned HTTP {exc.response.status_code} for {path}"
-            ) from exc
+            ) from None
         except httpx.RequestError as exc:
             raise CoreClientError(
                 f"Core request failed for {path} ({type(exc).__name__})"
-            ) from exc
-        except ValueError as exc:
-            raise CoreClientError(f"Core returned invalid JSON for {path}") from exc
+            ) from None
+        except ValueError:
+            raise CoreClientError(f"Core returned invalid JSON for {path}") from None
         if not isinstance(data, dict):
             raise CoreClientError(f"Core returned non-object JSON for {path}")
         return data

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Any, Literal
 
+from .activation_ack import ActivationAckV1
 from .event_models import (
     AuditEvent,
     PolicyDecision,
@@ -53,6 +54,10 @@ def bounded_terminal_error(error: str | None) -> str | None:
 
 
 def runtime_receipts_enabled(guard_adapter: Any) -> bool:
+    if getattr(guard_adapter, "product_enabled", False) is True:
+        # Historical Product evidence uses the frozen transport even after
+        # session close, current ACK expiry, or a later local config change.
+        return callable(getattr(guard_adapter, "submit_audit_event", None))
     config = getattr(guard_adapter, "config", None)
     mode = getattr(config, "core_api_mode", getattr(config, "api_mode", None))
     defense_enabled = getattr(config, "defense_enabled", True)
@@ -285,7 +290,7 @@ def build_runtime_outcome(
     enforcement: RuntimeEnforcementEvidence | dict[str, Any] | Any | None = None,
     lease_id: str | None = None,
     consumption_id: str | None = None,
-) -> AuditEvent:
+) -> RuntimeOutcomeReceipt:
     event_data = _event_dump(event)
     event_id = _event_id(event_data)
     completed = completed_at or utc_now_iso()
@@ -342,6 +347,15 @@ def build_runtime_outcome(
     }
     if enforcement is not None:
         evidence["enforcement"] = _enforcement_dump(enforcement)
+    metadata: dict[str, Any] = {
+        "agent_id": _agent_id(event_data),
+        "outcome_kind": outcome_kind,
+    }
+    activation_ack = _outcome_activation_ack(
+        decision, has_execution_lease=lease_id is not None
+    )
+    if activation_ack is not None:
+        metadata["activation_ack"] = activation_ack
     return RuntimeOutcomeReceipt(
         audit_id=f"audit_outcome_{event_id}_{outcome_kind}",
         schema_version="0.4",
@@ -364,12 +378,25 @@ def build_runtime_outcome(
         reason=decision.reason,
         links=links,  # pyright: ignore[reportArgumentType]
         latency_ms=None,
-        metadata={  # pyright: ignore[reportArgumentType]
-            "agent_id": _agent_id(event_data),
-            "outcome_kind": outcome_kind,
-        },
+        metadata=metadata,  # pyright: ignore[reportArgumentType]
         evidence=evidence,  # pyright: ignore[reportArgumentType]
     )
+
+
+def _outcome_activation_ack(
+    decision: PolicyDecision, *, has_execution_lease: bool
+) -> ActivationAckV1 | None:
+    evaluation = decision._evaluation_activation_ack
+    selected = (
+        decision._consumption_activation_ack if has_execution_lease else evaluation
+    )
+    if selected is None:
+        if has_execution_lease and evaluation is not None:
+            raise ValueError("Product lease receipt requires its consumption ACK")
+        return None
+    if not isinstance(selected, ActivationAckV1):
+        raise ValueError("Product receipt requires a typed activation ACK")
+    return selected
 
 
 def build_trace_lifecycle_observation(

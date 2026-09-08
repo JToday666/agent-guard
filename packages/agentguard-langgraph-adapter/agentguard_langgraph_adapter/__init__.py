@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from .activation_ack import ActivationAckV1, ProductActivationError
+from .activation_session import ProductActivationSession
+from .product_manifest import ProductActivationManifest, ProductRuntimeObservation
 from .config import AgentGuardLangGraphConfig
 from .context_guard import (
     ContextPlanValidationError,
@@ -55,6 +58,11 @@ from .tool_compat import (
 )
 
 __all__ = [
+    "ActivationAckV1",
+    "ProductActivationError",
+    "ProductActivationSession",
+    "ProductActivationManifest",
+    "ProductRuntimeObservation",
     "AgentGuardCoreClient",
     "AgentGuardLangGraphConfig",
     "ContextPlanValidationError",
