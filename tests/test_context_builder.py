@@ -17,7 +17,7 @@ from agentguard_core import (
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.authority.models import TaskFact, task_digest_projection
-from agentguard_core.security_context import compute_context_plan_digest
+from agentguard_core.security_context import MemoryFact, compute_context_plan_digest
 from guard_api.auth import AuthContext
 from guard_api.models import TaskCreateRequest
 from guard_api.security_state import SecurityStateService
@@ -314,6 +314,62 @@ def test_unproved_memory_is_excluded() -> None:
     assert chunk.transform_state == "excluded"
     assert "MEMORY_FACT_UNPROVED" in result.plan.reason_codes
     assert result.bundle.flow_facts == ()
+
+
+@pytest.mark.parametrize(
+    "status,verified,included",
+    [
+        ("proposed", True, False),
+        ("committed", False, False),
+        ("rolled_back", True, False),
+        ("committed", True, True),
+    ],
+)
+def test_native_memory_read_requires_committed_value_proof_before_context_use(
+    status, verified, included
+):
+    fact = MemoryFact(
+        memory_id="memory://notes/key",
+        change_id="change-1",
+        change_status=status,
+        trust_state="tainted",
+        taints=["UNTRUSTED"],
+        source_refs=["source:task"],
+        last_write_sequence=None,
+        last_read_sequence=None,
+        evidence_refs=[],
+    )
+    event = _event(
+        [
+            _source(
+                "memory:memory://notes/key",
+                "memory",
+                '{"key":"key","value":"stored value"}',
+                sequence_index=0,
+                role="user",
+                source_trust="untrusted",
+            )
+        ]
+    )
+    event.metadata["native_full_content"] = True
+    snapshot = _snapshot().model_copy(update={"task": _task(), "memory_facts": (fact,)})
+    result = build_context_assembly(
+        event=event,
+        bundle=_bundle(event),
+        snapshot=snapshot,
+        verified_memory_indexes=frozenset({0}) if verified else frozenset(),
+    )
+    chunk = result.plan.chunks[0]
+    assert chunk.transform_state == ("annotated" if included else "excluded")
+    assert chunk.fact_authority != "authoritative"
+    read_flows = [
+        flow
+        for flow in result.bundle.flow_facts
+        if flow.producer == "guard_api_context_builder"
+    ]
+    # Required proof tightens inclusion only; this batch does not mint a new
+    # provenance edge or reinterpret the historical CT fact producer version.
+    assert read_flows == []
 
 
 def test_context_source_additive_fields_preserve_legacy_canonical_request_shape() -> None:

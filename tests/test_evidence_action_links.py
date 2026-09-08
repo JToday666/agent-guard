@@ -5,6 +5,7 @@ import pytest
 from agentguard_core import (
     ApprovalIntent,
     AuditEvent,
+    DecisionAuthority,
     GuardDecision,
     GuardEvent,
     PolicyBundle,
@@ -494,3 +495,66 @@ def test_model_input_content_preview_is_never_projected() -> None:
     ).evidence["guard_event"]
     assert isinstance(guard_event, dict)
     assert "content_preview" not in guard_event
+
+
+@pytest.mark.parametrize(
+    "source,mode,selection,linked",
+    [
+        ("v21", "active", "profile_all", True),
+        ("v21", "limited_enable", "path_allowlist", False),
+        ("current", "shadow", "current", False),
+    ],
+)
+def test_only_official_product_model_input_has_durable_action_anchor(
+    source, mode, selection, linked
+):
+    from agentguard_core.decisions.product import product_decision_authority_envelope
+    from tests.test_product_authority_evidence_commit import _product_authority_fixture
+
+    event = _event(
+        "model_input_prepared",
+        {
+            "phase": "input",
+            "content_preview": "private model input",
+            "contains_instruction_like_text": False,
+            "contains_sensitive_data": False,
+            "sanitized": False,
+            "action_id": "forged-runtime-action",
+        },
+    )
+    event.metadata["native_full_content"] = True
+    authority = DecisionAuthority.model_validate(
+        {
+            "source": source,
+            "mode": mode,
+            "selection_basis": selection,
+            "matched_path_ids": [],
+            "legacy_floor_applied": False,
+            "activation_ref_digest": "sha256:" + "a" * 64,
+            "approval_release": "not_applicable",
+        }
+    )
+    selected = _decision()
+    envelope = None
+    if linked:
+        proof, _ = _product_authority_fixture()
+        proof = proof.model_copy(
+            update={"event_id": event.event_id, "event_type": event.event_type}
+        )
+        envelope = product_decision_authority_envelope(proof)
+        authority = proof.decision_authority
+        selected = proof.selected_decision
+    audit = build_audit_event(
+        event,
+        selected,
+        policy_bundle=PolicyBundle(),
+        policy_revision=None,
+        decision_authority=authority,
+        decision_authority_evidence=envelope,
+    )
+    if linked:
+        assert audit.links["action_id"] == f"act_{event.event_id}"
+        assert audit.metadata["action_id"] == audit.links["action_id"]
+    else:
+        assert "action_id" not in audit.links
+    assert "content_preview" not in audit.evidence["guard_event"]

@@ -39,8 +39,13 @@ _SEMANTICS = {
 }
 
 
-def catalog_fixture(tmp_path: Path):
-    fixture = build_test_product_activation()
+def catalog_fixture(
+    tmp_path: Path,
+    *,
+    langgraph_materials: dict | None = None,
+    policy_digest: str | None = None,
+):
+    fixture = build_test_product_activation(policy_digest=policy_digest)
     captured = json.loads(
         (
             Path(__file__).parents[1]
@@ -169,7 +174,37 @@ def catalog_fixture(tmp_path: Path):
     path = directory / "tools.json"
     path.write_text(json.dumps(document))
     path.chmod(0o600)
-    return SimpleNamespace(path=path, bundle=bundle, document=document, fixture=fixture)
+    result = SimpleNamespace(
+        path=path, bundle=bundle, document=document, fixture=fixture
+    )
+    if langgraph_materials is not None:
+        # B06 supplies actual pinned SDK descriptors/model binding. Only the
+        # test activation remains synthetic; no candidate signing is claimed.
+        material = json.loads(json.dumps(langgraph_materials))
+        if (
+            set(material)
+            != {
+                "tools",
+                "model_visible_tools",
+                "execution",
+                "tool_inventory_digest",
+                "host_inventory_digest",
+            }
+            or canonical_sha256(material["tools"]) != material["tool_inventory_digest"]
+            or langgraph_host_inventory_digest(material["model_visible_tools"])
+            != material["host_inventory_digest"]
+        ):
+            raise ValueError("invalid actual LangGraph fixture material")
+        result.document["runtimes"][0] = {
+            "runtime": "langgraph",
+            "execution": material["execution"],
+            "inventory": {
+                "tools": material["tools"],
+                "model_visible_tools": material["model_visible_tools"],
+            },
+        }
+        resign_catalog_document(result)
+    return result
 
 
 def resign_catalog_document(data):

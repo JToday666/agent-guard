@@ -1682,20 +1682,36 @@ class V21PipelineService:
         # overlay exercises the exact pre-Gate-A Core path.
         if transient_facts is not None:
             assess_kwargs["transient_facts"] = transient_facts
-        if self._memory_not_required_actions:
-            assess_kwargs["memory_not_required_actions"] = (
-                self._memory_not_required_actions
-            )
+        memory_not_required = self._memory_not_required_actions
         if (
-            self._competition_model_output_observation
+            self.product_active
+            and self.active
+            and event.runtime == "langgraph"
+            and event.event_type in {"model_input_prepared", "model_output_produced"}
+        ):
+            # A native model call without memory use must not require an
+            # unrelated pre-existing memory record. Reuse the frozen plan's
+            # precise safeguards: persistence, memory resources and explicit
+            # memory lineage still make memory required. Source and dataflow
+            # remain required; this is not an empty-state completeness claim.
+            memory_not_required = memory_not_required | frozenset({"model_call"})
+        if memory_not_required:
+            assess_kwargs["memory_not_required_actions"] = memory_not_required
+        if (
+            (
+                self._competition_model_output_observation
+                or (self.product_active and event.runtime == "langgraph")
+            )
             and self.active
             and event.event_type == "model_output_produced"
         ):
-            # Competition-only contract B: model output is an inbound
-            # observation, not a new outbound action. Detectors, signals and
-            # taint still run. Source/dataflow are N/A for this already
-            # server-attested event; memory remains governed by its independent
-            # persistence/resource/lineage safeguards.
+            # The verified Product LangGraph profile likewise enforces output
+            # as post-execution isolation: it is an inbound observation, not a
+            # second outbound call. An opaque model's possible-influence edge
+            # cannot attest complete outbound provenance here. Detectors,
+            # signals, taint and behavior checks still run; memory retains its
+            # persistence/resource/lineage safeguards. The actual model-input
+            # event continues to require source and dataflow coverage.
             assess_kwargs["source_dataflow_not_required_actions"] = frozenset(
                 {"model_call"}
             )

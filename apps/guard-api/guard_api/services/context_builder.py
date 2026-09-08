@@ -49,6 +49,7 @@ from guard_api.settings import GuardApiSettings
 from guard_api.storage.base import ControlPlaneStore
 
 from .policy import PolicyService
+from .product_memory import verify_product_memory_source
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,9 @@ class ContextBuilderService:
         policy_service: PolicyService | None = None,
     ) -> None:
         self._enabled = bool(settings.context_builder_enabled)
+        # Server configuration owns this restriction. Omitting an adapter's
+        # native marker cannot bypass memory verification in Product Active.
+        self._product_memory_required = settings.product_activation_configured()
         self._store = store
         self._state_service = state_service
         self._policy_service = policy_service
@@ -125,6 +129,32 @@ class ContextBuilderService:
                 event=event,
                 bundle=bundle,
                 snapshot=snapshot,
+                require_memory_proof=self._product_memory_required,
+                verified_memory_indexes=(
+                    frozenset(
+                        source.sequence_index
+                        for source in event.payload.sources
+                        if source.source_type == "memory"
+                        and source.sequence_index is not None
+                        and self._store is not None
+                        and any(
+                            verify_product_memory_source(
+                                store=self._store,
+                                source=source,
+                                memory_fact=memory_fact,
+                                snapshot=snapshot,
+                            )
+                            for memory_fact in snapshot.memory_facts
+                        )
+                    )
+                    if isinstance(event.payload, ContextBuildPayload)
+                    and event.runtime == "langgraph"
+                    and (
+                        self._product_memory_required
+                        or event.metadata.get("native_full_content") is True
+                    )
+                    else frozenset()
+                ),
             )
         except Exception:  # noqa: BLE001 - isolation failure is fail-closed.
             logger.warning(
@@ -262,6 +292,8 @@ def build_context_assembly(
     event: GuardEvent,
     bundle: TransientSecurityFacts,
     snapshot: SecuritySnapshot,
+    verified_memory_indexes: frozenset[int] = frozenset(),
+    require_memory_proof: bool = False,
 ) -> ContextBuildResult:
     """Pure context assembly over one already-verified transient bundle."""
 
@@ -302,6 +334,8 @@ def build_context_assembly(
             event=event,
             snapshot=snapshot,
             memory_by_ref=memory_by_ref,
+            verified_memory_indexes=verified_memory_indexes,
+            require_memory_proof=require_memory_proof,
         )
         if not payload.will_enter_context:
             transform_state = "excluded"
@@ -487,6 +521,8 @@ def _classify_source(
     event: GuardEvent,
     snapshot: SecuritySnapshot,
     memory_by_ref: Mapping[str, MemoryFact],
+    verified_memory_indexes: frozenset[int],
+    require_memory_proof: bool,
 ) -> tuple[
     SourceFact,
     ContextCompartment,
@@ -617,6 +653,18 @@ def _classify_source(
         memory_fact = memory_by_ref.get(source.source_id)
         if memory_fact is None:
             return fact, "memory_context", "excluded", ("MEMORY_FACT_UNPROVED",)
+        if (
+            event.runtime == "langgraph"
+            and (
+                require_memory_proof
+                or event.metadata.get("native_full_content") is True
+            )
+            and (
+                memory_fact.change_status != "committed"
+                or source.sequence_index not in verified_memory_indexes
+            )
+        ):
+            return fact, "memory_context", "excluded", ("MEMORY_NOT_ACTIVE_TRACE_SAFE",)
         trust_state = getattr(memory_fact, "trust_state", "unknown")
         memory_taints = tuple(getattr(memory_fact, "taints", ()))
         merged_taints = _ordered_taints((*taints, *memory_taints))

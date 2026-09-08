@@ -284,6 +284,7 @@ class ProductReceiptOutbox:
         event_id: str,
         receipt: AuditEvent,
         activation_ack: ActivationAckV1 | None,
+        on_created: Callable[[str], None] | None = None,
     ) -> tuple[ProductReceiptDeliveryResult, str | None]:
         reserved = False
         try:
@@ -314,6 +315,8 @@ class ProductReceiptOutbox:
                     ),
                     "action",
                 )
+                if on_created is not None:
+                    on_created(record_id)
             delivered = self._deliver(record_id)
             with self._mutex:
                 self._starting = None
@@ -379,6 +382,12 @@ class ProductReceiptOutbox:
         try:
             if not isinstance(receipt, RuntimeOutcomeReceipt):
                 raise ProductActivationError("terminal_receipt_required")
+            if receipt.metadata.outcome_kind not in {
+                "execution_completed",
+                "execution_failed",
+                "pre_execution_deny",
+            }:
+                raise ProductActivationError("terminal_receipt_required")
             item, action_id, event_id = self._receipt_item(receipt, None)
             with self._mutex:
                 self._assert_open()
@@ -413,6 +422,69 @@ class ProductReceiptOutbox:
                     self._replace_locked(stored, updated)
                     self._active = None
             return self._deliver(record_id)
+        except ProductActivationError as exc:
+            with self._mutex:
+                self._trip_locked("action_terminal_invalid")
+            return _failed(_safe_local_code(exc.code))
+        except Exception:
+            with self._mutex:
+                self._trip_locked("outbox_storage_failed")
+            return _failed("outbox_storage_failed")
+
+    def _mark_unknown(self, record_id: str) -> None:
+        with self._mutex:
+            self._assert_open()
+            if self._active == record_id:
+                self._active = None
+            self._trip_locked("action_outcome_unknown")
+
+    def _abort(
+        self, record_id: str, receipt: RuntimeOutcomeReceipt
+    ) -> ProductReceiptDeliveryResult:
+        """Append a known not-invoked fact, even while the start is unconfirmed."""
+        try:
+            if not _not_invoked(receipt):
+                raise ProductActivationError("terminal_receipt_required")
+            item, action_id, event_id = self._receipt_item(receipt, None)
+            with self._mutex:
+                self._assert_open()
+                self._load_locked()
+                stored, data = self._records[record_id]
+                if data["record_type"] == "tombstone":
+                    if self._matches_terminal(data, item):
+                        return ProductReceiptDeliveryResult(
+                            "recorded", item["audit_id"]
+                        )
+                    raise ProductActivationError("outbox_receipt_conflict")
+                if data["record_type"] != "action" or (
+                    data["action_id"],
+                    data["event_id"],
+                ) != (action_id, event_id):
+                    raise ProductActivationError("action_identity_invalid")
+                self._validate_terminal_anchor(data, item)
+                if data["terminal"] is not None:
+                    if not self._matches_terminal(data, item):
+                        raise ProductActivationError("outbox_receipt_conflict")
+                else:
+                    updated = {**data, "terminal": item}
+                    if data["phase"] not in {"failed", "permanent_rejected"}:
+                        updated["phase"] = "terminal_pending"
+                    self._replace_locked(stored, updated)
+                    if self._active == record_id:
+                        self._active = None
+            # At most two distinct attempts: original start, then original terminal.
+            for _ in range(2):
+                result = self._deliver(record_id)
+                if result.status != "recorded":
+                    return ProductReceiptDeliveryResult(
+                        result.status,
+                        item["audit_id"],
+                        result.http_status,
+                        result.error_code,
+                    )
+                if result.audit_id == item["audit_id"]:
+                    return result
+            return ProductReceiptDeliveryResult("queued_durable", item["audit_id"])
         except ProductActivationError as exc:
             with self._mutex:
                 self._trip_locked("action_terminal_invalid")
@@ -468,6 +540,24 @@ class ProductReceiptOutbox:
                 return _failed("outbox_closed", item["audit_id"])
             try:
                 current = self._store.get(record_id)
+                if current is not None and current.revision != stored.revision:
+                    # A same-process abort may append a terminal while this exact
+                    # start wire is in flight. Merge only that monotonic transition.
+                    changed = json.loads(current.payload)
+                    self._validate_record(current, changed)
+                    expected = {
+                        **data,
+                        "terminal": changed.get("terminal"),
+                        "phase": "terminal_pending",
+                    }
+                    if (
+                        data["record_type"] == "action"
+                        and not data["start_acknowledged"]
+                        and data["terminal"] is None
+                        and changed.get("terminal") is not None
+                        and changed == expected
+                    ):
+                        stored, data = current, changed
                 if current is None or current.revision != stored.revision:
                     self._trip_locked("outbox_receipt_conflict")
                     return _failed("outbox_receipt_conflict", item["audit_id"])
@@ -484,7 +574,9 @@ class ProductReceiptOutbox:
                             {
                                 **data,
                                 "start_acknowledged": True,
-                                "phase": "active",
+                                "phase": (
+                                    "terminal_pending" if data["terminal"] else "active"
+                                ),
                                 "attempts": 0,
                                 "next_attempt_at_ms": 0,
                                 "error_code": None,
@@ -632,6 +724,12 @@ class ProductReceiptOutbox:
                     self._failure = data["code"] or "outbox_barrier_open"
                 continue
             self._validate_record(stored, data)
+            if data.get("phase") in {"failed", "permanent_rejected"}:
+                self._failure = (
+                    "receipt_permanently_rejected"
+                    if data["phase"] == "permanent_rejected"
+                    else "receipt_transport_failed"
+                )
             records[stored.record_id] = stored, data
         if self._control is not None and control is None:
             raise ValueError
@@ -747,10 +845,18 @@ class ProductReceiptOutbox:
                 raise ValueError
             if data["terminal"] is not None:
                 if (
-                    not data["start_acknowledged"]
-                    or json.loads(data["terminal"]["wire"])["record_type"]
+                    json.loads(data["terminal"]["wire"])["record_type"]
                     != "runtime_outcome"
                 ):
+                    raise ValueError
+                terminal = RuntimeOutcomeReceipt.model_validate_json(
+                    data["terminal"]["wire"]
+                )
+                if terminal.metadata.outcome_kind not in {
+                    "execution_completed",
+                    "execution_failed",
+                    "pre_execution_deny",
+                } or (not data["start_acknowledged"] and not _not_invoked(terminal)):
                     raise ValueError
                 self._validate_terminal_anchor(data, data["terminal"])
             elif data["phase"] == "terminal_pending":
@@ -874,6 +980,7 @@ _LOCAL_CODES = frozenset(
         "action_identity_invalid",
         "action_ticket_invalid",
         "action_terminal_invalid",
+        "action_checkpoint_failed",
         "receipt_carrier_invalid",
         "terminal_receipt_required",
         "receipt_permanently_rejected",
@@ -901,6 +1008,15 @@ def _safe_local_code(code: str) -> str:
 def _failed(code: str, audit_id: str | None = None) -> ProductReceiptDeliveryResult:
     return ProductReceiptDeliveryResult(
         "failed", audit_id=audit_id, error_code=_safe_local_code(code)
+    )
+
+
+def _not_invoked(receipt: Any) -> bool:
+    return (
+        isinstance(receipt, RuntimeOutcomeReceipt)
+        and receipt.metadata.outcome_kind == "pre_execution_deny"
+        and receipt.evidence.execution.get("status") == "not_invoked"
+        and receipt.evidence.execution.get("invoked_at") is None
     )
 
 

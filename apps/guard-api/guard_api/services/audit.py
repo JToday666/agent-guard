@@ -43,6 +43,7 @@ from .competition import (
 )
 from .evidence import build_audit_event
 from .provenance import ProvenanceWriter
+from .product_memory import ProductMemoryReceiptBridge, is_product_memory_completion
 from .redaction import sanitize_audit_event
 
 _RUNTIME_OUTCOME_AUDIT_ID_PREFIX = "audit_outcome_"
@@ -88,6 +89,16 @@ class AuditService:
         self.checkpoint_service = checkpoint_service
         self.evidence_content_preview_enabled = evidence_content_preview_enabled
         self.product_activation_authority = product_activation_authority
+        self._product_memory_bridge: ProductMemoryReceiptBridge | None = None
+
+    def bind_product_memory_bridge(self, bridge: ProductMemoryReceiptBridge) -> None:
+        """One-time assembly after MemoryGuardService receives this audit sink."""
+        if (
+            self._product_memory_bridge is not None
+            or bridge.memory_service.store is not self.store
+        ):
+            raise ValueError("V21_PRODUCT_MEMORY_BRIDGE_ALREADY_BOUND")
+        self._product_memory_bridge = bridge
 
     def prepare_submission(
         self,
@@ -117,6 +128,7 @@ class AuditService:
         *,
         auth_context: AuthContext | None = None,
     ) -> dict[str, str | bool]:
+        memory_completion: tuple[RuntimeOutcomeReceipt, AuditEvent] | None = None
         # Defense in depth for callers that bypass prepare_submission().  The
         # only authorized path is record_context_manifest() below.
         if is_context_manifest_reserved_payload(event):
@@ -167,6 +179,8 @@ class AuditService:
                             build_product_ack_validation(receipt, parent)
                         )
                 is_new = self.store.add_audit_event(event)
+                if is_product_memory_completion(receipt, parent):
+                    memory_completion = receipt, parent
         else:
             event = sanitize_audit_event(event)
             is_new = self.store.add_audit_event(event)
@@ -174,6 +188,26 @@ class AuditService:
         # 同内容重试也执行确定性 upsert，用于修复首次请求在 audit 已提交后
         # provenance 写入失败形成的可检测部分状态。
         self.provenance_writer.record_audit_event(persisted)
+        if memory_completion is not None:
+            # The original action/lease/ACK and immutable insert have all
+            # succeeded. Repeat the idempotent lifecycle step on replay to
+            # close a crash after receipt commit; never invoke the tool here.
+            if self._product_memory_bridge is None:
+                from .v21_pipeline import V21OfficialEvaluationUnavailableError
+
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_MEMORY_BRIDGE_UNAVAILABLE"
+                )
+            try:
+                self._product_memory_bridge.apply(
+                    *memory_completion, auth_context=auth_context
+                )
+            except Exception:
+                from .v21_pipeline import V21OfficialEvaluationUnavailableError
+
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_MEMORY_TRANSITION_UNAVAILABLE"
+                ) from None
         # §12.3：首次写入与同内容重试都返回 200，用 created/idempotent_replay 区分。
         return {
             "ok": True,

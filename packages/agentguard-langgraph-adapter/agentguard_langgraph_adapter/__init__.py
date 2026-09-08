@@ -2,6 +2,26 @@
 
 from __future__ import annotations
 
+from importlib import import_module
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .native_langgraph import (
+        NativeProductGraph,
+        NativeRunResult,
+        NativeRuntimeError,
+        build_native_product_graph,
+    )
+    from .native_tools import (
+        NativeToolSpec,
+        PreparedNativeToolCall,
+        close_isolated_product_tools,
+        create_isolated_product_tools,
+        native_tool_descriptor,
+        native_tool_inventory_digest,
+        prepare_native_tool_call,
+    )
+
 from .activation_ack import ActivationAckV1, ProductActivationError
 from .activation_session import ProductActivationSession
 from .product_manifest import ProductActivationManifest, ProductRuntimeObservation
@@ -120,4 +140,60 @@ __all__ = [
     "context_content_digest",
     "context_plan_digest",
     "validate_and_prepare_context",
+    "NativeProductGraph",
+    "NativeRunResult",
+    "NativeRuntimeError",
+    "build_native_product_graph",
+    "NativeToolSpec",
+    "PreparedNativeToolCall",
+    "close_isolated_product_tools",
+    "create_isolated_product_tools",
+    "native_tool_descriptor",
+    "native_tool_inventory_digest",
+    "prepare_native_tool_call",
 ]
+
+
+_NATIVE_EXPORTS = {
+    **dict.fromkeys(
+        (
+            "NativeProductGraph",
+            "NativeRunResult",
+            "NativeRuntimeError",
+            "build_native_product_graph",
+        ),
+        ".native_langgraph",
+    ),
+    **dict.fromkeys(
+        (
+            "NativeToolSpec",
+            "PreparedNativeToolCall",
+            "close_isolated_product_tools",
+            "create_isolated_product_tools",
+            "native_tool_descriptor",
+            "native_tool_inventory_digest",
+            "prepare_native_tool_call",
+        ),
+        ".native_tools",
+    ),
+}
+
+
+def __getattr__(name: str) -> Any:
+    module = _NATIVE_EXPORTS.get(name)
+    if module is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    try:
+        value = getattr(import_module(module, __name__), name)
+    except ModuleNotFoundError as error:
+        if (error.name or "").split(".")[0] in {
+            "langgraph",
+            "langchain_core",
+            "langsmith",
+        }:
+            raise ImportError(
+                "Native LangGraph requires agentguard-langgraph-adapter[native]."
+            ) from None
+        raise
+    globals()[name] = value
+    return value
