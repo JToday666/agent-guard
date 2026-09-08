@@ -433,6 +433,7 @@ def test_server_ct_inputs_use_same_verified_ir_and_proof(tmp_path):
         task_id="task",
         product_tool=case.tool,
         product_data=case.proof,
+        product_result=None,
     )
     actual = service._build_inputs(case.event, materials, case.ir.scope_digest)
     assert actual.product_data is case.proof

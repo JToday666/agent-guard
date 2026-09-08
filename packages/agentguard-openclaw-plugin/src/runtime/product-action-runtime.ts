@@ -18,6 +18,7 @@ import {
   readNativeProductFields,
   readNativeProductToolCall,
   snapshotProductJson,
+  snapshotNativeProductResult,
   type NativeProductToolCall,
   type OpenClawProductActionOrigin,
   type OpenClawProductToolProfile,
@@ -97,6 +98,10 @@ type Entry = {
   };
   ticket?: OpenClawProductActionTicket;
   afterDigest?: string;
+  middlewareObserved?: boolean;
+  middlewareDigest?: string;
+  approvedAfterDigest?: string;
+  approvedAfterFailed?: boolean;
   completion?: Promise<ProductReceiptDeliveryResult | undefined>;
   safeMessage?: unknown;
   persisted?: boolean;
@@ -406,55 +411,177 @@ export class OpenClawProductActionRuntime {
         return Promise.resolve(undefined);
       }
       const terminal = readNativeProductAfter(event);
-      // A successful message envelope alone cannot prove the one local delivery.
-      // Missing/mismatched confirmation preserves unknown effects and never re-sends.
-      if (
-        entry.call.toolName === "message" &&
-        !messageDelivered(entry, terminal.result)
-      ) {
-        this.#unknown(entry);
-        return Promise.resolve(undefined);
-      }
-      const digest = restrictedDigest({
-        call,
-        failed: terminal.failed,
-        result: terminal.result ?? null,
-      });
-      if (entry.afterDigest) {
-        if (entry.afterDigest !== digest) this.#trip();
+      if (entry.middlewareObserved) {
+        if (
+          !entry.approvedAfterDigest ||
+          entry.approvedAfterDigest !==
+            restrictedDigest(terminal.result ?? null) ||
+          entry.approvedAfterFailed !== terminal.failed
+        )
+          this.#trip();
         return entry.completion ?? Promise.resolve(undefined);
       }
-      if (
-        !entry.ticket ||
-        !entry.event ||
-        !entry.evaluation ||
-        !["released", "unknown"].includes(entry.phase)
-      ) {
-        this.#unknown(entry);
-        return Promise.resolve(undefined);
-      }
-      entry.afterDigest = digest;
-      entry.phase = "terminal";
-      const receipt = buildProductActionReceipt(entry.event, entry.evaluation, {
-        kind: terminal.failed ? "execution_failed" : "execution_completed",
-        lease: entry.lease,
-        approval: entry.approval,
-        persisted:
-          !terminal.failed && memoryWritten(entry.call, terminal.result),
-      });
-      // finishAction persists synchronously before its first HTTP await.
-      const delivery = this.#outbox!.finishAction(entry.ticket, receipt);
-      entry.completion = this.#finish(
-        entry,
-        terminal.result,
-        receipt,
-        delivery,
-      );
-      return entry.completion;
+      return this.#observeTerminal(entry, terminal, "after_tool_call");
     } catch {
       if (entry) this.#unknown(entry);
       else this.#trip();
       return Promise.resolve(undefined);
+    }
+  }
+  #observeTerminal(
+    entry: Entry,
+    terminal: Readonly<{ failed: boolean; result: unknown }>,
+    observation: "after_tool_call" | "native_tool_result_middleware",
+  ): Promise<ProductReceiptDeliveryResult | undefined> {
+    const call = entry.call;
+    // A successful message envelope alone cannot prove the one local delivery.
+    // Missing/mismatched confirmation preserves unknown effects and never re-sends.
+    if (
+      entry.call.toolName === "message" &&
+      !messageDelivered(entry, terminal.result)
+    ) {
+      this.#unknown(entry);
+      return Promise.resolve(undefined);
+    }
+    const digest = restrictedDigest({
+      call,
+      failed: terminal.failed,
+      result: terminal.result ?? null,
+    });
+    if (entry.afterDigest) {
+      if (entry.afterDigest !== digest) this.#trip();
+      return entry.completion ?? Promise.resolve(undefined);
+    }
+    if (
+      !entry.ticket ||
+      !entry.event ||
+      !entry.evaluation ||
+      !["released", "unknown"].includes(entry.phase)
+    ) {
+      this.#unknown(entry);
+      return Promise.resolve(undefined);
+    }
+    entry.afterDigest = digest;
+    entry.phase = "terminal";
+    const receipt = buildProductActionReceipt(entry.event, entry.evaluation, {
+      observation,
+      kind: terminal.failed ? "execution_failed" : "execution_completed",
+      lease: entry.lease,
+      approval: entry.approval,
+      persisted: !terminal.failed && memoryWritten(entry.call, terminal.result),
+    });
+    // finishAction persists synchronously before its first HTTP await.
+    const delivery = this.#outbox!.finishAction(entry.ticket, receipt);
+    entry.completion = this.#finish(entry, terminal.result, receipt, delivery);
+    return entry.completion;
+  }
+
+  /** This is the actual awaited postinvoke seam, before the Host after notification. */
+  async observeToolResultMiddleware(
+    event: unknown,
+    context: unknown,
+  ): Promise<{
+    result: { content: unknown[]; details?: unknown; isError?: boolean };
+  }> {
+    let entry: Entry | undefined;
+    try {
+      const raw = readNativeProductFields(event),
+        host = readNativeProductFields(context);
+      if (
+        host.runtime !== "openclaw" ||
+        (host.harness !== undefined && host.harness !== "openclaw") ||
+        typeof raw.toolCallId !== "string"
+      )
+        productActionError("native_result_identity_invalid");
+      const key = this.#nativeIds.get(raw.toolCallId);
+      entry = key ? this.#entries.get(key) : undefined;
+      if (
+        !entry ||
+        raw.toolName !== entry.call.toolName ||
+        restrictedCanonicalJson(snapshotProductJson(raw.args)) !==
+          entry.call.argumentsJson
+      )
+        productActionError("native_result_identity_invalid");
+      for (const field of ["agentId", "sessionKey", "runId"] as const)
+        if (host[field] !== undefined && host[field] !== entry.call[field])
+          productActionError("native_result_identity_invalid");
+      if (raw.isError !== undefined && typeof raw.isError !== "boolean")
+        productActionError("native_terminal_invalid");
+      const result = readNativeProductFields(
+        snapshotNativeProductResult(raw.result),
+      );
+      if (
+        !Array.isArray(result.content) ||
+        result.content.length > 100 ||
+        Buffer.byteLength(restrictedCanonicalJson(result)) > 64 * 1024 ||
+        Object.keys(result).some(
+          (k) => !["content", "details", "isError", "terminate"].includes(k),
+        )
+      )
+        productActionError("native_terminal_invalid");
+      for (const block of result.content) {
+        const content = readNativeProductFields(block);
+        if (
+          Object.keys(content).sort().join("|") !== "text|type" ||
+          content.type !== "text" ||
+          typeof content.text !== "string" ||
+          /(?:\[truncated\]|\[omitted\]|content truncated)/iu.test(content.text)
+        )
+          productActionError("native_terminal_invalid");
+      }
+      const terminal = readNativeProductAfter({
+        result: {
+          ...result,
+          isError: raw.isError === true || result.isError === true,
+        },
+      });
+      const digest = restrictedDigest(terminal);
+      if (entry.middlewareDigest && entry.middlewareDigest !== digest)
+        productActionError("native_result_identity_invalid");
+      entry.middlewareObserved = true;
+      entry.middlewareDigest = digest;
+      await this.#observeTerminal(
+        entry,
+        terminal,
+        "native_tool_result_middleware",
+      );
+      this.#checkOpen();
+      if (!entry.safeMessage) productActionError("native_result_unconfirmed");
+      const safe = readNativeProductFields(entry.safeMessage);
+      const returned = {
+        content: safe.content as unknown[],
+        ...(safe.details !== undefined ? { details: safe.details } : {}),
+        isError: safe.isError === true,
+      };
+      const { sanitizeToolResult } =
+        await import("openclaw/plugin-sdk/agent-harness");
+      // Host finalize strips the isError flag out of result into its separate event field.
+      const afterProjection = {
+        content: returned.content,
+        ...(returned.details !== undefined
+          ? { details: returned.details }
+          : {}),
+      };
+      const expectedAfter = snapshotProductJson(
+        sanitizeToolResult(afterProjection),
+      );
+      entry.approvedAfterDigest = restrictedDigest(expectedAfter);
+      entry.approvedAfterFailed = readNativeProductAfter({
+        result: expectedAfter,
+        ...(returned.isError ? { error: "native_tool_failed" } : {}),
+      }).failed;
+      this.#checkOpen();
+      return { result: freezeProductValue(returned) };
+    } catch {
+      if (entry && !entry.afterDigest) this.#unknown(entry);
+      else this.#trip();
+      return {
+        result: {
+          content: [{ type: "text", text: "Product result withheld" }],
+          details: {},
+          isError: true,
+        },
+      };
     }
   }
   async #finish(
@@ -527,6 +654,12 @@ export class OpenClawProductActionRuntime {
         entry.persisted
       )
         productActionError();
+      if (
+        entry.middlewareObserved &&
+        restrictedCanonicalJson(messageProjection(raw.message)) !==
+          restrictedCanonicalJson(messageProjection(entry.safeMessage))
+      )
+        productActionError("native_result_identity_invalid");
       entry.persisted = true;
       return { message: snapshotProductJson(entry.safeMessage) };
     } catch {
@@ -665,4 +798,25 @@ function messageDelivered(entry: Entry, result: unknown): boolean {
     delivery.chatId === args.target &&
     delivery.messageId === entry.messageId
   );
+}
+
+function messageProjection(raw: unknown): unknown {
+  const value = readNativeProductFields(snapshotProductJson(raw));
+  if (
+    Object.keys(value).some(
+      (k) =>
+        ![
+          "role",
+          "toolCallId",
+          "toolName",
+          "content",
+          "details",
+          "isError",
+          "timestamp",
+        ].includes(k),
+    )
+  )
+    productActionError("native_result_identity_invalid");
+  const { timestamp: _timestamp, ...body } = value;
+  return body;
 }

@@ -81,6 +81,7 @@ from agentguard_core.security_context.facts import (
     SourceFact,
 )
 from agentguard_core.security_context.product_data import VerifiedProductData
+from .product_result import ProductToolResultProof
 from agentguard_core.signals.models import EvaluationDegradation, SecuritySignal
 
 from .fact_authority import (
@@ -92,6 +93,7 @@ from .fact_authority import (
 )
 from .transient import (
     PRODUCT_FACT_PRODUCER,
+    PRODUCT_RESULT_FACT_PRODUCER,
     TransientSecurityFacts,
     compute_bundle_digest,
     compute_overlay_digest,
@@ -135,6 +137,7 @@ class FactBuildInputs(BaseModel):
     visible_refs: tuple[str, ...] | None = None
     action_ir: ActionIR | None = None
     product_data: VerifiedProductData | None = None
+    product_result: ProductToolResultProof | None = None
     upstream_descriptors: Mapping[str, VerifiedSourceDescriptor] = {}
     upstream_memory_facts: Mapping[str, MemoryFact] = {}
     memory_change_status: Literal["proposed", "quarantined"] = "proposed"
@@ -524,6 +527,40 @@ def _handle_tool_result_produced(
         producer_identity=inputs.producer_identity,
     )
     action_ir = inputs.action_ir
+    result_proof = inputs.product_result
+    if result_proof is not None:
+        if (
+            not result_proof.matches_event(event)
+            or result_proof.scope_digest != inputs.scope_digest
+            or action_ir is None
+            or action_ir.runtime_binding_id != result_proof.runtime_binding_id
+        ):
+            raise ValueError("ct_product_result_invalid")
+        source_id = f"tool_result:{result_proof.runtime_binding_id}:{result_proof.native_call_id}"
+        source = _source_fact_from_descriptor(
+            descriptor=descriptor,
+            scope_digest=inputs.scope_digest,
+            source_id=source_id,
+        ).model_copy(
+            update={
+                "producer": PRODUCT_RESULT_FACT_PRODUCER,
+                "taints": sorted(
+                    set(descriptor.initial_taints) | set(result_proof.taints)
+                ),
+            }
+        )
+        flow = _flow(
+            event=event,
+            scope_digest=inputs.scope_digest,
+            index=0,
+            source_ref=f"action:{result_proof.parent_action_id}",
+            target_ref=source_id,
+            relation="returned_by",
+            strength="exact",
+            origin="deterministic",
+            taints=list(result_proof.taints),
+        ).model_copy(update={"producer": PRODUCT_RESULT_FACT_PRODUCER})
+        return _PartialFacts(source_facts=(source,), flow_facts=(flow,))
     degradations: tuple[EvaluationDegradation, ...] = ()
     flow_facts: tuple[FlowFact, ...] = ()
     if action_ir is not None:

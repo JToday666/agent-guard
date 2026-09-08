@@ -530,3 +530,14 @@ def test_signed_profile_commits_model_visible_order_and_actual_script(data):
     assert product_command_script_digest("langgraph") != product_command_script_digest(
         "openclaw"
     )
+
+
+@pytest.mark.parametrize("event_type", ["tool_call_proposed", "memory_write_proposed"])
+def test_signed_openclaw_message_cannot_use_another_event_category(data, event_type):
+    inventory = data.document["runtimes"][1]["inventory"]
+    message = next(tool for tool in inventory["tools"] if tool["tool_id"] == "message")
+    assert message["event_type"] == "message_send_proposed"
+    message["event_type"] = event_type
+    resign_catalog_document(data)
+    with pytest.raises(ProductToolCatalogError, match="product_tool_catalog_invalid"):
+        load_product_tool_catalog(str(data.path), activation=data.bundle)

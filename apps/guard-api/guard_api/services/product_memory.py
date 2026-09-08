@@ -129,7 +129,7 @@ def verify_product_memory_source(
             or memory_fact not in snapshot.memory_facts
             or memory_fact.change_status != "committed"
             or memory_fact.change_id is None
-            or snapshot.scope.runtime != "langgraph"
+            or snapshot.scope.runtime not in {"langgraph", "openclaw"}
             or source.source_id
             not in {memory_fact.memory_id, f"memory:{memory_fact.memory_id}"}
             or len(source.summary.encode("utf-8")) > 64 * 1024
@@ -182,6 +182,19 @@ def verify_product_memory_source(
         authority = parse_decision_authority_evidence_payload(
             {"decision_authority": envelope}
         )
+        if not isinstance(authority, ProductDecisionAuthorityEvidenceV1):
+            return False
+        from .product_model_content import _receipt
+
+        _receipt(store, parent, authority, snapshot, action_terminal=True)
+        if snapshot.scope.runtime == "openclaw" and (
+            (terminal.evidence or {}).get("execution", {}).get("invoked_at") is not None
+            or (terminal.evidence or {}).get("execution", {}).get("persisted")
+            is not True
+            or (terminal.evidence or {}).get("result", {}).get("disposition")
+            != "passed_through"
+        ):
+            return False
         proof = _memory_proof(parent, change)
         decoded = decode_ct_transient_facts(parent)
         originals = (
@@ -195,7 +208,7 @@ def verify_product_memory_source(
         )
         return bool(
             isinstance(authority, ProductDecisionAuthorityEvidenceV1)
-            and authority.runtime == "langgraph"
+            and authority.runtime == snapshot.scope.runtime
             and authority.event_type == parent.event_type == "memory_write_proposed"
             and authority.approval_release_directive.scope_digest
             == snapshot.scope.scope_digest
@@ -210,7 +223,7 @@ def verify_product_memory_source(
             and memory_fact.trust_state != "clean"
             and parent.links.get("memory_change_id") == change.change_id
             and terminal.record_type == "runtime_outcome"
-            and terminal.runtime == "langgraph"
+            and terminal.runtime == snapshot.scope.runtime
             and terminal.metadata.get("outcome_kind") == "execution_completed"
             and (terminal.evidence or {}).get("execution", {}).get("status")
             == "executed"

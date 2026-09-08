@@ -93,7 +93,7 @@ from guard_api.security_state.fact_builder import (
 from guard_api.security_state.transient import (
     FACT_BUILDER_VERSION,
     LEGACY_FACT_BUILDER_VERSION,
-    PRODUCT_FACT_BUILDER_VERSION,
+    PRODUCT_FACT_VERSIONS,
     TransientSecurityFacts,
     compute_bundle_digest,
     compute_overlay_digest,
@@ -238,7 +238,7 @@ def _fact_builder_version_for_envelope(
             if declared
             in (
                 FACT_BUILDER_VERSION,
-                PRODUCT_FACT_BUILDER_VERSION,
+                *PRODUCT_FACT_VERSIONS,
             )
             else None
         )
@@ -415,9 +415,10 @@ def decode_ct_transient_facts(
     issues: list[str] = []
     try:
         actual_version = fact_builder_version_for_bundle(bundle)
-        if (fact_builder_version == PRODUCT_FACT_BUILDER_VERSION) != (
-            actual_version == PRODUCT_FACT_BUILDER_VERSION
-        ):
+        if (
+            fact_builder_version in PRODUCT_FACT_VERSIONS
+            or actual_version in PRODUCT_FACT_VERSIONS
+        ) and fact_builder_version != actual_version:
             issues.append("ct-envelope:fact_producer_version_mismatch")
     except ValueError:
         issues.append("ct-envelope:fact_producer_version_mismatch")
@@ -920,6 +921,7 @@ class CtProjectionService:
             visible_refs=visible_refs,
             action_ir=action_ir,
             product_data=materials.product_data,
+            product_result=materials.product_result,
             upstream_descriptors=upstream_descriptors,
             upstream_memory_facts=upstream_memory_facts,
             memory_change_status="proposed",
@@ -1072,14 +1074,10 @@ class CtProjectionService:
                     )
                 ),
             )
-            if (
-                fact_builder_version == PRODUCT_FACT_BUILDER_VERSION
-                and result.outcome
-                in {
-                    "applied",
-                    "replayed_noop",
-                }
-            ):
+            if fact_builder_version in PRODUCT_FACT_VERSIONS and result.outcome in {
+                "applied",
+                "replayed_noop",
+            }:
                 # Product Phase C reconciles the policy prefix before this CT
                 # append. Finish the full post-commit boundary with the same
                 # bounded recovery primitive, under both required locks. This
@@ -1468,7 +1466,7 @@ class CtProjectionService:
             PROJECTOR_VERSION,
         )
         if existing_projection is not None:
-            if fact_builder_version == PRODUCT_FACT_BUILDER_VERSION:
+            if fact_builder_version in PRODUCT_FACT_VERSIONS:
                 # The envelope can survive a crash or failed reconciliation
                 # after project_committed. Recover from persisted history,
                 # without constructing a second delta or executing the action.

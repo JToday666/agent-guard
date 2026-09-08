@@ -715,6 +715,7 @@ class AuditService:
         audit_id: str | None = None,
         product_model_content: dict[str, object] | None = None,
         product_action_data: dict[str, object] | None = None,
+        product_tool_result: dict[str, object] | None = None,
     ) -> AuditEvent:
         """写入 policy_evaluation 审计记录。
 
@@ -755,11 +756,19 @@ class AuditService:
             audit_id=audit_id,
             product_model_content=product_model_content,
             product_action_data=product_action_data,
+            product_tool_result=product_tool_result,
             evidence_content_preview_enabled=self.evidence_content_preview_enabled,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
         persisted = self.store.get_audit_event(audit_event.audit_id) or audit_event
+        if product_tool_result is not None:
+            from .product_model_content import read_product_tool_result
+
+            if read_product_tool_result(
+                persisted
+            ).proof_digest != product_tool_result.get("proof_digest"):
+                raise ValueError("product_tool_result_persistence_mismatch")
         if product_action_data is not None:
             from .product_model_content import read_product_action_data
 

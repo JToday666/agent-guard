@@ -91,6 +91,7 @@ def build_audit_event(
     evidence_content_preview_enabled: bool = False,
     product_model_content: dict[str, object] | None = None,
     product_action_data: dict[str, object] | None = None,
+    product_tool_result: dict[str, object] | None = None,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
 
@@ -398,6 +399,21 @@ def build_audit_event(
             raise CriticalDecisionEvidenceError("Product action proof exceeds budget")
         evidence = candidate
 
+    if product_tool_result is not None:
+        from guard_api.security_state.product_result import ProductToolResultProof
+
+        proof = ProductToolResultProof.model_validate(product_tool_result)
+        if (
+            decision_authority is None
+            or decision_authority_evidence is None
+            or not proof.matches_event(event)
+        ):
+            raise CriticalDecisionEvidenceError("Product tool result identity mismatch")
+        candidate = {**evidence, "product_tool_result": proof.model_dump(mode="json")}
+        if evidence_serialized_size(candidate) > MAX_EVIDENCE_BYTES:
+            raise CriticalDecisionEvidenceError("Product tool result exceeds budget")
+        evidence = candidate
+
     audit_kwargs: dict[str, str] = {}
     if audit_id is not None:
         audit_kwargs["audit_id"] = audit_id
@@ -429,6 +445,10 @@ def build_audit_event(
     dumped = built.model_dump(mode="json")
     dumped["decision_authority"] = decision_authority.model_dump(mode="json")
     result = AuditEvent.model_validate(dumped)
+    if product_tool_result is not None:
+        from .product_model_content import read_product_tool_result
+
+        read_product_tool_result(result)
     if product_action_data is not None:
         from .product_model_content import read_product_action_data
 

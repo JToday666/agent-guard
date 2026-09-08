@@ -17,6 +17,7 @@ from agentguard_core import (
     AuditEvent,
     GuardEvent,
     ModelCallPayload,
+    ToolResultPayload,
     RuntimeOutcomeReceipt,
 )
 from agentguard_core.actions import canonical_action_id
@@ -34,6 +35,7 @@ from agentguard_core.security_context.product_data import (
 )
 from agentguard_core.signals.models import TaintLabel
 from guard_api.runtime_status import activation_ack_token_digest
+from guard_api.security_state.product_result import ProductToolResultProof
 from guard_api.storage.base import AuditWindowQuery, ControlPlaneStore
 from .competition import parse_decision_authority_evidence_payload
 
@@ -370,10 +372,20 @@ def _receipt(
     parent: AuditEvent,
     authority: ProductDecisionAuthorityEvidenceV1,
     snapshot: SecuritySnapshot,
+    *,
+    action_terminal: bool = False,
 ) -> AuditEvent:
-    receipt = store.get_audit_event(
-        f"audit_outcome_{authority.event_id}_execution_completed"
-    )
+    candidates = [
+        store.get_audit_event(f"audit_outcome_{authority.event_id}_{kind}")
+        for kind in (
+            ("execution_completed", "execution_failed")
+            if action_terminal
+            else ("execution_completed",)
+        )
+    ]
+    present = [item for item in candidates if item is not None]
+    _require(len(present) == 1)
+    receipt = present[0]
     _require(receipt is not None and receipt.record_type == "runtime_outcome")
     assert receipt is not None
     stamp = receipt.metadata.get(ACK_VALIDATION_KEY)
@@ -402,6 +414,13 @@ def _receipt(
     public.pop("ack_token", None)
     _require(public == issuance.ack_projection)
     anchor = _time(cast(str, parent.metadata["product_authority_initial_checked_at"]))
+    if action_terminal and receipt.links.get("lease_id") is not None:
+        lease = store.get_execution_lease(
+            snapshot.scope.scope_digest, receipt.links["lease_id"]
+        )
+        _require(lease is not None)
+        assert lease is not None
+        anchor = _time(lease.issued_at)
     _require(_time(ack.issued_at) <= anchor < _time(ack.expires_at))
     _require(issuance.revoked_at is None or anchor < _time(issuance.revoked_at))
     _require(issuance.principal_id == snapshot.scope.principal_id)
@@ -429,16 +448,213 @@ def _receipt(
         and strict.links.policy_audit_id == parent.audit_id
         and strict.links.decision_id == parent.links.get("decision_id")
     )
-    _require(
-        strict.links.action_id == parent.links.get("action_id")
-        and strict.links.approval_id is None
-    )
-    _require(strict.decision == parent.decision == "allow" and strict.blocked is False)
-    _require(
-        strict.evidence.execution.status == "executed"
-        and strict.evidence.result.disposition == "passed_through"
-    )
+    _require(strict.links.action_id == parent.links.get("action_id"))
+    if action_terminal:
+        from .audit import AuditService
+
+        validator = AuditService(store=store)
+        _require(validator._validate_runtime_outcome_parent(strict) == parent)
+        validator._validate_runtime_outcome_authority(strict, parent)
+        _require(strict.decision in {"allow", "ask"})
+        _require(strict.evidence.execution.status in {"executed", "failed"})
+        _require(strict.evidence.execution.completed_at is not None)
+        if strict.runtime == "openclaw":
+            _require(strict.evidence.execution.invoked_at is None)
+        if strict.decision == "ask":
+            _require(strict.links.lease_id is not None)
+            _require(strict.evidence.approval.status == "allowed")
+            _require(strict.evidence.approval.decision == "allow_once")
+    else:
+        _require(strict.links.approval_id is None)
+        _require(
+            strict.decision == parent.decision == "allow" and strict.blocked is False
+        )
+        _require(
+            strict.evidence.execution.status == "executed"
+            and strict.evidence.result.disposition == "passed_through"
+        )
     return receipt
+
+
+def verify_product_tool_result(
+    store: ControlPlaneStore,
+    event: GuardEvent,
+    snapshot: SecuritySnapshot,
+) -> ProductToolResultProof:
+    """Resolve the real native call from its accepted original action, not metadata trust."""
+    try:
+        _require(event.event_type == "tool_result_produced" and not event.pre_execution)
+        _require(isinstance(event.payload, ToolResultPayload))
+        assert isinstance(event.payload, ToolResultPayload)
+        payload = event.payload
+        _require(
+            len(payload.result.content_preview.encode("utf-8")) <= _MAX_CONTENT_BYTES
+        )
+        _require(
+            payload.result.size_bytes
+            == len(payload.result.content_preview.encode("utf-8"))
+        )
+        _require(event.security_context.source_type == "tool_result")
+        _require(event.security_context.source_trust == "untrusted")
+        origin = event.metadata.get("product_tool_result")
+        _require(
+            type(origin) is dict
+            and set(origin) == {"action_event_id", "action_policy_audit_id"}
+        )
+        assert isinstance(origin, dict)
+        parent = store.get_audit_event(origin["action_policy_audit_id"])
+        _require(
+            parent is not None
+            and parent.event_type
+            in {"tool_call_proposed", "memory_write_proposed", "message_send_proposed"}
+        )
+        assert parent is not None
+        authority = _authority(
+            parent, parent.event_type, require_allow=False, require_unfloored=False
+        )
+        _same_parent(parent, authority, event, snapshot)
+        _require(authority.event_id == origin["action_event_id"])
+        action = read_product_action_data(parent)
+        _require(action.scope_digest == snapshot.scope.scope_digest)
+        _require(action.runtime_binding_id == snapshot.scope.runtime_binding_id)
+        task = snapshot.task
+        assert task is not None
+        _require(
+            action.task_id == task.task_id and action.task_revision == task.revision
+        )
+        output = store.get_audit_event(action.model_output_audit_id)
+        _require(output is not None)
+        assert output is not None
+        output_authority = _authority(output, "model_output_produced")
+        _same_parent(output, output_authority, event, snapshot)
+        commitment = read_product_model_content(
+            (output.evidence or {}).get(CONTENT_KEY)
+        )
+        _require(
+            commitment.model_output_authority_digest
+            == canonical_sha256(output_authority.model_dump(mode="json"))
+        )
+        _require(commitment.model_output_event_id == action.model_output_event_id)
+        _require(commitment.model_output_digest == action.model_output_digest)
+        _require(commitment.tool_name == action.tool_name == payload.tool.name)
+        _require(commitment.call_id == payload.tool.call_id)
+        _require(commitment.tool_descriptor_digest == action.tool_descriptor_digest)
+        _require(commitment.input_schema_digest == action.input_schema_digest)
+        _require(commitment.semantics_digest == action.semantics_digest)
+        # Both actual model receipts remain required; this also authenticates
+        # their original task/profile/ACK and input artifact ancestry.
+        _verified_model_ancestors(
+            store, f"source:model:{output_authority.event_id}", event, snapshot
+        )
+        terminal = _receipt(store, parent, authority, snapshot, action_terminal=True)
+        task = snapshot.task
+        assert task is not None
+        return ProductToolResultProof(
+            event_id=event.event_id,
+            event_digest=canonical_sha256(event.model_dump(mode="json")),
+            runtime=cast(Literal["langgraph", "openclaw"], event.runtime),
+            trace_id=event.trace_id,
+            agent_id=event.security_context.agent_id,
+            runtime_binding_id=snapshot.scope.runtime_binding_id,
+            scope_digest=snapshot.scope.scope_digest,
+            task_id=task.task_id,
+            task_revision=task.revision,
+            parent_event_id=authority.event_id,
+            parent_policy_audit_id=parent.audit_id,
+            parent_action_id=action.action_id,
+            parent_terminal_audit_id=terminal.audit_id,
+            parent_terminal_digest=canonical_sha256(terminal.model_dump(mode="json")),
+            model_commitment_digest=commitment.commitment_digest,
+            native_tool_name=payload.tool.name,
+            native_call_id=payload.tool.call_id,
+            result_digest=canonical_sha256(payload.result.content_preview),
+            taints=tuple(sorted(set(action.taints))),
+        )
+    except Exception:
+        raise ProductModelContentUnavailable() from None
+
+
+def read_product_tool_result(audit: AuditEvent) -> ProductToolResultProof:
+    """Read only the separately persisted server proof; public metadata is not proof."""
+    try:
+        value = (audit.evidence or {}).get("product_tool_result")
+        _require(type(value) is dict and bool(value.get("proof_digest")))
+        proof = ProductToolResultProof.model_validate(value)
+        authority = _authority(
+            audit, "tool_result_produced", require_allow=False, require_unfloored=False
+        )
+        _require(proof.event_id == authority.event_id)
+        _require(proof.runtime == audit.runtime and proof.trace_id == audit.trace_id)
+        _require(proof.native_call_id == audit.links.get("action_id"))
+        _require(proof.agent_id == audit.metadata.get("agent_id"))
+        _require(
+            proof.scope_digest == authority.approval_release_directive.scope_digest
+        )
+        envelope = (audit.evidence or {}).get("decision_v21")
+        _require(type(envelope) is dict and type(envelope.get("payload")) is dict)
+        refs = cast(dict[str, Any], cast(dict[str, Any], envelope)["payload"]).get(
+            "evidence_refs"
+        )
+        _require(type(refs) is list)
+        matches = [
+            ref
+            for ref in cast(list[Any], refs)
+            if isinstance(ref, dict) and ref.get("record_type") == "product_tool_result"
+        ]
+        _require(len(matches) == 1)
+        _require(
+            matches[0].get("kind") == "guard_event"
+            and matches[0].get("record_id") == proof.event_id
+            and matches[0].get("json_pointer") == "/evidence/product_tool_result"
+            and matches[0].get("digest") == proof.proof_digest
+            and matches[0].get("redaction_state") == "summary_only"
+        )
+        return proof
+    except Exception:
+        raise ProductModelContentUnavailable() from None
+
+
+def _verified_result_parent(
+    store: ControlPlaneStore,
+    record: AuditEvent,
+    event: GuardEvent,
+    snapshot: SecuritySnapshot,
+) -> ProductToolResultProof:
+    proof = read_product_tool_result(record)
+    task = snapshot.task
+    _require(task is not None)
+    assert task is not None
+    _require(proof.scope_digest == snapshot.scope.scope_digest)
+    _require(proof.runtime_binding_id == snapshot.scope.runtime_binding_id)
+    _require(proof.task_id == task.task_id and proof.task_revision == task.revision)
+    parent = store.get_audit_event(proof.parent_policy_audit_id)
+    _require(parent is not None)
+    assert parent is not None
+    authority = _authority(
+        parent, parent.event_type, require_allow=False, require_unfloored=False
+    )
+    _same_parent(parent, authority, event, snapshot)
+    action = read_product_action_data(parent)
+    _require(authority.event_id == proof.parent_event_id)
+    _require(action.action_id == proof.parent_action_id)
+    _require(action.tool_name == proof.native_tool_name)
+    _require(set(action.taints) == set(proof.taints))
+    output = store.get_audit_event(action.model_output_audit_id)
+    _require(output is not None)
+    assert output is not None
+    commitment = read_product_model_content((output.evidence or {}).get(CONTENT_KEY))
+    _require(commitment.commitment_digest == proof.model_commitment_digest)
+    _require(commitment.call_id == proof.native_call_id)
+    _verified_model_ancestors(
+        store, f"source:model:{action.model_output_event_id}", event, snapshot
+    )
+    terminal = _receipt(store, parent, authority, snapshot, action_terminal=True)
+    _require(terminal.audit_id == proof.parent_terminal_audit_id)
+    _require(
+        canonical_sha256(terminal.model_dump(mode="json"))
+        == proof.parent_terminal_digest
+    )
+    return proof
 
 
 def _committed_artifacts(
@@ -505,7 +721,16 @@ def _committed_artifacts(
         if action_id:
             artifacts.add(f"action:{action_id}")
             if record.event_type == "tool_result_produced":
-                action_results.setdefault(f"action:{action_id}", []).append(record)
+                if (record.evidence or {}).get("product_tool_result") is not None:
+                    result_proof = _verified_result_parent(
+                        store, record, event, snapshot
+                    )
+                    parent_action = result_proof.parent_action_id
+                else:
+                    # Unadapted B06 LangGraph history retains its old identity.
+                    _require(record.runtime == "langgraph")
+                    parent_action = action_id
+                action_results.setdefault(f"action:{parent_action}", []).append(record)
         if (record.evidence or {}).get("product_action_data") is not None:
             action_proof = read_product_action_data(record)
             _require(action_proof.scope_digest == snapshot.scope.scope_digest)
@@ -579,7 +804,13 @@ def _verified_action_result_source(
     authority = _authority(record, "tool_result_produced")
     _same_parent(record, authority, event, snapshot)
     action_id = record.links.get("action_id")
-    _require(bool(action_id) and action_ref == f"action:{action_id}")
+    if (record.evidence or {}).get("product_tool_result") is not None:
+        result_proof = _verified_result_parent(store, record, event, snapshot)
+        parent_action_id = result_proof.parent_action_id
+    else:
+        _require(record.runtime == "langgraph")
+        parent_action_id = action_id
+    _require(bool(action_id) and action_ref == f"action:{parent_action_id}")
     decoded = decode_ct_transient_facts(record)
     _require(decoded.kind == "full" and decoded.bundle is not None)
     bundle = decoded.bundle

@@ -101,14 +101,14 @@ jobs:
       - name: Install locked Python environment
         run: uv sync --locked --all-groups
 
-      - name: Set up Node.js for cross-language contracts
-        if: ${{ matrix.suite == 'contract' }}
+      - name: Set up Node.js for cross-language and native Host tests
+        if: ${{ matrix.suite == 'contract' || matrix.suite == 'e2e' }}
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24.18.0"
 
-      - name: Install integrity-pinned pnpm for cross-language contracts
-        if: ${{ matrix.suite == 'contract' }}
+      - name: Install integrity-pinned pnpm for cross-language and native Host tests
+        if: ${{ matrix.suite == 'contract' || matrix.suite == 'e2e' }}
         run: |
           corepack enable
           corepack install

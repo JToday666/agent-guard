@@ -1,6 +1,6 @@
 {
   "runtime_version": "2026.7.1-2",
-  "evidence_scope": "B01 actual pinned SDK factory and native model-visible capture; no tool execution or Product Active qualification",
+  "evidence_scope": "B01 actual pinned SDK factory/native schemas and B07 Product specialized message event mapping; no tool execution or Product Active qualification",
   "tools": [
     {
       "tool_id": "agentguard_memory_read",
@@ -34,7 +34,7 @@
       "tool_id": "message",
       "source_plugin_id": "openclaw-core",
       "input_schema_digest": "sha256:2c511c7972c9294b4899a66b3f1bdcc68ebeed4489b2747ddd75c45aaf7d00d6",
-      "event_type": "tool_call_proposed",
+      "event_type": "message_send_proposed",
       "fixture_id": "openclaw:message:restricted-v1"
     },
     {
@@ -432,6 +432,6 @@
     "host_inventory_digest": "sha256:6fa621a89b1bab2f7f764aa1e3fd9c032a1fcd39a449f962c0aa77292c93ebea",
     "plugin_inventory_digest": "sha256:a8c756ec9043c01e7f2f251d070d0f42a2f8a53af73c5674797ce5950c414199",
     "plugin_order_inventory_digest": "sha256:7a3b6bd031ddab5a605bb65880442ccee0da89c2adb062b5c8dc79525ef0461f",
-    "tool_inventory_digest": "sha256:5f80126a84952452e77ee37bf6edf24df4d0a010c27815a8450cddeca840103d"
+    "tool_inventory_digest": "sha256:b8c35ea4e3522b2eeca1482fdc3c7a9734c24b0c8635ec7927206faf1a140faa"
   }
 }

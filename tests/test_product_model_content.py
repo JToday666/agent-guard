@@ -68,8 +68,10 @@ def _fixture(
     memory_read=False,
     sensitive=False,
     model_taints=("UNTRUSTED",),
+    runtime="langgraph",
+    message=False,
 ):
-    harness, original, receipt_payload, service = _rig(tmp_path)
+    harness, original, receipt_payload, service = _rig(tmp_path, runtime=runtime)
     phase = harness.pipeline.prepare_phase_a(
         harness.event(event_id="snapshot"), auth_context=harness.auth_context
     )
@@ -161,6 +163,14 @@ def _fixture(
     )
     if memory_read:
         arguments = {"key": "note"}
+    if message:
+        name = "message"
+        arguments = {
+            "action": "send",
+            "channel": "agentguard-fixture",
+            "target": "fixture-inbox",
+            "message": "complete synthetic message",
+        }
     event = harness.event(event_id="action", call_id="call:generated").model_dump(
         mode="json"
     )
@@ -178,9 +188,23 @@ def _fixture(
         "root": str(tmp_path),
         "memory_namespace": str(tmp_path) + "/memory.sqlite",
         "inbox_url": "http://127.0.0.1:18431/inbox",
-        "script_digest": product_command_script_digest("langgraph"),
+        "script_digest": product_command_script_digest(runtime),
     }
-    if memory:
+    if message:
+        event["event_type"] = "message_send_proposed"
+        event["metadata"]["product_tool_call"] = {
+            "tool_name": name,
+            "call_id": "call:generated",
+        }
+        event["payload"] = {
+            "channel": arguments["channel"],
+            "recipient": arguments["target"],
+            "content_preview": arguments["message"],
+            "contains_sensitive_data": False,
+            "sanitized": False,
+            "derived_resources": [],
+        }
+    elif memory:
         event["event_type"] = "memory_write_proposed"
         event["metadata"]["product_tool_call"] = {
             "tool_name": name,
@@ -276,6 +300,8 @@ def _fixture(
 
     for record in (input_parent, output_parent):
         wire = copy.deepcopy(receipt_payload)
+        if runtime == "openclaw":
+            wire["evidence"]["execution"]["invoked_at"] = None
         wire["evidence"]["result"]["disposition"] = "passed_through"
         wire["audit_id"] = (
             f"audit_outcome_{record.links['event_id']}_execution_completed"
