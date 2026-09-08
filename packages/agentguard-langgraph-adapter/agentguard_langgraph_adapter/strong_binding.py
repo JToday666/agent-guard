@@ -13,6 +13,8 @@ import re
 import time
 from typing import Any, Callable, Literal, TypeGuard
 
+from .activation_ack import ActivationAckV1
+
 _AUTHORIZATION_FINGERPRINT = re.compile(r"^hmac-sha256:[0-9a-f]{64}$")
 _RUNTIME_SECRET_MATERIAL = re.compile(r"^(?:hmac-sha256|lease-v1):[0-9a-f]{64}$")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$")
@@ -377,13 +379,59 @@ def authorize_strong_approval(
             approval_resolution=safe_resolution,
             approval_wait_latency_ms=latency_ms,
         )
+    consume_arguments: dict[str, Any] = {
+        "action_id": snapshot.action_id,
+        "authorization_fingerprint": snapshot.authorization_fingerprint,
+        "deadline": deadline,
+    }
+    evaluation_ack = getattr(decision, "_evaluation_activation_ack", None)
+    if evaluation_ack is not None:
+        try:
+            if not isinstance(evaluation_ack, ActivationAckV1):
+                raise ValueError("Invalid evaluation activation ACK")
+            refresh = getattr(guard_adapter, "refresh_product_ack", None)
+            if not callable(refresh):
+                raise ValueError("Product activation refresh is unavailable")
+            consumption_ack = refresh()
+            if not isinstance(consumption_ack, ActivationAckV1):
+                raise ValueError("Invalid consumption activation ACK")
+            mutable_ack_fields = {"issued_at", "expires_at"}
+            if (
+                evaluation_ack.model_dump(exclude=mutable_ack_fields)
+                != consumption_ack.model_dump(exclude=mutable_ack_fields)
+                or consumption_ack.runtime_binding_id != snapshot.runtime_binding_id
+            ):
+                raise ValueError("Product activation identity changed during approval")
+            remaining = consumption_ack.remaining_seconds(
+                now=_utc_now(),
+                max_age_seconds=getattr(
+                    getattr(guard_adapter, "config", None),
+                    "activation_ack_max_age_seconds",
+                    120.0,
+                ),
+            )
+            if remaining <= 0:
+                raise ValueError("Consumption activation ACK is not current")
+            deadline = min(deadline, monotonic() + remaining)
+            if monotonic() >= deadline:
+                raise ValueError("Approval execution deadline has elapsed")
+            # Assign before attempting consumption: even an uncertain response
+            # with server correlation must retain this exact historical ACK.
+            decision._consumption_activation_ack = consumption_ack
+            consume_arguments["activation_ack"] = consumption_ack
+            consume_arguments["deadline"] = deadline
+        except Exception:
+            raise _failure(
+                "binding_failed",
+                "passed",
+                "not_attempted",
+                "rte-05:binding_exact",
+                "rte-05:lease_unavailable",
+                approval_resolution=safe_resolution,
+                approval_wait_latency_ms=latency_ms,
+            ) from None
     try:
-        lease = consume(
-            approval_id,
-            action_id=snapshot.action_id,
-            authorization_fingerprint=snapshot.authorization_fingerprint,
-            deadline=deadline,
-        )
+        lease = consume(approval_id, **consume_arguments)
     except ExecutionLeaseConsumeError as exc:
         raise _consume_failure(
             exc,

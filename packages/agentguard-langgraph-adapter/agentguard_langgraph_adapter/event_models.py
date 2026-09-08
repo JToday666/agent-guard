@@ -7,8 +7,16 @@ import re
 from typing import Any, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    PrivateAttr,
+    field_validator,
+    model_validator,
+)
 
+from .activation_ack import ActivationAckV1, timestamp_nanoseconds
 from .strong_binding import normalize_approval_resolution
 
 _RUNTIME_SECRET_MATERIAL = re.compile(r"(?:hmac-sha256|lease-v1):[0-9a-f]{64}")
@@ -236,6 +244,11 @@ class ApprovalReleaseDirectiveV2(BaseModel):
 
 
 class PolicyDecision(BaseModel):
+    # Server ACKs belong to this exact evaluate/consume operation. Never accept
+    # them from decision wire fields or include their tokens in generic dumps.
+    _evaluation_activation_ack: ActivationAckV1 | None = PrivateAttr(default=None)
+    _consumption_activation_ack: ActivationAckV1 | None = PrivateAttr(default=None)
+
     decision_id: str = Field(default_factory=lambda: new_id("dec"))
     decision: Decision
     risk_score: int = Field(ge=0, le=100)
@@ -370,10 +383,20 @@ class RuntimeOutcomeLinks(BaseModel):
 
 
 class RuntimeOutcomeMetadata(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     agent_id: str
     outcome_kind: RuntimeOutcomeKind
+    activation_ack: ActivationAckV1 | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+
+    @field_validator("activation_ack", mode="before")
+    @classmethod
+    def reject_explicit_null_ack(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("activation_ack must be omitted instead of null")
+        return value
 
 
 class RuntimeEnforcementEvidence(BaseModel):
@@ -412,7 +435,7 @@ class RuntimeOutcomeEvidence(BaseModel):
 
 
 class RuntimeOutcomeReceipt(AuditEvent):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", hide_input_in_errors=True)
 
     schema_version: Literal["0.4"] = "0.4"
     record_type: Literal["runtime_outcome"] = "runtime_outcome"
@@ -428,8 +451,28 @@ class RuntimeOutcomeReceipt(AuditEvent):
     metadata: RuntimeOutcomeMetadata  # pyright: ignore[reportGeneralTypeIssues]
     evidence: RuntimeOutcomeEvidence  # pyright: ignore[reportGeneralTypeIssues]
 
+    def to_wire(self) -> dict[str, Any]:
+        """Explicit private transport serialization of the historical ACK."""
+
+        payload = self.model_dump(mode="json")
+        if self.metadata.activation_ack is not None:
+            payload["metadata"][
+                "activation_ack"
+            ] = self.metadata.activation_ack.to_wire()
+        return payload
+
     @model_validator(mode="after")
     def validate_identity(self) -> "RuntimeOutcomeReceipt":
+        ack = self.metadata.activation_ack
+        if ack is not None:
+            if ack.runtime != self.runtime:
+                raise ValueError("activation ack runtime must match receipt runtime")
+            if ack.agent_id != self.metadata.agent_id:
+                raise ValueError("activation ack agent must match receipt agent")
+            if timestamp_nanoseconds(ack.issued_at) > timestamp_nanoseconds(
+                self.timestamp
+            ):
+                raise ValueError("activation ack cannot be issued after receipt")
         expected = f"audit_outcome_{self.links.event_id}_{self.metadata.outcome_kind}"
         if self.audit_id != expected:
             raise ValueError("runtime outcome audit_id does not match its identity")

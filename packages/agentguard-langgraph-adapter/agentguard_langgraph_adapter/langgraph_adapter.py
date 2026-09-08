@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
-from .config import AgentGuardLangGraphConfig
+from .activation_ack import ActivationAckV1, ProductActivationError
+from .config import AgentGuardLangGraphConfig, product_configuration_digest
 from .context_guard import (
     REFERENCE_RUNTIME_FACT,
     context_content_digest,
@@ -30,9 +31,11 @@ from .event_models import (
     ToolCallEvent,
     ToolDescriptor,
     ToolExecutionResult,
+    RuntimeOutcomeReceipt,
     new_id,
 )
 from .strong_binding import ExecutionLeaseReference
+from .product_manifest import ProductRuntimeObservation
 
 TOOL_METADATA = {
     "read_file": ("file", "file_read", "read"),
@@ -81,10 +84,74 @@ _PROVIDER_KEY_RE = re.compile(
 class LangGraphAdapter:
     config: Any = field(default_factory=AgentGuardLangGraphConfig)
     core_client: CoreClientProtocol | None = None
+    _product_enabled: bool = field(default=False, init=False, repr=False)
+    _official_client: AgentGuardCoreClient | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
+        self._product_enabled = (
+            getattr(self.config, "product_manifest_path", None) is not None
+        )
         if self.core_client is None:
             self.core_client = AgentGuardCoreClient(self.config)
+        if self.product_enabled:
+            self._product_enabled = True
+            if isinstance(self.core_client, AgentGuardCoreClient):
+                self._official_client = self.core_client
+            self._product_client()
+
+    @property
+    def product_enabled(self) -> bool:
+        return (
+            self._product_enabled
+            or getattr(self.config, "product_manifest_path", None) is not None
+            or (
+                isinstance(self.core_client, AgentGuardCoreClient)
+                and self.core_client.product_enabled
+            )
+        )
+
+    def _product_client(self) -> AgentGuardCoreClient:
+        client = self._official_client
+        if (
+            client is None
+            or self.core_client is not client
+            or not client.product_enabled
+        ):
+            raise ProductActivationError("official_client_required")
+        try:
+            if product_configuration_digest(
+                self.config
+            ) != product_configuration_digest(client.config):
+                raise ValueError
+        except Exception:
+            raise ProductActivationError("adapter_configuration_mismatch") from None
+        return client
+
+    def start_product_session(
+        self, *, observe: Callable[[], ProductRuntimeObservation]
+    ) -> ActivationAckV1:
+        return self._product_client().start_product_session(observe=observe)
+
+    def refresh_product_ack(self) -> ActivationAckV1:
+        return self._product_client().refresh_product_ack()
+
+    def close_product_session(self) -> None:
+        if self._official_client is not None:
+            self._official_client.close_product_session()
+
+    def _evaluate_product(self, event: dict[str, Any]) -> PolicyDecision:
+        try:
+            raw, ack = self._product_client().evaluate_product_event(event)
+            decision = PolicyDecision.model_validate(raw)
+            decision._evaluation_activation_ack = ack
+            return decision
+        except Exception:
+            # Do not serialize Pydantic/HTTP exception inputs into rule hits.
+            return _failure_decision(
+                ProductActivationError("official_evaluation_failed"), fail_closed=True
+            )
 
     @classmethod
     def with_fake_deny_core(cls, config: Any | None = None) -> "LangGraphAdapter":
@@ -109,6 +176,8 @@ class LangGraphAdapter:
             trace_id=trace_id,
             call_id=call_id,
         )
+        if self.product_enabled:
+            return event, self._evaluate_product(event.model_dump())
         if not self.config.defense_enabled:
             return event, PolicyDecision(
                 decision_id="dec_defense_off",
@@ -160,6 +229,8 @@ class LangGraphAdapter:
     def evaluate_guard_event(
         self, event: RuntimeGuardEvent | dict[str, Any]
     ) -> PolicyDecision:
+        if self.product_enabled:
+            return self._evaluate_product(_event_dump(event))
         if not self.config.defense_enabled:
             return _allow_decision("Defense is disabled for this benchmark run.")
         try:
@@ -717,20 +788,49 @@ class LangGraphAdapter:
             ),
         )
 
-    def submit_audit_event(self, audit_event: AuditEvent) -> dict[str, Any]:
-        if not self.config.defense_enabled:
+    def submit_audit_event(
+        self, audit_event: AuditEvent | RuntimeOutcomeReceipt
+    ) -> dict[str, Any]:
+        if not self.product_enabled and not self.config.defense_enabled:
             return {"ok": True, "skipped": "defense_off"}
         try:
+            payload = (
+                audit_event.to_wire()
+                if isinstance(audit_event, RuntimeOutcomeReceipt)
+                else audit_event.model_dump()
+            )
+            if self.product_enabled:
+                if self._official_client is None:
+                    raise ProductActivationError("official_client_required")
+                return self._official_client.submit_audit_event(payload)
             assert self.core_client is not None
-            return self.core_client.submit_audit_event(audit_event.model_dump())
+            return self.core_client.submit_audit_event(payload)
         except CoreClientError as exc:
             return {"ok": False, "error": str(exc)}
         except Exception as exc:
-            return {"ok": False, "error": str(exc)}
+            return {
+                "ok": False,
+                "error": (
+                    "Product receipt submission failed"
+                    if self.product_enabled
+                    else str(exc)
+                ),
+            }
 
     def wait_for_approval(
         self, approval_id: str, timeout: float | None = None
     ) -> dict[str, Any]:
+        if self.product_enabled:
+            try:
+                return self._product_client().wait_for_approval(
+                    approval_id, timeout=timeout
+                )
+            except Exception:
+                return {
+                    "status": "error",
+                    "decision": "deny",
+                    "error": "Product approval wait failed",
+                }
         if not self.config.defense_enabled:
             return {"status": "resolved", "decision": "allow_once"}
         try:
@@ -759,9 +859,20 @@ class LangGraphAdapter:
         action_id: str,
         authorization_fingerprint: str,
         deadline: float,
+        activation_ack: ActivationAckV1 | None = None,
     ) -> ExecutionLeaseReference:
         """Consume one RTE-05 lease without retaining its bearer token."""
 
+        if self.product_enabled:
+            return self._product_client().consume_execution_lease(
+                approval_id,
+                action_id=action_id,
+                authorization_fingerprint=authorization_fingerprint,
+                deadline=deadline,
+                activation_ack=activation_ack,
+            )
+        if activation_ack is not None:
+            raise ProductActivationError("unexpected_activation_ack")
         if not self.config.defense_enabled:
             raise CoreClientError(
                 "execution lease unavailable while defense is disabled"

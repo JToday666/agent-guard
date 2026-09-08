@@ -49,10 +49,26 @@ class GuardedToolGateway:
     approval_poll_interval: float = 0.25
 
     def __post_init__(self) -> None:
+        self._reject_incomplete_product_runtime()
         if self.approval_timeout <= 0:
             raise ValueError("approval_timeout must be greater than 0")
         if self.approval_poll_interval <= 0:
             raise ValueError("approval_poll_interval must be greater than 0")
+
+    def _reject_incomplete_product_runtime(self) -> None:
+        if (
+            getattr(self.guard_adapter, "product_enabled", False)
+            or getattr(
+                getattr(self.guard_adapter, "config", None),
+                "product_manifest_path",
+                None,
+            )
+            is not None
+        ):
+            raise ValueError(
+                "Product runtime execution remains disabled until the complete "
+                "activation, event-consumer and durable-receipt gate is available"
+            )
 
     def invoke_tool(
         self,
@@ -66,6 +82,7 @@ class GuardedToolGateway:
         call_id: str | None = None,
         case_context: dict[str, Any] | None = None,
     ) -> ToolExecutionResult:
+        self._reject_incomplete_product_runtime()
         call_id = call_id or new_id("call")
         # Freeze the complete invocation projection before evaluate.  Caller
         # mutation during human wait cannot alter the arguments later invoked.

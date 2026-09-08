@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import hashlib
+import json
+import math
+from pathlib import Path
+from typing import Any
 from typing import Literal
 import warnings
 
@@ -64,7 +69,7 @@ def validate_runtime_receipt_mode(value: object) -> RuntimeReceiptMode:
 @dataclass(slots=True)
 class AgentGuardLangGraphConfig:
     core_base_url: str = "http://127.0.0.1:8088"
-    token: str = "demo-token"
+    token: str = field(default="demo-token", repr=False)
     timeout: float = 5.0
     fail_closed: bool = True
     defense_enabled: bool = True
@@ -80,6 +85,12 @@ class AgentGuardLangGraphConfig:
     # Product Active and required-durable decisions always require receipts,
     # independently of this opt-in compatibility default.
     runtime_receipt_mode: RuntimeReceiptMode = "best_effort"
+    # Protected local expectations, never learned from an evaluate response.
+    # This batch enables transport only; execution remains gated until the
+    # complete native/receipt/breaker composition is available.
+    product_manifest_path: str | None = None
+    product_refresh_interval_seconds: float = 30.0
+    activation_ack_max_age_seconds: float = 120.0
 
     def __post_init__(self) -> None:
         self.core_base_url = validate_guard_api_base_url(self.core_base_url)
@@ -93,7 +104,71 @@ class AgentGuardLangGraphConfig:
         warn_if_legacy_api_mode(self.api_mode)
         if self.timeout <= 0:
             raise ValueError("timeout must be greater than 0")
+        if self.product_manifest_path is not None:
+            validate_product_configuration(self)
 
     @property
     def core_api_mode(self) -> ApiMode:
         return self.api_mode
+
+
+def validate_product_configuration(config: Any) -> None:
+    """Reject every compatibility downgrade before an official request."""
+
+    path = getattr(config, "product_manifest_path", None)
+    if (
+        not isinstance(path, str)
+        or not path
+        or not Path(path).is_absolute()
+        or getattr(config, "api_mode", None) != "guard-api-v0.3"
+        or getattr(config, "runtime", None) != "langgraph"
+        or getattr(config, "defense_enabled", None) is not True
+        or getattr(config, "fail_closed", None) is not True
+        or getattr(config, "context_isolation_mode", None) != "required"
+        or getattr(config, "runtime_receipt_mode", None) != "required"
+        or not isinstance(getattr(config, "token", None), str)
+        or not config.token
+        or not isinstance(getattr(config, "runtime_binding_id", None), str)
+        or not config.runtime_binding_id
+    ):
+        raise ValueError("Product configuration is incomplete or incompatible")
+    interval = getattr(config, "product_refresh_interval_seconds", None)
+    age = getattr(config, "activation_ack_max_age_seconds", None)
+    timeout = getattr(config, "timeout", None)
+    for value in (interval, age, timeout):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (float, int))
+            or not math.isfinite(value)
+            or value <= 0
+        ):
+            raise ValueError("Product timing configuration is invalid")
+    assert isinstance(age, (int, float)) and isinstance(interval, (int, float))
+    if age > 120 or interval > 30 or interval >= age:
+        raise ValueError("Product timing configuration is invalid")
+
+
+def product_configuration_digest(config: Any) -> str:
+    """Detect mutable compatibility config changes without retaining secrets."""
+
+    validate_product_configuration(config)
+    fields = (
+        "core_base_url",
+        "token",
+        "timeout",
+        "fail_closed",
+        "defense_enabled",
+        "runtime",
+        "agent_id",
+        "runtime_binding_id",
+        "api_mode",
+        "context_isolation_mode",
+        "runtime_receipt_mode",
+        "product_manifest_path",
+        "product_refresh_interval_seconds",
+        "activation_ack_max_age_seconds",
+    )
+    projection = {name: getattr(config, name, None) for name in fields}
+    return hashlib.sha256(
+        json.dumps(projection, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
