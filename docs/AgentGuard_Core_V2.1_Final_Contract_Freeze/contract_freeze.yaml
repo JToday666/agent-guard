@@ -1,6 +1,17 @@
 {
   "schema_version": "2.1-final-candidate",
   "status": "frozen",
+  "product_data_amendment": {
+    "version": "product-data-contract-1",
+    "authorized_at": "2026-09-08",
+    "authorization_source": "explicit_user_confirmation_in_codex_task",
+    "document": "11_Product数据与控制影响修正.md",
+    "model_control_implies_exact_data_flow": false,
+    "complete_evidence_grants_authority": false,
+    "langgraph_strong_binding_required": true,
+    "openclaw_strong_binding": false,
+    "historical_records_without_proof": "retain_conservative_semantics"
+  },
   "repository": {
     "full_name": "JToday666/agent-guard",
     "remote_dev_sha_at_freeze": "69efe2f027d9a4ba9c18623838e84f6ce30ffa62",

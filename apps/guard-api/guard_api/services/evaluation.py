@@ -1007,6 +1007,41 @@ class EvaluationService:
         memory_change = self._record_memory_change(
             event, decision, requesting_principal_id=requesting_principal_id
         )
+        product_model_content = None
+        if (
+            event.event_type == "model_output_produced"
+            and decision.decision == "allow"
+            and self.v21_pipeline is not None
+            and self.v21_pipeline.product_tool_catalog is not None
+            and self.v21_pipeline.product_active
+        ):
+            from .product_model_content import (
+                ProductModelContentUnavailable,
+                build_product_model_content,
+            )
+
+            if (
+                materials.snapshot is None
+                or authority_evidence is None
+                or self.v21_pipeline.product_activation is None
+            ):
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_MODEL_CONTENT_UNAVAILABLE"
+                )
+            try:
+                product_model_content = build_product_model_content(
+                    self.audit_service.store,
+                    event,
+                    snapshot=materials.snapshot,
+                    catalog=self.v21_pipeline.product_tool_catalog,
+                    activation=self.v21_pipeline.product_activation.bundle,
+                    decision_authority_evidence=authority_evidence,
+                )
+            except ProductModelContentUnavailable:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_MODEL_CONTENT_UNAVAILABLE"
+                ) from None
+
         audit_event = self.audit_service.record_evaluation(
             event,
             decision,
@@ -1030,6 +1065,23 @@ class EvaluationService:
                 **finalize_metadata,
                 **semantic_metadata,
                 **product_authority_metadata,
+                **(
+                    {
+                        "product_model_task": {
+                            "task_id": materials.snapshot.task.task_id,
+                            "task_revision": materials.snapshot.task.revision,
+                            "task_digest": materials.snapshot.task.task_digest,
+                            "scope_digest": materials.snapshot.task.scope_digest,
+                        }
+                    }
+                    if self.v21_pipeline is not None
+                    and self.v21_pipeline.product_active
+                    and materials.snapshot is not None
+                    and materials.snapshot.task is not None
+                    and authority is not None
+                    and authority.source == "v21"
+                    else {}
+                ),
                 **self._context_manifest_metadata(context_manifest),
             },
             decision_dump=decision.model_dump(mode="json"),
@@ -1039,6 +1091,16 @@ class EvaluationService:
             ct_facts_evidence=(ct_plan.envelope if ct_plan is not None else None),
             decision_authority_evidence=authority_evidence,
             decision_authority=authority,
+            product_model_content=(
+                product_model_content.model_dump(mode="json")
+                if product_model_content is not None
+                else None
+            ),
+            product_action_data=(
+                materials.product_data.model_dump(mode="json")
+                if materials.product_data is not None
+                else None
+            ),
             # D7-5：pipeline 路径确定性审计身份（replay 同输入同身份）；
             # plan 缺态（stale/降级）时沿用 AuditEvent 默认工厂。
             audit_id=(phase_c_plan.audit_id if phase_c_plan is not None else None),
@@ -1199,6 +1261,7 @@ class EvaluationService:
                 scope_digest=materials.scope_digest,
                 event_type=event.event_type,
                 residual_boundaries=runtime_entry.residual_boundaries,
+                product_data=materials.product_data,
             )
         except V21AuthoritySelectionError as exc:
             logger.warning(
@@ -1520,12 +1583,36 @@ class EvaluationService:
         # before any recovery write. It is validated again inside the locked
         # transaction so concurrent storage drift cannot cross the boundary.
         self._rebuild_response(existing)
+        needs_product_data = (
+            pipeline.product_tool_catalog is not None
+            and event.event_type
+            in {"tool_call_proposed", "memory_write_proposed", "message_send_proposed"}
+        )
+        if needs_product_data:
+            from .product_model_content import (
+                ProductModelContentUnavailable,
+                read_product_action_data,
+            )
+
+            try:
+                read_product_action_data(existing)
+            except ProductModelContentUnavailable:
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_MODEL_CONTENT_UNAVAILABLE"
+                ) from None
         with pipeline.product_replay_transaction(
             event,
             existing,
             auth_context,
             activation_ack_token=activation_ack_token,
         ) as locked:
+            if needs_product_data:
+                try:
+                    read_product_action_data(locked)
+                except ProductModelContentUnavailable:
+                    raise V21OfficialEvaluationUnavailableError(
+                        "V21_PRODUCT_MODEL_CONTENT_UNAVAILABLE"
+                    ) from None
             response = self._rebuild_response(locked)
             self.audit_service.repair_provenance(locked)
             return response

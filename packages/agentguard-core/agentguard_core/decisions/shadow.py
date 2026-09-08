@@ -46,6 +46,8 @@ from dataclasses import dataclass
 from typing import Any, Sequence
 
 from ..actions.builder import build_action_ir, canonical_action_id
+from ..actions.product_tools import VerifiedProductTool
+from ..security_context.product_data import VerifiedProductData
 from ..actions.canonical_json import canonical_sha256
 from ..actions.models import ActionIR
 from ..decisions.evidence import (
@@ -97,6 +99,7 @@ from ..signals.models import (
     AuthorityVerdict,
     Decision,
     EvaluationDegradation,
+    EvidenceRef,
     FlowVerdict,
     ImpactClass,
     SecuritySignal,
@@ -319,7 +322,9 @@ def _legacy_signals_and_degradations(
     return signals, degradations
 
 
-def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
+def _overlay_lookup_targets(
+    action_ir: ActionIR, *, product_tool: VerifiedProductTool | None = None
+) -> tuple[str, ...]:
     """Deterministic current-action and normalized-sink lookup roots."""
     refs = {
         action_ir.action_id,
@@ -335,6 +340,12 @@ def _overlay_lookup_targets(action_ir: ActionIR) -> tuple[str, ...]:
         *(resource.canonical_id for resource in action_ir.resources),
         *(destination.canonical_id for destination in action_ir.destinations),
     }
+    if product_tool is not None:
+        refs.update(
+            f"memory:{resource.canonical_id}"
+            for resource in action_ir.resources
+            if resource.kind == "memory"
+        )
     return tuple(sorted(refs))
 
 
@@ -417,6 +428,8 @@ def _assess_kernel(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    product_tool: VerifiedProductTool | None = None,
+    product_data: VerifiedProductData | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
@@ -431,6 +444,8 @@ def _assess_kernel(
     evidence 组装（§14 保存项 2）必须消费评估时喂给 fusion 的同一份
     coverage，本函数是该同源真值的唯一出口。
     """
+    if product_data is not None and (product_tool is None or transient_facts is None):
+        raise ValueError("Product data requires verified tools and current facts")
     policy_digest = canonical_sha256(policies.model_dump(mode="json"))
     signals, degradations = _legacy_signals_and_degradations(
         detection_results, event_id=event.event_id
@@ -456,16 +471,23 @@ def _assess_kernel(
                 principal_id=scope.principal_id,
                 runtime_binding_id=scope.runtime_binding_id,
                 model_output_observation=model_output_observation,
+                product_tool=product_tool,
             )
         else:
             action_ir = build_action_ir(
                 event,
                 server_secret=server_secret,
                 model_output_observation=model_output_observation,
+                product_tool=product_tool,
             )
     except Exception:  # noqa: BLE001 - 旁路评估失败必须收敛，不外抛。
         action_ir = None
         action_ir_failed = True
+
+    if product_data is not None and (
+        action_ir is None or not product_data.matches_action(action_ir)
+    ):
+        raise ValueError("Product data proof does not match the current action")
 
     if action_ir is not None:
         action_id = action_ir.action_id
@@ -519,6 +541,7 @@ def _assess_kernel(
                         else frozenset()
                     ),
                 ),
+                product_data=product_data,
             )
             state = _state_from_snapshot(snapshot, revoked_grant_ids=revoked_grant_ids)
             if transient_facts is None:
@@ -537,6 +560,7 @@ def _assess_kernel(
                     snapshot,
                     action_ir,
                     dataflow_status=coverage.dataflow.status,
+                    product_data=product_data,
                 )
             else:
                 if transient_facts.overlay_digest != compute_overlay_digest(
@@ -564,7 +588,9 @@ def _assess_kernel(
                 overlay = build_assessment_overlay(
                     state,
                     transient_facts,
-                    target_refs=_overlay_lookup_targets(action_ir),
+                    target_refs=_overlay_lookup_targets(
+                        action_ir, product_tool=product_tool
+                    ),
                 )
                 state = overlay.state
                 incomplete_reasons = _overlay_incomplete_reasons(transient_facts)
@@ -582,6 +608,7 @@ def _assess_kernel(
                             stable_refs=stable_source_refs,
                         ),
                         "truncated": (("dataflow",) if overlay.truncated else ()),
+                        "product_data": product_data,
                         "provider_available": (
                             {DATAFLOW_PROVIDER_KEY: False} if incomplete_reasons else {}
                         ),
@@ -602,6 +629,7 @@ def _assess_kernel(
                     state,
                     action_ir,
                     dataflow_status=coverage.dataflow.status,
+                    product_data=product_data,
                 )
                 signals = [
                     *signals,
@@ -686,7 +714,21 @@ def _assess_kernel(
             reason_codes=[_SEMANTIC_RESERVED_REASON],
         ),
         reason_codes=list(fusion_reasons),
-        evidence_refs=[],
+        evidence_refs=(
+            [
+                EvidenceRef(
+                    ref_id=f"product-data:{event.event_id}",
+                    kind="guard_event",
+                    record_type="product_action_data",
+                    record_id=event.event_id,
+                    json_pointer="/evidence/product_action_data",
+                    digest=product_data.proof_digest,
+                    redaction_state="summary_only",
+                )
+            ]
+            if product_data is not None
+            else []
+        ),
         authorization_fingerprint=authorization_fingerprint,
         audit_fingerprint=audit_fingerprint,
         task_digest=task_digest,
@@ -723,6 +765,8 @@ def assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    product_tool: VerifiedProductTool | None = None,
+    product_data: VerifiedProductData | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
@@ -753,6 +797,8 @@ def assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        product_tool=product_tool,
+        product_data=product_data,
         memory_not_required_actions=memory_not_required_actions,
         source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     ).assessment
@@ -767,6 +813,8 @@ def shadow_assess_with_coverage(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    product_tool: VerifiedProductTool | None = None,
+    product_data: VerifiedProductData | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> ShadowOutcome:
@@ -783,6 +831,8 @@ def shadow_assess_with_coverage(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        product_tool=product_tool,
+        product_data=product_data,
         memory_not_required_actions=memory_not_required_actions,
         source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     )
@@ -797,6 +847,8 @@ def shadow_assess(
     detection_results: Sequence[DetectionResult] = (),
     revoked_grant_ids: Sequence[str] = (),
     transient_facts: AssessmentTransientFacts | None = None,
+    product_tool: VerifiedProductTool | None = None,
+    product_data: VerifiedProductData | None = None,
     memory_not_required_actions: frozenset[str] = frozenset(),
     source_dataflow_not_required_actions: frozenset[str] = frozenset(),
 ) -> FastAssessment:
@@ -830,6 +882,8 @@ def shadow_assess(
         detection_results=detection_results,
         revoked_grant_ids=revoked_grant_ids,
         transient_facts=transient_facts,
+        product_tool=product_tool,
+        product_data=product_data,
         memory_not_required_actions=memory_not_required_actions,
         source_dataflow_not_required_actions=(source_dataflow_not_required_actions),
     ).assessment

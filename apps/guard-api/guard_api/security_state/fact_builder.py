@@ -1,4 +1,4 @@
-"""GuardEvent → transient 事实映射（ct-fact-2）。
+"""GuardEvent → transient 事实映射（ct-fact-2 / ct-product-fact-1）。
 
 冻结出处（docs/AgentGuard_Context_Isolation_Taint_Tracking_Final_RC/）：
 
@@ -38,6 +38,9 @@ refs 时的最小 SecuritySignal（02 §8.6，不伪造 exact provenance）。
 influence 边、传播服务端 taint，并扩展 current action data refs；
 这些都改变 fact 语义，因此 bump 为 ``ct-fact-2``。由于
 fact→typed delta 容器映射未变，不 bump projector。
+
+Product proof 分支单独使用 ct-product-fact-1 producer/version，按已验证
+完整参数建立数据复制边；历史 handlers 不重解释。控制影响始终 possible。
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ from agentguard_core.security_context.facts import (
     RecentActionFact,
     SourceFact,
 )
+from agentguard_core.security_context.product_data import VerifiedProductData
 from agentguard_core.signals.models import EvaluationDegradation, SecuritySignal
 
 from .fact_authority import (
@@ -87,6 +91,7 @@ from .fact_authority import (
     verify_source_claim,
 )
 from .transient import (
+    PRODUCT_FACT_PRODUCER,
     TransientSecurityFacts,
     compute_bundle_digest,
     compute_overlay_digest,
@@ -129,6 +134,7 @@ class FactBuildInputs(BaseModel):
     server_credential_fingerprints: frozenset[str] = frozenset()
     visible_refs: tuple[str, ...] | None = None
     action_ir: ActionIR | None = None
+    product_data: VerifiedProductData | None = None
     upstream_descriptors: Mapping[str, VerifiedSourceDescriptor] = {}
     upstream_memory_facts: Mapping[str, MemoryFact] = {}
     memory_change_status: Literal["proposed", "quarantined"] = "proposed"
@@ -588,6 +594,8 @@ def _handle_memory_write_proposed(
     ``ct-fact:flow_ref_missing`` 降级（02 §13，与 message 路径同
     口径）；visible_refs 只参与 fail-closed trust 判定。
     """
+    if inputs.product_data is not None:
+        return _handle_product_action(event, inputs)
     payload = cast(MemoryEventPayload, event.payload)
     canonical = normalize_memory_resource(
         ResourceNormalizationInput(
@@ -739,6 +747,8 @@ def _handle_message_send_proposed(
     性交 Fusion；evidence_group 确定性构造）；绝不建 exact sent_to
     伪造 provenance。
     """
+    if inputs.product_data is not None:
+        return _handle_product_action(event, inputs)
     payload = cast(MessageSendPayload, event.payload)
     sink_ref = _canonical_sink_ref(payload.channel, payload.recipient)
     degradations: tuple[EvaluationDegradation, ...] = ()
@@ -819,6 +829,8 @@ def _handle_tool_call_proposed(
     事实生产者无合法依据构造完整锚点，候选取 None，由持有
     producer 上下文的后续链（CT-PR-04/05 接线）填充。
     """
+    if inputs.product_data is not None:
+        return _handle_product_action(event, inputs)
     action_ir = inputs.action_ir
     if action_ir is None:
         return _PartialFacts(
@@ -905,6 +917,193 @@ def _handle_tool_call_proposed(
     )
 
 
+def _product_inputs(
+    event: GuardEvent, inputs: FactBuildInputs
+) -> tuple[VerifiedProductData, ActionIR, list[str], bool]:
+    """Validate server proof against this IR and the actual scoped closure.
+
+    Snapshot maps may contain unrelated historical records. Only the proved
+    closure contributes here; direct refs determine this action's control
+    inputs, while every ancestor's taints remain sticky.
+    """
+    proof, action = inputs.product_data, inputs.action_ir
+    if (
+        proof is None
+        or action is None
+        or not proof.matches_action(action)
+        or proof.event_id != event.event_id
+        or proof.runtime != event.runtime
+        or proof.scope_digest != inputs.scope_digest
+        or inputs.visible_refs is None
+        or set(inputs.visible_refs) != set(proof.direct_source_refs)
+        or event.security_context.source_type != "model"
+        or event.security_context.source_trust != "unknown"
+    ):
+        raise ValueError("ct_product_data_invalid")
+    taints = set(proof.taints)
+    tainted = False
+    for ref in proof.source_refs:
+        descriptor = inputs.upstream_descriptors.get(ref)
+        if (
+            descriptor is None
+            or descriptor.source_id != ref
+            or descriptor.scope_digest != inputs.scope_digest
+            or not descriptor.producer
+            or not set(descriptor.initial_taints).issubset(proof.taints)
+        ):
+            raise ValueError("ct_product_source_invalid")
+        if ref == proof.model_source_ref and (
+            descriptor.source_type != "model"
+            or descriptor.fact_authority != "model_judgment"
+            or descriptor.trust != "unknown"
+        ):
+            raise ValueError("ct_product_model_source_invalid")
+        tainted |= descriptor.trust == "untrusted" or bool(
+            {"UNTRUSTED", "EXTERNAL_INSTRUCTION", "PERSISTENT_UNTRUSTED"}
+            & set(descriptor.initial_taints)
+        )
+    for ref in proof.memory_refs:
+        facts = [
+            fact
+            for fact in inputs.upstream_memory_facts.values()
+            if fact.memory_id == ref
+        ]
+        if ref == proof.first_write_memory_ref:
+            if facts:
+                raise ValueError("ct_product_memory_not_absent")
+            continue
+        if len(facts) != 1 or not set(facts[0].taints).issubset(proof.taints):
+            raise ValueError("ct_product_memory_invalid")
+        tainted |= facts[0].trust_state in {"tainted", "quarantined"}
+    if inputs.server_sensitive_evidence:
+        taints.add("SENSITIVE")
+    if inputs.server_credential_evidence:
+        taints.update(("CREDENTIAL", "SENSITIVE"))
+    return proof, action, [label for label in TAINT_ORDER if label in taints], tainted
+
+
+def _handle_product_action(event: GuardEvent, inputs: FactBuildInputs) -> _PartialFacts:
+    """Compiler-proved scalar transport; model control stays possible.
+
+    Exact edges assert only that the complete current arguments copy an
+    accepted output, or that the actual content is addressed to the registry's
+    final sink. They never assert exact derivation from the model's inputs.
+    """
+    proof, action, taints, tainted = _product_inputs(event, inputs)
+    flows: list[FlowFact] = []
+
+    def add(
+        source: str,
+        target: str,
+        relation: str,
+        *,
+        control: bool = False,
+        labels: list[str] | None = None,
+    ) -> None:
+        flow = _flow(
+            event=event,
+            scope_digest=inputs.scope_digest,
+            index=len(flows),
+            source_ref=source,
+            target_ref=target,
+            relation=relation,
+            strength="possible" if control else "exact",
+            origin="semantic_inferred" if control else "observed",
+            taints=taints if labels is None else labels,
+        )
+        flows.append(flow.model_copy(update={"producer": PRODUCT_FACT_PRODUCER}))
+
+    action_ref = f"action:{action.action_id}"
+    for ref in proof.direct_source_refs:
+        add(ref, action_ref, "influenced_by", control=True)
+    # This exact edge starts at the generated output, not its opaque inputs.
+    add(proof.model_source_ref, action_ref, "derived_from")
+    memories: tuple[MemoryFact, ...] = ()
+    if event.event_type == "memory_write_proposed":
+        payload = cast(MemoryEventPayload, event.payload)
+        memory_ref = proof.first_write_memory_ref
+        if (
+            memory_ref is None
+            or not payload.will_persist
+            or not any(
+                binding.argument_pointer == "/value"
+                and binding.sink_role == "content"
+                and binding.resource_ref == memory_ref
+                for binding in proof.bindings
+            )
+        ):
+            raise ValueError("ct_product_memory_binding_invalid")
+        memory_taints = set(taints)
+        if tainted:
+            memory_taints.add("PERSISTENT_UNTRUSTED")
+        ordered_taints = [label for label in TAINT_ORDER if label in memory_taints]
+        memories = (
+            MemoryFact(
+                memory_id=memory_ref,
+                change_id=None,
+                change_status=inputs.memory_change_status,
+                trust_state=(
+                    "quarantined"
+                    if inputs.memory_change_status == "quarantined"
+                    else "tainted" if tainted else "unknown"
+                ),
+                taints=cast(Any, ordered_taints),
+                source_refs=[*proof.direct_source_refs, action_ref],
+                last_write_sequence=None,
+                last_read_sequence=None,
+                evidence_refs=[],
+            ),
+        )
+        add(
+            proof.model_source_ref,
+            f"memory:{memory_ref}",
+            "persisted_to",
+            labels=ordered_taints,
+        )
+    elif event.event_type == "message_send_proposed":
+        if len(action.destinations) != 1 or not any(
+            binding.argument_pointer == "/message" and binding.sink_role == "content"
+            for binding in proof.bindings
+        ):
+            raise ValueError("ct_product_message_binding_invalid")
+        destination = action.destinations[0]
+        if destination.resolution_status != "resolved":
+            raise ValueError("ct_product_message_destination_invalid")
+        add(proof.model_source_ref, destination.canonical_id, "sent_to")
+    else:
+        for relation, resources in (
+            ("written_to", action.destinations),
+            ("read_from", action.resources),
+        ):
+            for resource in resources:
+                add(
+                    action_ref,
+                    resource.canonical_id,
+                    relation,
+                    labels=(taints if relation == "written_to" else []),
+                )
+    current = RecentActionFact(
+        action_id=action.action_id,
+        event_id=action.event_id,
+        agent_id=action.agent_id,
+        branch_id=action.branch_id,
+        parent_event_ids=list(action.parent_event_ids),
+        runtime_sequence=None,
+        action_type=action.action_type,
+        impact=action.impact,
+        effects=action.effects,
+        resource_ids=[resource.canonical_id for resource in action.resources],
+        destination_ids=[resource.canonical_id for resource in action.destinations],
+        data_refs=list(proof.direct_source_refs),
+        authority_status="unknown",
+        final_decision=None,
+        evidence_refs=[],
+    )
+    return _PartialFacts(
+        flow_facts=tuple(flows), memory_facts=memories, current_action=current
+    )
+
+
 #: 事件分派表（02 §8.1-8.7）：Wave 1 读路径四事件 + Wave 2 写侧三
 #: 事件；未注册事件类型视为未知 → fail-closed（02 §13）。
 _EVENT_HANDLERS: types.MappingProxyType = types.MappingProxyType(
@@ -947,6 +1146,12 @@ def build_transient_facts(
         partial = _PartialFacts()
     else:
         try:
+            if inputs.product_data is not None and event.event_type not in {
+                "tool_call_proposed",
+                "message_send_proposed",
+                "memory_write_proposed",
+            }:
+                raise ValueError("ct_product_event_invalid")
             partial = handler(event, inputs)
         except Exception:
             logger.warning(

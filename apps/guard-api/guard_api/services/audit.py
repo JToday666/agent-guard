@@ -146,12 +146,26 @@ class AuditService:
                 # against the approval row / consume CAS. Exact replays bypass
                 # live-state validation so later expiry or revocation cannot
                 # invalidate evidence already committed to the immutable chain.
-                if self.store.get_audit_event(receipt.audit_id) is None:
+                previous = self.store.get_audit_event(receipt.audit_id)
+                if previous is None:
                     self._validate_runtime_outcome_authority(receipt, parent)
                 self._validate_product_receipt_ack(receipt, parent, auth_context)
                 event = sanitize_audit_event(
                     AuditEvent.model_validate(receipt.model_dump(mode="json"))
                 )
+                if receipt.metadata.activation_ack is not None:
+                    from .product_model_content import (
+                        ACK_VALIDATION_KEY,
+                        build_product_ack_validation,
+                    )
+
+                    # Only the server may create this hash-only validation
+                    # stamp, after the original ACK verification above. Old
+                    # accepted receipts keep their exact replay representation.
+                    if previous is None or ACK_VALIDATION_KEY in previous.metadata:
+                        event.metadata[ACK_VALIDATION_KEY] = (
+                            build_product_ack_validation(receipt, parent)
+                        )
                 is_new = self.store.add_audit_event(event)
         else:
             event = sanitize_audit_event(event)
@@ -631,6 +645,8 @@ class AuditService:
         decision_authority_evidence: dict[str, object] | None = None,
         decision_authority: DecisionAuthority | None = None,
         audit_id: str | None = None,
+        product_model_content: dict[str, object] | None = None,
+        product_action_data: dict[str, object] | None = None,
     ) -> AuditEvent:
         """写入 policy_evaluation 审计记录。
 
@@ -669,11 +685,19 @@ class AuditService:
             decision_authority_evidence=decision_authority_evidence,
             decision_authority=decision_authority,
             audit_id=audit_id,
+            product_model_content=product_model_content,
+            product_action_data=product_action_data,
             evidence_content_preview_enabled=self.evidence_content_preview_enabled,
         )
         audit_event = sanitize_audit_event(audit_event)
         self.store.add_audit_event(audit_event)
         persisted = self.store.get_audit_event(audit_event.audit_id) or audit_event
+        if product_action_data is not None:
+            from .product_model_content import read_product_action_data
+
+            actual_data = read_product_action_data(persisted)
+            if actual_data.proof_digest != product_action_data.get("proof_digest"):
+                raise CriticalDecisionEvidenceError("Product action proof mismatch")
         if decision_authority_evidence is not None:
             self._validate_decision_authority_commit(
                 persisted,

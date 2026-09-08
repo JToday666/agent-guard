@@ -48,6 +48,11 @@ from agentguard_core.signals.models import (
 #: 并评估 projector reprojection。
 FACT_BUILDER_VERSION = "ct-fact-2"
 
+# Scoped compiler-backed action semantics. Historical producers and their
+# ct-fact-1/2 digest interpretation remain unchanged.
+PRODUCT_FACT_BUILDER_VERSION = "ct-product-fact-1"
+PRODUCT_FACT_PRODUCER = "ct-product-fact-builder-1"
+
 #: Gate A 之前已持久化信封使用的 fact-builder 版本。旧审计记录没有
 #: 显式版本字段，replay/backfill 必须按该版本重算历史 bundle digest，
 #: 不能用当前全局版本静默改写摘要口径。
@@ -91,10 +96,24 @@ class TransientSecurityFacts(BaseModel):
     overlay_digest: str = ""
 
 
+def fact_builder_version_for_bundle(bundle: TransientSecurityFacts) -> str:
+    """Select the explicit producer contract without changing old bundle JSON.
+
+    Product action bundles always contain control flows. Mixing historical and
+    Product producers in one current-event bundle is not a supported contract.
+    """
+    producers = {flow.producer for flow in bundle.flow_facts}
+    if PRODUCT_FACT_PRODUCER in producers:
+        if producers != {PRODUCT_FACT_PRODUCER}:
+            raise ValueError("ct_product_fact_producer_mixed")
+        return PRODUCT_FACT_BUILDER_VERSION
+    return FACT_BUILDER_VERSION
+
+
 def bundle_digest_projection(
     bundle: TransientSecurityFacts,
     *,
-    fact_builder_version: str = FACT_BUILDER_VERSION,
+    fact_builder_version: str | None = None,
 ) -> dict[str, Any]:
     """Bundle digest 白名单投影（01 §29 白名单冻结规则）。
 
@@ -108,7 +127,11 @@ def bundle_digest_projection(
     （防自引用）。
     """
     return {
-        "fact_builder_version": fact_builder_version,
+        "fact_builder_version": (
+            fact_builder_version
+            if fact_builder_version is not None
+            else fact_builder_version_for_bundle(bundle)
+        ),
         "event_id": bundle.event_id,
         "scope_digest": bundle.scope_digest,
         "source_facts": [fact_digest_projection(fact) for fact in bundle.source_facts],
@@ -120,7 +143,7 @@ def bundle_digest_projection(
 def compute_bundle_digest(
     bundle: TransientSecurityFacts,
     *,
-    fact_builder_version: str = FACT_BUILDER_VERSION,
+    fact_builder_version: str | None = None,
 ) -> str:
     """单次 ``canonical_sha256(白名单投影)``，``sha256:`` 前缀（01 §29）。
 

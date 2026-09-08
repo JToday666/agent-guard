@@ -28,6 +28,7 @@ from ..signals.models import CoverageDomain
 from .coverage import GapContext
 from .eviction import EvictionReport
 from .facts import GapRange, StateWatermarks
+from .product_data import VerifiedProductData
 from .state import OnlineSecurityState
 
 __all__ = [
@@ -69,6 +70,7 @@ class CoverageContext(BaseModel):
     truncated: tuple[CoverageDomain, ...] = ()
     provider_available: Mapping[str, bool] = Field(default_factory=dict)
     authoritative_head_revision: int | None = None
+    product_data: VerifiedProductData | None = None
 
 
 #: 单域 coverage 判定纯函数签名：输入在线状态 + 完整上下文，输出

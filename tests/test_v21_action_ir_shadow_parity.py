@@ -239,8 +239,34 @@ def _import_references(source: str) -> list[str]:
     ``node.names`` 的 alias 名，保证 ``from ..actions import builder``、
     ``from . import actions`` 等自然写法都能被检查到。
     """
+    tree = ast.parse(source)
+    # Static public-API annotations do not load ActionIR on the legacy path.
+    # Rebound sentinels and runtime conditional/else branches remain checked.
+    typing_sentinel = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == "typing"
+        and any(alias.name == "TYPE_CHECKING" and alias.asname is None for alias in node.names)
+        for node in tree.body
+    ) and not any(
+        isinstance(node, ast.Name)
+        and node.id == "TYPE_CHECKING"
+        and isinstance(node.ctx, ast.Store)
+        for node in ast.walk(tree)
+    )
+    ignored = {
+        id(child)
+        for node in ast.walk(tree)
+        if typing_sentinel
+        and isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "TYPE_CHECKING"
+        for statement in node.body
+        for child in ast.walk(statement)
+    }
     references: list[str] = []
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(tree):
+        if id(node) in ignored:
+            continue
         if isinstance(node, ast.Import):
             references.extend(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -278,6 +304,9 @@ def test_decision_path_does_not_import_actions(relative_path: str) -> None:
         "import agentguard_core.actions",
         "from agentguard_core.actions.models import ActionIR",
         "from ..actions.canonical_json import canonical_sha256",
+        "from typing import TYPE_CHECKING\nTYPE_CHECKING = True\nif TYPE_CHECKING:\n from .actions import builder",
+        "from typing import TYPE_CHECKING\nif not TYPE_CHECKING:\n from .actions import builder",
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n pass\nelse:\n from .actions import builder",
     ],
 )
 def test_isolation_guard_detects_actions_imports(sample_source: str) -> None:
@@ -286,3 +315,14 @@ def test_isolation_guard_detects_actions_imports(sample_source: str) -> None:
         _assert_no_actions_references(
             "sample.py", _import_references(sample_source)
         )
+
+
+def test_isolation_guard_accepts_static_product_type_annotations() -> None:
+    _assert_no_actions_references(
+        "sample.py",
+        _import_references(
+            "from typing import TYPE_CHECKING\n"
+            "if TYPE_CHECKING:\n"
+            " from .actions.product_tools import VerifiedProductTool\n"
+        ),
+    )

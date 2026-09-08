@@ -282,6 +282,18 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             if isinstance(source_evidence, dict)
             else None
         )
+        model_content_envelope = (
+            source_evidence.get("product_model_content")
+            if isinstance(source_evidence, dict)
+            and event.record_type == "policy_evaluation"
+            else None
+        )
+        product_action_envelope = (
+            source_evidence.get("product_action_data")
+            if isinstance(source_evidence, dict)
+            and event.record_type == "policy_evaluation"
+            else None
+        )
         raw_evidence = redact_structure(event.evidence)
         if isinstance(raw_evidence, dict):
             replay_decision = raw_evidence.pop("guard_decision", None)
@@ -300,6 +312,8 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             # Critical/no-drop authority is validated from the pre-redaction
             # source and restored after the generic evidence budget pass.
             raw_evidence.pop("decision_authority", None)
+            raw_evidence.pop("product_model_content", None)
+            raw_evidence.pop("product_action_data", None)
         else:
             replay_decision = None
             v21_envelope = None
@@ -352,6 +366,31 @@ def sanitize_audit_event(event: AuditEvent) -> AuditEvent:
             if evidence_serialized_size(candidate) > MAX_EVIDENCE_BYTES:
                 raise CriticalDecisionEvidenceError(
                     "critical decision authority cannot survive audit sanitization"
+                )
+            evidence = candidate
+        if model_content_envelope is not None:
+            from .product_model_content import (
+                CONTENT_KEY,
+                read_product_model_content,
+            )
+
+            commitment = read_product_model_content(model_content_envelope)
+            candidate = {**evidence, CONTENT_KEY: commitment.model_dump(mode="json")}
+            if evidence_serialized_size(candidate) <= MAX_EVIDENCE_BYTES:
+                evidence = candidate
+        if product_action_envelope is not None:
+            from agentguard_core.security_context.product_data import (
+                VerifiedProductData,
+            )
+
+            proof = VerifiedProductData.model_validate(product_action_envelope)
+            candidate = {
+                **evidence,
+                "product_action_data": proof.model_dump(mode="json"),
+            }
+            if evidence_serialized_size(candidate) > MAX_EVIDENCE_BYTES:
+                raise CriticalDecisionEvidenceError(
+                    "Product action proof exceeds budget"
                 )
             evidence = candidate
 

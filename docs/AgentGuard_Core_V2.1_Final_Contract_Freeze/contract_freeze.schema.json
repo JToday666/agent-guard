@@ -12,6 +12,22 @@
   "properties": {
     "schema_version": {"const": "2.1-final-candidate"},
     "status": {"enum": ["candidate-for-freeze", "frozen"]},
+    "product_data_amendment": {
+      "type": "object",
+      "required": ["version", "authorized_at", "authorization_source", "document", "model_control_implies_exact_data_flow", "complete_evidence_grants_authority", "langgraph_strong_binding_required", "openclaw_strong_binding", "historical_records_without_proof"],
+      "properties": {
+        "version": {"const": "product-data-contract-1"},
+        "authorized_at": {"const": "2026-09-08"},
+        "authorization_source": {"const": "explicit_user_confirmation_in_codex_task"},
+        "document": {"const": "11_Product数据与控制影响修正.md"},
+        "model_control_implies_exact_data_flow": {"const": false},
+        "complete_evidence_grants_authority": {"const": false},
+        "langgraph_strong_binding_required": {"const": true},
+        "openclaw_strong_binding": {"const": false},
+        "historical_records_without_proof": {"const": "retain_conservative_semantics"}
+      },
+      "additionalProperties": false
+    },
     "repository": {
       "type": "object", "required": ["full_name", "remote_dev_sha_at_freeze", "core_design_parent_sha"],
       "properties": {

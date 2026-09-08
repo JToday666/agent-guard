@@ -141,6 +141,13 @@ current_state_version == delta.base_state_version
 - capability projection；
 - coverage computation。
 
+2026-09-08 [Product 数据证明修正](11_Product数据与控制影响修正.md)采用独立的
+产品规范化、数据证明、必检计划和 `ct-product-fact-1` 动作事实映射版本。
+新映射只作用于完整证明绑定的当前 Product 动作，不改写 CT 已持久化事实或
+旧记录的 coverage 含义；事实容器不变，因此不重标历史 `projector_version`。
+新证明及其完整摘要必须随决策保留，缺失时保持旧保守规则；任何实际修改历史
+事实构造、污点传播或重放解释的后续变更仍适用上述 projector 升版要求。
+
 ---
 
 ## 5. OnlineSecurityState 容器

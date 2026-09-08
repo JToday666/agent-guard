@@ -89,6 +89,8 @@ def build_audit_event(
     decision_authority: DecisionAuthority | None = None,
     audit_id: str | None = None,
     evidence_content_preview_enabled: bool = False,
+    product_model_content: dict[str, object] | None = None,
+    product_action_data: dict[str, object] | None = None,
 ) -> AuditEvent:
     """Build the Guard API 0.4 policy_evaluation AuditEvent (§8-§10).
 
@@ -153,6 +155,7 @@ def build_audit_event(
         event.metadata,
         description.metadata,
     )
+    metadata.pop("product_model_task", None)
     if extra_metadata:
         for key, value in extra_metadata.items():
             if value in (None, ""):
@@ -325,8 +328,76 @@ def build_audit_event(
             raise CriticalDecisionEvidenceError(
                 "decision authority evidence exceeds the audit evidence budget"
             )
+    if (
+        event.event_type == "model_input_prepared"
+        and decision_authority_evidence is not None
+    ):
+        from agentguard_core.decisions.product import ProductDecisionAuthorityEvidenceV1
+        from .competition import parse_decision_authority_evidence_payload
+
+        selected_model = parse_decision_authority_evidence_payload(bounded_authority)
+        if (
+            isinstance(selected_model, ProductDecisionAuthorityEvidenceV1)
+            and selected_model.event_id == event.event_id
+            and selected_model.event_type == event.event_type
+            and selected_model.runtime == event.runtime
+            and selected_model.selected_decision == decision
+            and selected_model.decision_authority == decision_authority
+            and selected_model.decision_authority.source == "v21"
+            and selected_model.decision_authority.mode == "active"
+            and selected_model.decision_authority.selection_basis == "profile_all"
+        ):
+            # This is only the canonical model action anchor, never an invocation.
+            links["action_id"] = canonical_action_id(event)
+            metadata["action_id"] = links["action_id"]
+            metadata["action_name"] = "model_call"
     # 只可能携带 audit_id（str）：标注收窄为 dict[str, str]，避免
     # **kwargs 展开时 pyright 无法把 object 值匹配到 str 参数。
+    if product_model_content is not None:
+        from .product_model_content import CONTENT_KEY, read_product_model_content
+
+        commitment = read_product_model_content(product_model_content)
+        # A caller-controlled metadata object is never an evidence input.
+        # Bind the compiler's commitment to this exact selected authority.
+        if decision_authority_evidence is None:
+            raise CriticalDecisionEvidenceError("Product content authority unavailable")
+        from agentguard_core.decisions.product import ProductDecisionAuthorityEvidenceV1
+        from .competition import parse_decision_authority_evidence_payload
+
+        selected = parse_decision_authority_evidence_payload(
+            decision_authority_evidence
+        )
+        if (
+            not isinstance(selected, ProductDecisionAuthorityEvidenceV1)
+            or event.event_type != "model_output_produced"
+            or commitment.model_output_event_id != event.event_id
+            or commitment.model_output_authority_digest
+            != canonical_sha256(selected.model_dump(mode="json"))
+            or decision.decision != "allow"
+            or decision_authority != selected.decision_authority
+        ):
+            raise CriticalDecisionEvidenceError("Product content authority mismatch")
+        candidate = {**evidence, CONTENT_KEY: commitment.model_dump(mode="json")}
+        if evidence_serialized_size(candidate) <= MAX_EVIDENCE_BYTES:
+            evidence = candidate
+        # No truncated proof is issued. Missing content evidence makes the
+        # later action unavailable even when the output itself was allowed.
+
+    if product_action_data is not None:
+        if decision_authority is None or decision_authority_evidence is None:
+            raise CriticalDecisionEvidenceError("Product action authority unavailable")
+        from agentguard_core.security_context.product_data import VerifiedProductData
+
+        proof = VerifiedProductData.model_validate(product_action_data)
+        if proof.event_id != event.event_id or proof.action_id != description.action_id:
+            raise CriticalDecisionEvidenceError(
+                "Product action proof identity mismatch"
+            )
+        candidate = {**evidence, "product_action_data": proof.model_dump(mode="json")}
+        if evidence_serialized_size(candidate) > MAX_EVIDENCE_BYTES:
+            raise CriticalDecisionEvidenceError("Product action proof exceeds budget")
+        evidence = candidate
+
     audit_kwargs: dict[str, str] = {}
     if audit_id is not None:
         audit_kwargs["audit_id"] = audit_id
@@ -357,7 +428,12 @@ def build_audit_event(
         return built
     dumped = built.model_dump(mode="json")
     dumped["decision_authority"] = decision_authority.model_dump(mode="json")
-    return AuditEvent.model_validate(dumped)
+    result = AuditEvent.model_validate(dumped)
+    if product_action_data is not None:
+        from .product_model_content import read_product_action_data
+
+        read_product_action_data(result)
+    return result
 
 
 def _policy_evaluation_evidence(

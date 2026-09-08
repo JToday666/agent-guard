@@ -70,6 +70,8 @@ from agentguard_core import (
 )
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.models import ActionIR
+from agentguard_core.actions.product_tools import VerifiedProductTool
+from agentguard_core.security_context.product_data import VerifiedProductData
 from agentguard_core.authority import TaskAuthorityError, compile_task_authority
 from agentguard_core.authority.models import EvaluationClock, SecurityStateScope
 from agentguard_core.decisions.evidence import (
@@ -133,6 +135,8 @@ from .v21_shadow import (
 if TYPE_CHECKING:
     from agentguard_core.security_context import AssessmentTransientFacts
     from agentguard_core.semantic.models import SemanticJudgment
+    from agentguard_core.decisions.activation_ack import ActivationAckV1
+    from .product_tool_catalog import ProductToolCatalog
 
     from .product_activation import (
         FrozenProductActivation,
@@ -255,6 +259,8 @@ class V21PhaseAPrepared:
     state_authority_digest: str | None
     auth_context: AuthContext | None = None
     runtime_binding: ResolvedRuntimeBinding | None = None
+    product_tool: VerifiedProductTool | None = None
+    product_data: VerifiedProductData | None = None
 
 
 @dataclass(frozen=True)
@@ -297,6 +303,8 @@ class V21PipelineMaterials:
     # （provider 缺席/门控未过/异常收敛时为 None）。只供 Phase B
     # 证据/评测消费，绝不改变决策。
     semantic_judgment: "SemanticJudgment | None" = None
+    product_tool: VerifiedProductTool | None = None
+    product_data: VerifiedProductData | None = None
 
 
 @dataclass(frozen=True)
@@ -390,6 +398,7 @@ def _product_replay_authority_digest(
     policy_revision: int,
     policy_digest: str,
     task_authority_projection: dict[str, Any],
+    product_catalog_digest: str | None = None,
 ) -> str:
     """Bind replay-stable Product authority while excluding mutable state.
 
@@ -402,6 +411,11 @@ def _product_replay_authority_digest(
         {
             "schema_version": "product-replay-authority-anchor/1.0",
             "event_digest": event_digest,
+            **(
+                {"product_catalog_digest": product_catalog_digest}
+                if product_catalog_digest is not None
+                else {}
+            ),
             "activation": {
                 "content_digest": activation_content_digest,
                 **activation_projection,
@@ -512,6 +526,8 @@ def _phase_a_output_digest(
     action_ir: ActionIR | None,
     consumed_overlay_digest: str | None,
     semantic_judgment: "SemanticJudgment | None",
+    product_tool: VerifiedProductTool | None = None,
+    product_data: VerifiedProductData | None = None,
 ) -> str:
     """Freeze mutable assessment outputs until Phase B consumes them."""
 
@@ -528,6 +544,18 @@ def _phase_a_output_digest(
                 semantic_judgment.model_dump(mode="json")
                 if semantic_judgment is not None
                 else None
+            ),
+            **(
+                {
+                    "product_tool_semantics_digest": product_tool.semantics_digest,
+                    "product_data": (
+                        product_data.model_dump(mode="json")
+                        if product_data is not None
+                        else None
+                    ),
+                }
+                if product_tool is not None
+                else {}
             ),
         }
     )
@@ -630,6 +658,19 @@ class V21PipelineService:
             runtime_binding_resolver or RuntimeBindingResolver()
         )
         self._product_activation_authority = product_activation_authority
+        self._product_tool_catalog: ProductToolCatalog | None = None
+        if settings.v21_product_tool_catalog_path is not None:
+            from .product_tool_catalog import load_product_tool_catalog  # noqa: PLC0415
+
+            activation = self._runtime_binding_resolver.product_activation
+            if activation is None:
+                raise GuardApiConfigurationError(
+                    "Product tool catalog requires verified Product activation"
+                )
+            self._product_tool_catalog = load_product_tool_catalog(
+                settings.v21_product_tool_catalog_path,
+                activation=activation.bundle,
+            )
         self._task_scope_keyring = (
             settings.task_scope_keyring()
             if self._runtime_binding_resolver.product_active
@@ -683,6 +724,45 @@ class V21PipelineService:
         return self._mode == "active"
 
     @property
+    def product_tool_catalog(self) -> "ProductToolCatalog | None":
+        """Server-loaded inventory; event metadata never creates this object."""
+        return self._product_tool_catalog
+
+    def _product_action_materials(
+        self,
+        event: GuardEvent,
+        snapshot: SecuritySnapshot | None,
+        *,
+        activation_ack: "ActivationAckV1 | None" = None,
+    ) -> tuple[VerifiedProductTool | None, VerifiedProductData | None]:
+        catalog = self._product_tool_catalog
+        if catalog is None:
+            return None, None
+        activation = self.product_activation
+        if not self.product_active or activation is None or snapshot is None:
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_TOOL_CATALOG_UNAVAILABLE"
+            )
+        try:
+            tool = catalog.resolve(
+                event,
+                activation=activation.bundle,
+                activation_ack=activation_ack,
+            )
+            if tool is None:
+                return None, None
+            from .product_model_content import (
+                verify_product_model_content,
+            )  # noqa: PLC0415
+
+            proof = verify_product_model_content(self._store, event, snapshot, tool)
+            return tool, proof
+        except Exception as exc:  # noqa: BLE001 - no model data in diagnostics.
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTION_CONTENT_UNAVAILABLE"
+            ) from exc
+
+    @property
     def product_active(self) -> bool:
         """Whether this pipeline is bound to a verified Product activation."""
 
@@ -730,12 +810,22 @@ class V21PipelineService:
         """Revalidate the caller ACK against this exact frozen authority."""
 
         authority = self._product_authority_service()
-        _, observation = authority.enforce_evaluation_with_observation(
+        ack, observation = authority.enforce_evaluation_with_observation(
             event,
             auth_context,
             activation_ack_token,
             reference_time=reference_time,
         )
+        if self._product_tool_catalog is not None:
+            try:
+                self._product_tool_catalog.verify_current(
+                    activation=authority.activation.bundle,
+                    activation_ack=ack,
+                )
+            except Exception as exc:  # noqa: BLE001 - fixed external error.
+                raise V21OfficialEvaluationUnavailableError(
+                    "V21_PRODUCT_TOOL_CATALOG_UNAVAILABLE"
+                ) from exc
         return observation
 
     @contextmanager
@@ -1143,6 +1233,11 @@ class V21PipelineService:
             policy_revision=policy_record.revision,
             policy_digest=policy_digest,
             task_authority_projection=task_projection,
+            product_catalog_digest=(
+                self._product_tool_catalog.content_digest
+                if self._product_tool_catalog is not None
+                else None
+            ),
         )
         if audit.metadata.get("product_replay_authority_digest") != replay_digest:
             raise V21OfficialEvaluationUnavailableError(PRODUCT_AUTHORITY_NOT_CURRENT)
@@ -1470,6 +1565,7 @@ class V21PipelineService:
         degraded_kind: PhaseADegradedKind | None = (
             None if snapshot is not None else "snapshot_absent"
         )
+        product_tool, product_data = self._product_action_materials(event, snapshot)
         return V21PhaseAPrepared(
             event_id=event.event_id,
             event_digest=event_digest,
@@ -1503,6 +1599,8 @@ class V21PipelineService:
             state_authority_digest=state_authority_digest,
             auth_context=auth_context,
             runtime_binding=runtime_binding,
+            product_tool=product_tool,
+            product_data=product_data,
         )
 
     def _finish_phase_a(
@@ -1560,10 +1658,23 @@ class V21PipelineService:
             if current_binding != prepared.runtime_binding:
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_IDENTITY_MISMATCH)
 
+        product_tool, product_data = self._product_action_materials(
+            event, prepared.snapshot
+        )
+        if (
+            product_tool != prepared.product_tool
+            or product_data != prepared.product_data
+        ):
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTION_CONTENT_CHANGED"
+            )
         assess_kwargs: dict[str, Any] = {
             "server_secret": self._server_secret,
             "detection_results": prepared.detection_results,
         }
+        if product_tool is not None:
+            assess_kwargs["product_tool"] = product_tool
+            assess_kwargs["product_data"] = product_data
         if prepared.snapshot is not None:
             assess_kwargs["revoked_grant_ids"] = prepared.revoked_grant_ids
         # Do not pass the new keyword on the compatibility path. Besides keeping
@@ -1627,6 +1738,8 @@ class V21PipelineService:
                 action_ir=outcome.action_ir,
                 consumed_overlay_digest=outcome.consumed_overlay_digest,
                 semantic_judgment=semantic_judgment,
+                product_tool=product_tool,
+                product_data=product_data,
             ),
             bundle=prepared.bundle,
             policy_revision=prepared.policy_revision,
@@ -1647,6 +1760,8 @@ class V21PipelineService:
             auth_context=prepared.auth_context,
             runtime_binding=prepared.runtime_binding,
             semantic_judgment=semantic_judgment,
+            product_tool=product_tool,
+            product_data=product_data,
         )
 
     def _resolve_snapshot_v(
@@ -1781,6 +1896,17 @@ class V21PipelineService:
             activation_ack_token,
             reference_time=checked_at,
         )
+
+        current_tool, current_data = self._product_action_materials(
+            event, materials.snapshot
+        )
+        if (
+            current_tool != materials.product_tool
+            or current_data != materials.product_data
+        ):
+            raise V21OfficialEvaluationUnavailableError(
+                "V21_PRODUCT_ACTION_CONTENT_CHANGED"
+            )
 
         binding = materials.runtime_binding
         self._runtime_binding_resolver.revalidate(
@@ -1934,6 +2060,13 @@ class V21PipelineService:
             {
                 "schema_version": "product-authority-anchor/1.0",
                 "event_digest": materials.event_digest,
+                **(
+                    {
+                        "product_catalog_digest": self._product_tool_catalog.content_digest
+                    }
+                    if self._product_tool_catalog is not None
+                    else {}
+                ),
                 "activation": {
                     "content_digest": activation.content_digest,
                     **activation_projection,
@@ -1975,6 +2108,11 @@ class V21PipelineService:
                 policy_revision=policy_record.revision,
                 policy_digest=policy_digest,
                 task_authority_projection=task_authority_projection,
+                product_catalog_digest=(
+                    self._product_tool_catalog.content_digest
+                    if self._product_tool_catalog is not None
+                    else None
+                ),
             ),
             checked_at=checked_at,
         )
@@ -2057,6 +2195,8 @@ class V21PipelineService:
                 action_ir=materials.action_ir,
                 consumed_overlay_digest=materials.consumed_overlay_digest,
                 semantic_judgment=materials.semantic_judgment,
+                product_tool=materials.product_tool,
+                product_data=materials.product_data,
             ):
                 raise RuntimeBindingResolutionError(PRODUCT_TASK_SCOPE_INVALID)
             if materials.runtime_binding is None:

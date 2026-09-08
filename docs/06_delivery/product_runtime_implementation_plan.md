@@ -28,7 +28,8 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 | 03 | OpenClaw 可信 handshake、ACK 会话和历史 carrier | 02 |
 | 04 | LangGraph 加密持久回执、结构化状态、恢复与熔断 | 03 |
 | 05 | OpenClaw required 持久回执、拒绝隔离与熔断 | 04 |
-| 06 | LangGraph 统一执行模板、原生 StateGraph 和七事件链 | 05 |
+| 06a | 独立契约修正：可信工具语义、模型数据承诺与控制影响分离 | 05 |
+| 06 | LangGraph 统一执行模板、原生 StateGraph 和七事件链 | 06a |
 | 07 | OpenClaw tool/memory/message 的 official 动作链 | 06 |
 | 08 | OpenClaw context/model/result 的 official 内容链 | 07 |
 | 09 | 完整组合检查与显式启用，默认关闭 | 08 |
@@ -39,6 +40,12 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 实现中保留未接完产品链的注册限制。LangGraph 和 OpenClaw 的 ACK 更新不能
 替换在途动作的快照；无 lease 回执绑定 evaluate ACK，有 lease 回执绑定 consume ACK。
 开始确认失败不得调用工具，终态失败不得重新执行；持久回执补投只重发证据。
+
+2026-09-08 用户明确授权增加 06a：真实模型驱动的 `write/exec` 暴露出
+旧契约把模型控制影响的 `possible` 等同于实际参数数据缺证的问题。
+修正范围见[产品数据与控制影响契约](../AgentGuard_Core_V2.1_Final_Contract_Freeze/11_Product数据与控制影响修正.md)。
+该授权来自本次隔离验收任务，不代表人工审查已完成或生产风险接受；
+LangGraph strong binding、OpenClaw restricted allow_once 及全部残余边界不变。
 
 ## 最终验收
 
