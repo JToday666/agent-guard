@@ -9,6 +9,10 @@ import pytest
 
 from agentguard_core import ContextBuildPayload, ContextSource
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.actions.canonical_resources import (
+    ResourceNormalizationInput,
+    normalize_memory_resource,
+)
 from guard_api.security_state import SecurityStateService
 from guard_api.services.context_builder import ContextBuilderService
 from guard_api.services.ct_projection import CtProjectionService
@@ -56,9 +60,16 @@ def test_actual_product_plan_preserves_task_isolates_sources_and_rejects_drift(
         ),
         ("runtime", "unknown", "system", "Unverified Host system instructions.", False),
     ]
+    memory_id = normalize_memory_resource(
+        ResourceNormalizationInput(
+            resource_id="resource:context-memory",
+            memory_namespace=str(tmp_path / "memory.sqlite"),
+            target="fixture",
+        )
+    ).canonical_id
     sources = [
         dict(
-            source_id=f"local:{i}",
+            source_id=memory_id if kind == "memory" else f"local:{i}",
             source_type=kind,
             source_trust=trust,
             role=role,
@@ -68,7 +79,7 @@ def test_actual_product_plan_preserves_task_isolates_sources_and_rejects_drift(
     ]
     descriptors = [
         ContextSource(
-            source_id=f"local:{i}",
+            source_id=sources[i]["source_id"],
             source_type=kind,
             source_trust=trust,
             role=role,
