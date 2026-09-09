@@ -423,6 +423,71 @@ def test_all_nine_unit_archives_have_source_raw_hash_and_retained_install_bindin
 
 @pytest.mark.parametrize(
     "mutation",
+    [
+        "pnpm_pack_order",
+        "changed_value",
+        "added_field",
+        "duplicate_key",
+        "boolean_number",
+        "nested_json_format",
+        "source_bytes",
+    ],
+)
+def test_pnpm_pack_top_level_metadata_keeps_complete_source_equivalence(
+    tmp_path, mutation
+):
+    metadata = {
+        "name": c.NPM_DISTRIBUTION,
+        "version": c.NPM_VERSION,
+        "private": True,
+        "scripts": {"build": "tsc", "test": "node --test"},
+        "peerDependencies": {"openclaw": ">=2026.6.6 <2027.0.0"},
+    }
+    source_bytes = (json.dumps(metadata, indent=2) + "\n").encode()
+    fixture = unit_candidate.__wrapped__(
+        tmp_path, extra_node={"package.json": source_bytes}
+    )
+    members = fixture.members[c.NPM_DISTRIBUTION, "npm_tgz"].copy()
+    packed = metadata.copy()
+    packed["scripts"] = packed.pop("scripts")
+    if mutation == "changed_value":
+        packed["scripts"] = {"build": "unrelated-command", "test": "node --test"}
+    elif mutation == "added_field":
+        packed["unrequested"] = "extra-metadata"
+    elif mutation == "boolean_number":
+        packed["private"] = 1
+    packed_bytes = json.dumps(packed, indent=2).encode()
+    if mutation == "duplicate_key":
+        packed_bytes = packed_bytes[:-1] + b',"version":"0.1.0-rc.1"}'
+    members["package/package.json"] = packed_bytes
+    if mutation == "nested_json_format":
+        nested = "package/product-runtime/product/package.json"
+        members[nested] = json.dumps(json.loads(members[nested]), indent=2).encode()
+    elif mutation == "source_bytes":
+        members["package/LICENSE"] += b"\n"
+    item = next(a for a in fixture.manifest["artifacts"] if a["kind"] == "npm_tgz")
+    archive = fixture.root / item["file"]["path"]
+    _archive(archive, members)
+    item["file"] = _ref(fixture.root, archive)
+    source = c.safe_archive_members(fixture.source_path.read_bytes(), wheel=False)
+    if mutation == "pnpm_pack_order":
+        assert source_bytes != packed_bytes
+        artifacts = c.verify_artifacts(
+            EvidenceStore(fixture.root), fixture.manifest["artifacts"], source
+        )
+        npm = next(a for a in artifacts if a.kind == "npm_tgz")
+        assert len(artifacts) == 9
+        assert npm.raw_sha256 == sha256(archive.read_bytes())
+        assert npm.members["package/package.json"] == packed_bytes
+    else:
+        with pytest.raises(EvidenceError):
+            c.verify_artifacts(
+                EvidenceStore(fixture.root), fixture.manifest["artifacts"], source
+            )
+
+
+@pytest.mark.parametrize(
+    "mutation",
     ["missing", "duplicate", "revision", "schema", "conformance", "raw_hash"],
 )
 def test_candidate_manifest_rejects_incomplete_drift_or_circular_evidence(

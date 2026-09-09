@@ -21,6 +21,8 @@ import time
 from typing import Any
 import zipfile
 
+from agentguard_core.actions.canonical_json import canonical_sha256
+
 from .evidence import (
     EvidenceError,
     EvidenceStore,
@@ -434,6 +436,23 @@ def _check_source(artifact: VerifiedArtifact, source: dict[str, bytes]) -> None:
             if not name.startswith("package/"):
                 raise CandidateError("candidate_npm_member_root")
             local = name.removeprefix("package/")
+            if local == "package.json":
+                # Pinned pnpm pack moves scripts to the end and removes the
+                # trailing newline. Preserve archive/source raw hashes while
+                # comparing every metadata value with strict JSON types.
+                original = source.get(
+                    "packages/agentguard-openclaw-plugin/package.json"
+                )
+                if original is None:
+                    raise CandidateError("candidate_source_member_mismatch")
+                expected, packed = strict_json(original), strict_json(content)
+                if (
+                    type(expected) is not dict
+                    or type(packed) is not dict
+                    or canonical_sha256(expected) != canonical_sha256(packed)
+                ):
+                    raise CandidateError("candidate_source_member_mismatch")
+                continue
             if (
                 not local.startswith("dist/")
                 and source.get("packages/agentguard-openclaw-plugin/" + local)
