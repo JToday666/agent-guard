@@ -47,6 +47,7 @@ jobs:
       - name: Install locked environments
         run: |
           uv sync --locked --all-groups
+          uv lock --project apps/guard-api --check
           pnpm install --frozen-lockfile
 
       - name: Validate internal version mapping
@@ -62,10 +63,12 @@ jobs:
             "$BUILD_ROOT/aegis-agentguard-core" \
             "$BUILD_ROOT/aegis-agentguard-api" \
             "$BUILD_ROOT/aegis-agentguard-cli" \
+            "$BUILD_ROOT/agentguard-langgraph-adapter" \
             "$BUILD_ROOT/npm"
           uv build packages/agentguard-core --out-dir "$BUILD_ROOT/aegis-agentguard-core"
           uv build apps/guard-api --out-dir "$BUILD_ROOT/aegis-agentguard-api"
           uv build apps/cli --out-dir "$BUILD_ROOT/aegis-agentguard-cli"
+          uv build packages/agentguard-langgraph-adapter --out-dir "$BUILD_ROOT/agentguard-langgraph-adapter"
           pnpm --filter @agentguard-ai/openclaw-plugin build
           pnpm --filter @agentguard-ai/openclaw-plugin pack --pack-destination "$BUILD_ROOT/npm"
 
@@ -78,7 +81,7 @@ jobs:
       - name: Verify isolated OpenClaw plugin installation
         run: >-
           node scripts/verify-npm-tarball.mjs
-          "$BUILD_ROOT/npm/agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz"
+          "$BUILD_ROOT/npm/agentguard-ai-openclaw-plugin-0.1.0-rc.1.tgz"
 
       - name: Create and verify source-bound manifest
         run: |

@@ -200,6 +200,7 @@ test("fixture full registration witness contains the actual stable factories and
     profile,
     messagePermitBridge: bridge,
   });
+  assert.equal(fixturePlugin.plugin.version, "0.1.0-rc.1");
   const rows = [],
     channels = [];
   const api = {
@@ -637,6 +638,17 @@ test(
       root,
     ]);
     const installed = path.join(root, "package");
+    for (const relative of [
+      "package.json",
+      "openclaw.plugin.json",
+      "product-runtime/product/package.json",
+      "product-runtime/product/openclaw.plugin.json",
+    ])
+      assert.equal(
+        JSON.parse(readFileSync(path.join(installed, relative), "utf8"))
+          .version,
+        "0.1.0-rc.1",
+      );
     mkdirSync(path.join(installed, "node_modules"));
     const hostRoot = path.dirname(
       path.dirname(

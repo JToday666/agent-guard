@@ -40,7 +40,7 @@
 - Memory Guard 的 `commit` / `rollback` 目前只更新控制面变更记录，不会回滚或恢复真实 runtime memory。
 - action receipt 覆盖率、跨 run 回归阈值、完整生产运维、容器/包公开发布、可归档与可复现 SBOM、签名、provenance 和 Trusted Publishing 仍未完成。本轮仅为精确候选 SHA 本地生成并校验 SBOM，不构成发布或长期制品归档。
 - 多租户、用户登录、OAuth/SSO、自动备份与恢复不属于当前 Alpha 已有能力。
-- 公开 `v0.1.0-beta.1`/对应 npm 制品是 22 个 hook 名的基线；23-hook 只属于历史中间源码/证据；当前未发布源码要求 24 个唯一 hook 名并注册 25 个 handler，但包版本仍为 `0.1.0-beta.1`。本阶段不发布；下一次构建可发布制品前必须统一提升 Python/Node 版本和映射，禁止以同版本覆盖不同内容。
+- 公开 `v0.1.0-beta.1`/对应 npm 制品是 22 个 hook 名的基线；23-hook 只属于历史中间源码/证据；本 Alpha 快照的源码要求 24 个唯一 hook 名并注册 25 个 handler，当时包版本仍为 `0.1.0-beta.1`。后续 B10 已将当前 Python/Node 候选统一为 `0.1.0rc1` / `0.1.0-rc.1`，尚未发布或完成完整 RC；禁止以同版本覆盖历史 Beta 制品。
 - `scripts/` 已完成职责分类和兼容入口说明，但物理迁移与超大模块拆分尚未完成；继续拆分时必须保持公共 import、CLI 和 `/v1` 行为不变。
 - legacy benchmark 的 standalone LangGraph subprocess 已移除开发者机器默认路径，必须显式提供 agent command/path；但对应 849 项旧测试仍未进入门禁，它也不属于产品示例或 clean-clone acceptance。测试和依赖完成重整前不得把该 adapter 称为 Alpha 支持入口。
 - 本里程碑当时使用的四份 demo 设计/运行文档已在 2026-08-28 仓库收尾中从当前树移除；如需复盘只通过 Git 历史追溯，不恢复为产品入口。

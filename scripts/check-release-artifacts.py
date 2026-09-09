@@ -11,13 +11,15 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 
 EXPECTED_ARCHIVES = {
-    "aegis_agentguard_core-0.1.0b1-py3-none-any.whl",
-    "aegis_agentguard_core-0.1.0b1.tar.gz",
-    "aegis_agentguard_api-0.1.0b1-py3-none-any.whl",
-    "aegis_agentguard_api-0.1.0b1.tar.gz",
-    "aegis_agentguard_cli-0.1.0b1-py3-none-any.whl",
-    "aegis_agentguard_cli-0.1.0b1.tar.gz",
-    "agentguard-ai-openclaw-plugin-0.1.0-beta.1.tgz",
+    "aegis_agentguard_core-0.1.0rc1-py3-none-any.whl",
+    "aegis_agentguard_core-0.1.0rc1.tar.gz",
+    "aegis_agentguard_api-0.1.0rc1-py3-none-any.whl",
+    "aegis_agentguard_api-0.1.0rc1.tar.gz",
+    "aegis_agentguard_cli-0.1.0rc1-py3-none-any.whl",
+    "aegis_agentguard_cli-0.1.0rc1.tar.gz",
+    "agentguard_langgraph_adapter-0.1.0rc1-py3-none-any.whl",
+    "agentguard_langgraph_adapter-0.1.0rc1.tar.gz",
+    "agentguard-ai-openclaw-plugin-0.1.0-rc.1.tgz",
 }
 
 FORBIDDEN_NAME_PARTS = {
@@ -59,9 +61,9 @@ def validate(root: Path) -> list[str]:
     archive_paths = sorted(
         (
             path
-        for path in root.rglob("*")
-        if path.is_file()
-        and (path.suffix in {".whl", ".tgz"} or path.name.endswith(".tar.gz"))
+            for path in root.rglob("*")
+            if path.is_file()
+            and (path.suffix in {".whl", ".tgz"} or path.name.endswith(".tar.gz"))
         ),
         key=lambda path: path.relative_to(root).as_posix(),
     )

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-agentguard-cli"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 description = "Headless command-line control utility for AgentGuard"
 readme = "README.md"
 requires-python = ">=3.12"

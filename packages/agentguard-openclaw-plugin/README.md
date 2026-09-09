@@ -77,9 +77,9 @@ OpenClaw plugin config 示例：
 
 `agentId` 必须与 `agentguardctl credential issue --runtime openclaw --agent-id <id>` 签发时绑定的 agent 一致。`runtimeBindingId` 是与该 credential principal 一起可信下发的 `binding:<principal_id>`，不得从 evaluate 响应或工具参数学习；服务端一旦声明 execution lease，缺失或不匹配会在等待/consume 前 fail closed。`strongApprovalBindingEnabled` 已弃用，保留旧配置兼容，默认 `false`；它仅启用历史 canary 处理，不代表 Strong Binding。当前 OpenClaw hook API 无法在最终调用边界原子地 replace-and-seal 参数/消息，因此 heartbeat 的 C3 始终保持 false。插件会在 consume 前后复验完整 action snapshot，在成功时返回批准内容的深拷贝，并以最低安全整数优先级尽量成为最后修改 hook；同优先级或更低优先级的其他插件仍是明确的残余信任边界。`approvalTimeoutMs` 是审批等待与 consume 重试共享的唯一 deadline；每个 Guard API 请求的 `requestTimeoutMs` 同时覆盖 headers 和有界 body 读取/解析，JSON 响应最大 1 MiB，停滞、超限或无效响应均在插件内安全分类。409/410 不重试，网络、429、5xx/503 仅以完全相同请求在 deadline 内有界重试。插件只保留 lease/consumption ID，明文 lease token 在响应解析栈内验证后丢弃。读取对话内容的 hook 需要 `hooks.allowConversationAccess=true`，开发安装脚本会写入该设置。
 
-### V2.1 Product ACK 传输（产品启动仍关闭）
+### V2.1 Product ACK 传输（默认关闭，完整组合显式启动）
 
-已接入受保护本地清单、Product heartbeat、ACK 会话、evaluate/consume 请求头和历史 receipt carrier。传输只接受 `source=v21 / mode=active / selection_basis=profile_all`；响应身份来自本地清单的预期值，不从服务端输出反推。显式配置 official profile 仍在插件注册前拒绝，直到七事件消费者、加密持久投递和熔断完整接通。当前实际包仍是 `0.1.0-beta.1`，真实版本检查会在 HTTP 前拒绝 Product 握手。
+已接入受保护本地清单、Product heartbeat、ACK 会话、evaluate/consume 请求头和历史 receipt carrier。传输只接受 `source=v21 / mode=active / selection_basis=profile_all`；响应身份来自本地清单的预期值，不从服务端输出反推。兼容插件入口拒绝 official profile；独立 Product 入口校验七事件消费者、加密持久投递和熔断的完整组合后才允许显式启动。当前源码包版本为 `0.1.0-rc.1`，尚未发布或完成最终 Product Active 验收；安装包版本不匹配时仍在 HTTP 前拒绝握手。
 
 | 字段 | 默认与约束 |
 | --- | --- |

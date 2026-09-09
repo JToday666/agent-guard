@@ -240,7 +240,7 @@ test("manifest and independent observation preserve frozen restricted capabiliti
   const { manifest, observed } = await fixture(t);
   await manifest.assertUnchanged();
   await manifest.assertInstalledVersions();
-  assert.equal(synthetic.sourceVersion, "0.1.0-beta.1");
+  assert.equal(synthetic.sourceVersion, "0.1.0-rc.1");
   assert.equal(synthetic.actualHostVersion, "2026.7.1-2");
   assert.equal(manifest.data.plugin_version, synthetic.syntheticVersion);
   assert.equal(Object.isFrozen(manifest.data), true);
@@ -410,7 +410,7 @@ test("canonical manifest accepts one LF and detects identical atomic replacement
   await assert.rejects(withLf.assertUnchanged(), hasCode("manifest_changed"));
 });
 
-test("the actual beta package refuses startup before observation or HTTP", async (t) => {
+test("the actual rc1 package verifies its version but cannot start without a heartbeat ACK", async (t) => {
   const { manifest, observed } = await fixture(t, ActualManifest);
   let observations = 0,
     requests = 0;
@@ -426,10 +426,11 @@ test("the actual beta package refuses startup before observation or HTTP", async
     },
   });
   t.after(() => session.close());
-  await assert.rejects(session.start(), hasCode("version_mismatch"));
-  await assert.rejects(session.refresh(), hasCode("version_mismatch"));
-  assert.equal(observations, 0);
-  assert.equal(requests, 0);
+  await assert.rejects(session.start(), hasCode("heartbeat_unavailable"));
+  await assert.rejects(session.refresh(), hasCode("heartbeat_unavailable"));
+  await assert.rejects(session.snapshot(), hasCode("heartbeat_unavailable"));
+  assert.equal(observations, 2);
+  assert.equal(requests, 2);
 });
 
 for (const field of ["refreshIntervalMs", "maxAckAgeMs"]) {

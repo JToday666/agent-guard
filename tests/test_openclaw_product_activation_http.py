@@ -1,9 +1,10 @@
 """Real Node SDK / Guard API transport contracts, not native Product admission.
 
-The source distribution is beta. Successful handshakes use its actual built
-JavaScript copied into a private TEST package with synthetic RC metadata. The
-signed authority, capabilities and artifact/inventory digests are test fixtures;
-no host hook, external provider, or side effect is exercised or qualified here.
+The actual built JavaScript is copied into private TEST packages. Successful
+handshakes use RC metadata; the beta rejection case changes only the isolated
+package's installed version and checks that every built SDK byte is preserved.
+The signed authority, capabilities and artifact/inventory digests are test
+fixtures; no Host hook, external provider, or side effect is qualified here.
 """
 
 from __future__ import annotations
@@ -300,13 +301,19 @@ def test_openclaw_sdk_http_contract_invalid_start_makes_zero_requests(
     assert result["rejected"] is True
     assert len(harness.requests) == count
     if scenario == "beta-rejected":
-        assert result["syntheticPackageMetadata"] is False
+        assert result["syntheticPackageMetadata"] is True
         assert result["errorType"] == "OpenClawProductActivationError"
         assert result["errorCode"] == "version_mismatch"
-        assert (
-            json.loads((PLUGIN_ROOT / "package.json").read_text())["version"]
-            == "0.1.0-beta.1"
-        )
+        source_version = json.loads((PLUGIN_ROOT / "package.json").read_text())[
+            "version"
+        ]
+        assert result["sourceVersion"] == source_version
+        assert result["assumedVersion"] == "0.1.0-beta.1" != source_version
+        assert result["actualHostVersion"] == "2026.7.1-2"
+        assert result["sourceSdkDigest"] == result["copiedSdkDigest"]
+        assert len(result["sourceSdkDigest"]) == 64
+        installed = Path(harness.probe_input["packageDirectory"]) / "package.json"
+        assert json.loads(installed.read_text())["version"] == "0.1.0-beta.1"
 
 
 def test_openclaw_sdk_http_contract_peer_drift_blocks_without_policy_write(

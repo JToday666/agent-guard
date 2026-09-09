@@ -41,7 +41,7 @@ import {
 } from "./runtime/state.js";
 import type { OpenClawPluginConfigInput } from "./types.js";
 
-const PLUGIN_VERSION = "0.1.0-beta.1";
+const PLUGIN_VERSION = "0.1.0-rc.1";
 
 type RuntimeConfigSourceSnapshotShape = {
   plugins?: {

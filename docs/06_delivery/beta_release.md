@@ -4,7 +4,7 @@
 > 发布日期：2026-08-05
 > 许可证：MIT
 
-> 历史边界：公开 `v0.1.0-beta.1` 的 OpenClaw 插件是 22-hook 制品。当前 Productization Alpha 源码已演进为 24 hooks，但尚未升版或发布；两者不可视为同一构建。任何下一次发布前必须统一提升 Python/Node 版本与映射，禁止覆盖 Beta 1。
+> 历史边界：公开 `v0.1.0-beta.1` 的 OpenClaw 插件是 22-hook 制品。后续 Productization Alpha 快照的源码已演进为 24 hooks，当时尚未升版或发布；两者不可视为同一构建。B10 已将当前 Python/Node 候选统一为 `0.1.0rc1` / `0.1.0-rc.1`，尚未发布或完成完整 RC，禁止覆盖 Beta 1。
 
 ## 发布物与版本
 
