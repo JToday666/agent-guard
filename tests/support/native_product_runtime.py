@@ -83,7 +83,14 @@ class NativeProductRuntimeHttpHarness:
 
 
 @contextmanager
-def native_product_runtime_http(tmp_path: Path, *, staging_tools: bool = False):
+def native_product_runtime_http(
+    tmp_path: Path,
+    *,
+    staging_tools: bool = False,
+    policy: PolicyBundle | None = None,
+):
+    # A complete policy is fixed before catalog signing, API startup and ACKs.
+    policy = policy or PolicyBundle()
     received: list[dict[str, Any]] = []
 
     class Inbox(BaseHTTPRequestHandler):
@@ -134,18 +141,19 @@ def native_product_runtime_http(tmp_path: Path, *, staging_tools: bool = False):
         catalog = catalog_fixture(
             tmp_path,
             langgraph_materials=materials,
-            policy_digest=canonical_sha256(PolicyBundle().model_dump(mode="json")),
+            policy_digest=canonical_sha256(policy.model_dump(mode="json")),
         )
         fixture = replace(catalog.fixture, bundle=catalog.bundle)
         with product_runtime_http(
             tmp_path,
             fixture=fixture,
             product_tool_catalog_path=catalog.path,
+            policy=policy,
             task_text=(
                 "Exercise this isolated product profile: read, write and edit local "
                 "fixture files; exec python marker.py and list process; "
                 "agentguard_memory_write and agentguard_memory_read fixture notes; "
-                "send a message to the agentguard-fixture local fixture-inbox."
+                "send a message to the agentguard-fixture local fixture-inbox@agentguard.invalid."
             ),
         ) as http:
             yield NativeProductRuntimeHttpHarness(

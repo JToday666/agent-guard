@@ -168,7 +168,7 @@ def _fixture(
         arguments = {
             "action": "send",
             "channel": "agentguard-fixture",
-            "target": "fixture-inbox",
+            "target": "fixture-inbox@agentguard.invalid",
             "message": "complete synthetic message",
         }
     event = harness.event(event_id="action", call_id="call:generated").model_dump(

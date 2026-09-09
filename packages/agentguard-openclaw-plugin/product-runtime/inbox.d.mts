@@ -1,4 +1,5 @@
 export declare const DEFAULT_INBOX_TARGET: "fixture-inbox";
+export declare const PRODUCT_INBOX_TARGET: "fixture-inbox@agentguard.invalid";
 export declare const MAX_MESSAGE_BYTES: 32768;
 export declare function validateInboxUrl(value: unknown): URL;
 export declare function validateInboxTarget(value: unknown): string;

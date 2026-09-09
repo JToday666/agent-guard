@@ -34,6 +34,7 @@ CHAPTERS = tuple(
             "冻结清单.md",
             "决策记录_V21-05-06-07前置.md",
             "Product数据与控制影响修正.md",
+            "Product本机消息目标修正.md",
         )
     )
 )

@@ -178,7 +178,7 @@ def test_product_forbidden_without_approval_only_records_not_invoked(floored):
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "safe",
             },
         ),
@@ -763,7 +763,7 @@ def test_missing_official_ack_never_calls_or_falls_back(env):
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "safe",
             },
             "message_send_proposed",

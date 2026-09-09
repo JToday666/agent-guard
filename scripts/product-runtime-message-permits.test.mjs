@@ -22,11 +22,13 @@ import {
   snapshotNativeProductResult,
 } from "../packages/agentguard-openclaw-plugin/dist/mapping/product-events.js";
 
+import { PRODUCT_INBOX_TARGET } from "../packages/agentguard-openclaw-plugin/product-runtime/inbox.mjs";
+
 const SESSION = "agent:main:product-message-test";
 const ARGS = Object.freeze({
   action: "send",
   channel: CHANNEL_ID,
-  target: "fixture-inbox",
+  target: PRODUCT_INBOX_TARGET,
   message: "完整本机消息",
 });
 const canonical = (value) =>
@@ -97,7 +99,10 @@ function outbound(payload) {
 }
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), "agentguard-message-permit-"));
-  const inbox = await startFixtureInbox({ acceptanceRoot: root });
+  const inbox = await startFixtureInbox({
+    acceptanceRoot: root,
+    target: PRODUCT_INBOX_TARGET,
+  });
   t.after(async () => {
     await inbox.close();
     rmSync(root, { force: true, recursive: true });
@@ -105,6 +110,7 @@ async function fixture(t) {
   const config = buildFixtureConfig({
     acceptanceRoot: root,
     inboxUrl: inbox.url,
+    inboxTarget: PRODUCT_INBOX_TARGET,
   });
   const bridge = createMessagePermitBridge({ sessionKey: SESSION });
   const channel = createFixtureChannel(config, {
@@ -166,6 +172,72 @@ test("trusted Product factory rejects missing or JSON-impostor bridge before reg
   assert.equal(defaults[0].actions, undefined);
   assert.equal(typeof defaults[0].outbound.sendText, "function");
 });
+
+for (const target of [
+  "fixture-inbox",
+  "other@agentguard.invalid",
+  "fixture-inbox@example.com",
+  "Fixture-inbox@agentguard.invalid",
+  "fixture-inbox@AgentGuard.invalid",
+  ` ${PRODUCT_INBOX_TARGET}`,
+  `${PRODUCT_INBOX_TARGET} `,
+  `mailto:${PRODUCT_INBOX_TARGET}`,
+  `http://${PRODUCT_INBOX_TARGET}/inbox`,
+])
+  test(`Product rejects recipient ${JSON.stringify(target)} before registration, permit or sending`, async (t) => {
+    const { config, bridge, channel, inbox } = await fixture(t);
+    assert.throws(
+      () =>
+        createMessagePermitBridge({ sessionKey: SESSION, inboxTarget: target }),
+      /fixture_message_permit_invalid/u,
+    );
+    assert.throws(
+      () =>
+        createFixtureChannel(
+          { ...config, inboxTarget: target },
+          { productMode: true, messagePermitBridge: bridge },
+        ),
+      /invalid_product_inbox_target/u,
+    );
+    let registrations = 0;
+    for (const registrationMode of ["full", "discovery", "tool-discovery"])
+      assert.throws(
+        () =>
+          createFixturePlugin({
+            productMode: true,
+            messagePermitBridge: bridge,
+          }).register({
+            registrationMode,
+            pluginConfig: { ...config, inboxTarget: target },
+            registerTool() {
+              registrations += 1;
+            },
+            registerChannel() {
+              registrations += 1;
+            },
+          }),
+        /invalid_(?:product_)?inbox_target/u,
+      );
+    assert.equal(registrations, 0);
+    assert.equal(channel.messaging.normalizeTarget(target), undefined);
+    assert.equal(channel.messaging.targetResolver.looksLikeId(target), false);
+    assert.equal(channel.outbound.resolveTarget({ to: target }).ok, false);
+    assert.throws(
+      () =>
+        bridge.authorize(
+          release({ argumentsJson: canonical({ ...ARGS, target }) }),
+        ),
+      /fixture_message_permit_invalid/u,
+    );
+    await assert.rejects(
+      channel.outbound.sendPayload({
+        ...outbound({ text: ARGS.message }),
+        to: target,
+      }),
+      /fixture_message_permit_invalid/u,
+    );
+    assert.deepEqual(inbox.readMessages(), []);
+  });
 
 for (const accountId of [undefined, "default"]) {
   test(`one released action sends full text once through actual SQLite/HTTP inbox (SDK account ${accountId ?? "implicit"})`, async (t) => {
@@ -252,6 +324,12 @@ const rewrites = {
   },
   account: (x) => {
     x.ctx.accountId = "other";
+  },
+  channel: (x) => {
+    x.ctx.channel = "email";
+  },
+  channel_argument: (x) => {
+    x.ctx.params.channel = "email";
   },
   dryrun: (x) => {
     x.ctx.dryRun = true;
@@ -527,17 +605,32 @@ test(
     const wrapper = join(root, "trusted-wrapper");
     await mkdir(wrapper, { mode: 0o700 });
     for (const name of ["package.json", "openclaw.plugin.json"]) {
-      await writeFile(
-        join(wrapper, name),
-        await readFile(new URL(name, fixtureUrl)),
-        { mode: 0o600 },
+      const metadata = JSON.parse(
+        await readFile(new URL(name, fixtureUrl), "utf8"),
       );
+      if (name === "openclaw.plugin.json")
+        metadata.configSchema.properties.inboxTarget = {
+          type: "string",
+          const: PRODUCT_INBOX_TARGET,
+          default: PRODUCT_INBOX_TARGET,
+        };
+      await writeFile(join(wrapper, name), JSON.stringify(metadata), {
+        mode: 0o600,
+      });
     }
     const profile = await createProductRuntimeProfile({
       root,
       inboxUrl: inbox.url,
       modelBaseUrl: "http://127.0.0.1:1/v1",
       fixturePluginPath: wrapper,
+    });
+    // This test explicitly promotes a baseline profile into Product assembly.
+    profile.config.plugins.entries[
+      "agentguard-product-runtime-fixture"
+    ].config.inboxTarget = PRODUCT_INBOX_TARGET;
+    profile.toolOptions.messageTo = PRODUCT_INBOX_TARGET;
+    await writeFile(profile.configPath, JSON.stringify(profile.config), {
+      mode: 0o600,
     });
     const synthetic = release({ sessionKey: profile.sessionKey });
     const {
@@ -618,9 +711,8 @@ export default {id:"agentguard-product-runtime-fixture",name:"synthetic release 
     assert.equal(result.details.mediaUrl, null);
     assert.throws(() => snapshotNativeProductResult(result));
     const { t: createActualMiddlewareRunner } = await import(
-      pathToFileURL(
-        join(hostRoot, "dist/tool-result-middleware-D2HOtSKh.js"),
-      ).href
+      pathToFileURL(join(hostRoot, "dist/tool-result-middleware-D2HOtSKh.js"))
+        .href
     );
     let observed = false;
     const runner = createActualMiddlewareRunner({ runtime: "openclaw" }, [

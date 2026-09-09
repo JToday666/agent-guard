@@ -527,7 +527,7 @@ class ProductComposition:
             canonical_sha256(
                 {
                     "schema_version": "1.0",
-                    "semantics_version": "isolated-product-tools-1",
+                    "semantics_version": "isolated-product-tools-2",
                     "identity": identity,
                     "execution": materials["execution"],
                 }

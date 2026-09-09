@@ -22,7 +22,8 @@ from .canonical_json import canonical_json_bytes, canonical_sha256
 from .models import ActionEffect
 from .normalize import normalize_arguments
 
-PRODUCT_TOOL_SEMANTICS_VERSION = "isolated-product-tools-1"
+PRODUCT_TOOL_SEMANTICS_VERSION = "isolated-product-tools-2"
+PRODUCT_INBOX_TARGET = "fixture-inbox@agentguard.invalid"
 PRODUCT_TOOL_NAMES = (
     "agentguard_memory_read",
     "agentguard_memory_write",
@@ -319,7 +320,7 @@ def _validate_arguments(name: str, args: dict[str, Any], runtime: str) -> None:
     if name == "message" and (args["action"], args["channel"], args["target"]) != (
         "send",
         "agentguard-fixture",
-        "fixture-inbox",
+        PRODUCT_INBOX_TARGET,
     ):
         raise ProductToolError("product_tool_destination_forbidden")
     if name == "edit":

@@ -12,6 +12,7 @@ import os
 
 import pytest
 
+from agentguard_core import GuardEngine, PolicyBundle, build_product_activation_bundle
 from agentguard_core.actions.builder import build_action_ir
 from agentguard_core.actions.canonical_json import canonical_sha256
 from agentguard_core.actions.fingerprints import authorization_projection
@@ -22,7 +23,9 @@ from agentguard_core.actions.models import (
 )
 from agentguard_core.actions.normalize import normalize_arguments
 from agentguard_core.actions.product_tools import (
+    PRODUCT_INBOX_TARGET,
     PRODUCT_TOOL_NAMES,
+    PRODUCT_TOOL_SEMANTICS_VERSION,
     ProductToolError,
     langgraph_host_inventory_digest,
     product_command_script_digest,
@@ -30,7 +33,10 @@ from agentguard_core.actions.product_tools import (
     product_runtime_profile_digest,
     product_tool_resource_identity,
 )
+from agentguard_core.decisions.product import verify_product_activation_bundle
 from agentguard_core.events import GuardEvent
+from agentguard_core.policies import RuleOverride
+from guard_api.services.policy import validate_policy_bundle
 from guard_api.services.product_tool_catalog import (
     ProductToolCatalogError,
     load_product_tool_catalog,
@@ -71,7 +77,7 @@ def arguments(name, runtime):
         "message": {
             "action": "send",
             "channel": "agentguard-fixture",
-            "target": "fixture-inbox",
+            "target": PRODUCT_INBOX_TARGET,
             "message": "complete private message",
         },
     }[name]
@@ -218,6 +224,132 @@ def test_actual_openclaw_edit_and_process_schema_capture(data):
         "openclaw-core",
         "agentguard-product-runtime-fixture",
     ]
+
+
+@pytest.mark.parametrize("runtime", ["langgraph", "openclaw"])
+@pytest.mark.parametrize(
+    "target",
+    [
+        "fixture-inbox",
+        "other@agentguard.invalid",
+        "fixture-inbox@example.com",
+        "fixture-inbox@AGENTGUARD.INVALID",
+        " fixture-inbox@agentguard.invalid",
+        "fixture-inbox@agentguard.invalid ",
+        "mailto:fixture-inbox@agentguard.invalid",
+        "http://127.0.0.1:18431/inbox",
+    ],
+)
+def test_product_message_requires_one_exact_local_alias(data, runtime, target):
+    args = {**arguments("message", runtime), "target": target}
+    with pytest.raises(
+        ProductToolCatalogError, match="product_tool_catalog_action_invalid"
+    ):
+        resolve(data, event_for(data, "message", runtime, args))
+
+
+@pytest.mark.parametrize("runtime", ["langgraph", "openclaw"])
+@pytest.mark.parametrize("expected", ["allow", "ask", "deny"])
+def test_local_alias_uses_existing_core_recipient_policy(data, runtime, expected):
+    """Pure Core policy evidence, not an official Active or Host qualification."""
+    policy = PolicyBundle()
+    if expected == "allow":
+        policy.allowed_email_domains.append("agentguard.invalid")
+    elif expected == "deny":
+        policy.rule_overrides["P005_external_send"] = RuleOverride(decision="deny")
+    assert validate_policy_bundle(policy) == []
+    args = {**arguments("message", runtime), "message": "a local status note"}
+    event = event_for(data, "message", runtime, args)
+    tool = resolve(data, event)
+    ir = action(data, event, tool)
+    assert len(ir.destinations) == 1
+    assert all(
+        destination.canonical_id == "http://127.0.0.1:18431/inbox"
+        for destination in ir.destinations
+    )
+    decision = GuardEngine().evaluate(event, policy)
+    assert decision.decision == expected
+    assert [hit.rule_id for hit in decision.rule_hits] == (
+        [] if expected == "allow" else ["P005_external_send"]
+    )
+    assert event.security_context.source_type == "model"
+    assert event.security_context.source_trust == "unknown"
+
+
+def test_product_catalog_rejects_legacy_tool_semantics_version(data):
+    assert data.document["semantics_version"] == "isolated-product-tools-2"
+    data.document["semantics_version"] = "isolated-product-tools-1"
+    data.path.write_text(json.dumps(data.document))
+    with pytest.raises(ProductToolCatalogError):
+        load_product_tool_catalog(str(data.path), activation=data.bundle)
+
+
+def test_new_semantics_rejects_signed_activation_with_old_profile_digest(data):
+    entry = data.bundle.runtime_entry("langgraph")
+    execution = data.document["runtimes"][0]["execution"]
+    identity = {
+        name: getattr(entry, name)
+        for name in (
+            "runtime",
+            "runtime_version",
+            "plugin_version",
+            "profile_id",
+            "agent_id",
+            "runtime_binding_id",
+            "principal_id",
+            "adapter_artifact_digest",
+            "capability_report_digest",
+            "host_inventory_digest",
+            "plugin_inventory_digest",
+            "plugin_order_inventory_digest",
+            "tool_inventory_digest",
+        )
+    }
+    old_profile_digest = canonical_sha256(
+        {
+            "schema_version": "1.0",
+            "semantics_version": "isolated-product-tools-1",
+            "identity": identity,
+            "execution": execution,
+        }
+    )
+    assert old_profile_digest != entry.profile_digest
+    values = data.bundle.digest_projection()
+    values["rollout_admission_record"] = data.bundle.rollout_admission_record
+    values["residual_risk_acceptance"] = data.bundle.residual_risk_acceptance
+    values["runtimes"] = [
+        entry.model_copy(update={"profile_digest": old_profile_digest}),
+        data.bundle.runtime_entry("openclaw"),
+    ]
+    old_activation = build_product_activation_bundle(
+        server_secret=data.fixture.server_secret, **values
+    )
+    assert verify_product_activation_bundle(
+        old_activation, server_secret=data.fixture.server_secret
+    )
+    with pytest.raises(ProductToolCatalogError):
+        load_product_tool_catalog(str(data.path), activation=old_activation)
+
+
+@pytest.mark.parametrize("runtime", ["langgraph", "openclaw"])
+def test_tool_semantics_digest_changes_even_with_identical_native_schema(data, runtime):
+    event = event_for(data, "message", runtime)
+    tool = resolve(data, event)
+    assert tool is not None
+    execution = next(
+        row["execution"]
+        for row in data.document["runtimes"]
+        if row["runtime"] == runtime
+    )
+    projection = {
+        "version": PRODUCT_TOOL_SEMANTICS_VERSION,
+        "inventory_digest": tool.inventory_digest,
+        "descriptor_digest": tool.descriptor_digest,
+        "execution": execution,
+    }
+    assert tool.semantics_digest == canonical_sha256(projection)
+    projection["version"] = "isolated-product-tools-1"
+    assert tool.semantics_digest != canonical_sha256(projection)
 
 
 @pytest.mark.parametrize(

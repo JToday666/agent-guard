@@ -176,7 +176,11 @@ python -m pip install './packages/agentguard-langgraph-adapter[native]'
 `close()` 停止新调用，工具集所有者另调用 `close_isolated_product_tools()` 释放本地句柄。
 
 `create_isolated_product_tools()` 要求 Linux 上已存在的 `0700` 验收目录和显式
-`http://127.0.0.1:<port>/inbox` 收件端，固定 `fixture-inbox` 目标。文件工具只操作
+`http://127.0.0.1:<port>/inbox` 收件端，固定 `fixture-inbox@agentguard.invalid` 逻辑目标。
+该标识不会触发邮箱传输或域名连接，消息始终 POST 到配置的本机收件端。
+需要普通消息 ALLOW 的隔离验收策略可在完整 `PolicyBundle.allowed_email_domains`
+中加入 `agentguard.invalid`；默认策略仍要求审批，其他内容与授权检查继续执行。
+当前工具语义版本为 `isolated-product-tools-2`，旧 profile 须重新采集并签署。文件工具只操作
 目录内普通 `.txt` 文件；`exec` 只运行包内固定的 `python marker.py`，不使用 shell
 或继承 Provider 凭据；`process` 返回该工具集记录的命令结果。SQLite 记忆与消息
 渠道均使用真实本地存储/HTTP，不连接个人渠道。私有文件和目录锁保持单实例持有。

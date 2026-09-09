@@ -155,12 +155,14 @@ def test_actual_eight_tools_have_frozen_schemas_and_real_side_effects(toolkit):
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "fixture status",
             },
         )
     )["ok"]
-    assert messages == [{"target": "fixture-inbox", "text": "fixture status"}]
+    assert messages == [
+        {"target": "fixture-inbox@agentguard.invalid", "text": "fixture status"}
+    ]
     assert (root / "created.txt").stat().st_mode & 0o777 == 0o600
 
 
@@ -272,7 +274,7 @@ def test_catalog_capture_cannot_mix_factories_or_use_closed_runtime(toolkit, tmp
             {
                 "action": "send",
                 "channel": "email",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "x",
             },
         ),
@@ -298,6 +300,42 @@ def test_noncanonical_or_unscoped_arguments_reject_before_host_call(
     assert not (root / "x.txt").exists()
     assert not (root / "command-marker.txt").exists()
     assert not messages
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "fixture-inbox",
+        "other@agentguard.invalid",
+        "fixture-inbox@example.com",
+        "Fixture-inbox@agentguard.invalid",
+        "fixture-inbox@AGENTGUARD.INVALID",
+        " fixture-inbox@agentguard.invalid",
+        "fixture-inbox@agentguard.invalid ",
+        "mailto:fixture-inbox@agentguard.invalid",
+        "http://127.0.0.1/inbox",
+    ],
+)
+def test_message_recipient_is_exact_at_factory_and_invocation(toolkit, target):
+    root, tools, messages = toolkit
+    spec = next(tool for tool in tools if tool.name == "message")
+    with pytest.raises(ProductActivationError, match="inbox_invalid"):
+        create_isolated_product_tools(
+            root=root, inbox_url="http://127.0.0.1:19001/inbox", target=target
+        )
+    arguments = {
+        "action": "send",
+        "channel": "agentguard-fixture",
+        "target": target,
+        "message": "ordinary local fixture message",
+    }
+    with pytest.raises(ProductActivationError):
+        prepare_native_tool_call(spec, "call:recipient-invalid", arguments)
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        spec.tool.invoke(arguments)
+    assert messages == []
 
 
 @pytest.mark.parametrize(
@@ -449,7 +487,7 @@ def test_message_negative_response_is_one_attempt_and_bounded_error(
                     {
                         "action": "send",
                         "channel": "agentguard-fixture",
-                        "target": "fixture-inbox",
+                        "target": "fixture-inbox@agentguard.invalid",
                         "message": "only local",
                     },
                 )

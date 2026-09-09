@@ -8,10 +8,15 @@ import {
 } from "./memory.mjs";
 
 export const DEFAULT_INBOX_TARGET = "fixture-inbox";
+// Product logical recipient; transport remains the literal loopback inbox URL.
+export const PRODUCT_INBOX_TARGET = "fixture-inbox@agentguard.invalid";
 export const MAX_MESSAGE_BYTES = 32768;
 
 export function validateInboxTarget(target) {
-  if (typeof target !== "string" || !/^[a-z][a-z0-9-]{0,63}$/u.test(target)) {
+  if (
+    typeof target !== "string" ||
+    (target !== PRODUCT_INBOX_TARGET && !/^[a-z][a-z0-9-]{0,63}$/u.test(target))
+  ) {
     throw new FixtureError("invalid_inbox_target");
   }
   return target;
