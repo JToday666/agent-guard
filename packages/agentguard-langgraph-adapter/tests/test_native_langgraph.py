@@ -273,7 +273,7 @@ def test_real_stategraph_runs_all_eight_native_tools_once(
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "delivered",
             },
         ),
@@ -316,7 +316,9 @@ def test_real_stategraph_runs_all_eight_native_tools_once(
     }
     assert (tool_profile.root / "fixture.txt").read_text() == "after"
     assert (tool_profile.root / "command-marker.txt").read_text().count("executed") == 1
-    assert tool_profile.received == [{"target": "fixture-inbox", "text": "delivered"}]
+    assert tool_profile.received == [
+        {"target": "fixture-inbox@agentguard.invalid", "text": "delivered"}
+    ]
     with sqlite3.connect(tool_profile.root / "memory.sqlite") as connection:
         assert connection.execute(
             "SELECT value FROM memory WHERE key='fixture'"

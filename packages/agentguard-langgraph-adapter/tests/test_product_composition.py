@@ -15,6 +15,7 @@ import pytest
 from langchain_core.messages import AIMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from agentguard_core import build_activation_ack
+from agentguard_core.actions import product_tools as core_product_tools
 from agentguard_langgraph_adapter import AgentGuardLangGraphConfig, LangGraphAdapter
 from agentguard_langgraph_adapter import (
     activation_session,
@@ -37,7 +38,7 @@ pytestmark = pytest.mark.integration
 
 
 @pytest.fixture
-def assembled(tmp_path, monkeypatch):
+def assembled(tmp_path, monkeypatch, request):
     root = tmp_path / "tools"
     root.mkdir(mode=0o700)
     tools = create_isolated_product_tools(
@@ -46,7 +47,14 @@ def assembled(tmp_path, monkeypatch):
     materials = native_tool_catalog_materials(
         tools, model_visible_tools=[convert_to_openai_tool(x.tool) for x in tools]
     )
-    fixture = catalog_fixture(tmp_path, langgraph_materials=materials)
+    with monkeypatch.context() as contract:
+        if getattr(request, "param", None) == "previous-tool-semantics":
+            contract.setattr(
+                core_product_tools,
+                "PRODUCT_TOOL_SEMANTICS_VERSION",
+                "isolated-product-tools-1",
+            )
+        fixture = catalog_fixture(tmp_path, langgraph_materials=materials)
     entry = fixture.bundle.runtime_entry("langgraph")
     private = tmp_path / "private"
     private.mkdir(mode=0o700)
@@ -189,6 +197,13 @@ def test_explicit_start_observes_actual_inventory_and_owns_ack(assembled):
     assert len(body["capability_report"]["events"]) == 7
     with pytest.raises(ProductActivationError, match="session_owner_mismatch"):
         rig.adapter.start_product_session(observe=rig.graph._composition.observe)
+
+
+@pytest.mark.parametrize("assembled", ["previous-tool-semantics"], indirect=True)
+def test_old_semantics_profile_rejected_before_heartbeat_or_tool_call(assembled):
+    with pytest.raises(ProductActivationError, match="product_profile_drift"):
+        assembled.graph.start()
+    assert assembled.requests == []
 
 
 @pytest.mark.parametrize(

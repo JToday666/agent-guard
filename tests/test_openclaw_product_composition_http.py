@@ -29,6 +29,8 @@ from agentguard_core import (
     build_product_activation_bundle,
 )
 from agentguard_core.actions.canonical_json import canonical_json, canonical_sha256
+from agentguard_core.actions.product_tools import PRODUCT_INBOX_TARGET
+from agentguard_core.policies import RuleOverride
 from fastapi import Request
 
 from guard_api.main import create_app
@@ -80,7 +82,7 @@ TOOLS = (
         {
             "action": "send",
             "channel": "agentguard-fixture",
-            "target": "fixture-inbox",
+            "target": PRODUCT_INBOX_TARGET,
             "message": "composition-message",
         },
     ),
@@ -90,7 +92,7 @@ TASK = (
     "composition-written, edit that text to composition-edited, run the approved "
     "node marker.mjs command, list processes, store the new SQLite memory key "
     "fixture with value composition-memory, read that key, and send "
-    "composition-message to the local fixture-inbox channel."
+    f"composition-message to the local {PRODUCT_INBOX_TARGET} channel."
 )
 
 
@@ -372,18 +374,40 @@ def _replace_candidate_digest(catalog, digest):
         "concurrent-run",
         "close-during-start",
         "memory-after-untrusted",
+        "message-allow",
+        "message-ask",
+        "message-deny",
     ],
 )
 def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenario):
     all_tools = scenario == "all-eight"
     tainted_memory = scenario == "memory-after-untrusted"
+    message_decision = (
+        scenario.removeprefix("message-") if scenario.startswith("message-") else None
+    )
+    policy_bundle = PolicyBundle()
+    if message_decision == "allow":
+        policy_bundle = PolicyBundle(
+            allowed_email_domains=[
+                *policy_bundle.allowed_email_domains,
+                "agentguard.invalid",
+            ]
+        )
+    elif message_decision == "deny":
+        policy_bundle = PolicyBundle(
+            rule_overrides={"P005_external_send": RuleOverride(decision="deny")}
+        )
     # The independent write has only the authorized task as model input. A
     # separate real Host case below proves that persisting later UNTRUSTED
     # tool ancestry is still blocked. Neither proof nor trust is rewritten.
     program = (
         TOOLS[5:6] + TOOLS[:5] + TOOLS[7:] + TOOLS[6:7]
         if all_tools
-        else TOOLS[:1] + TOOLS[5:6] if tainted_memory else TOOLS[:1]
+        else (
+            TOOLS[:1] + TOOLS[5:6]
+            if tainted_memory
+            else TOOLS[7:] if message_decision else TOOLS[:1]
+        )
     )
     with _workspace(tmp_path) as root:
         with _model_server(root, program) as (model_url, calls, deliveries, ready):
@@ -409,7 +433,7 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
             assert fixture_schema_errors == []
             catalog = catalog_fixture(
                 tmp_path,
-                policy_digest=canonical_sha256(PolicyBundle().model_dump(mode="json")),
+                policy_digest=canonical_sha256(policy_bundle.model_dump(mode="json")),
             )
             catalog.document["runtimes"][1] = {
                 "runtime": "openclaw",
@@ -431,7 +455,7 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
             settings.v21_semantic_enabled = False
             store = MemoryControlPlaneStore()
             store.save_policy_snapshot(
-                PolicyBundle(), expected_revision=0, updated_by="composition-test"
+                policy_bundle, expected_revision=0, updated_by="composition-test"
             )
             tokens = {
                 runtime: f"test-composition-{runtime}"
@@ -557,7 +581,9 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
                                     "taskText": TASK,
                                     "traceId": "trace:composition",
                                     "concurrentRun": scenario == "concurrent-run",
-                                    "captureRunOutcome": all_tools or tainted_memory,
+                                    "captureRunOutcome": all_tools
+                                    or tainted_memory
+                                    or message_decision is not None,
                                     "closeDuringStart": scenario
                                     == "close-during-start",
                                 }
@@ -634,6 +660,69 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
                 )
                 return
             assert result["activeInspectionOutcomes"] == ["rejected", "rejected"]
+            if message_decision == "deny":
+                assert len(calls) == 1
+                assert resolutions == deliveries == []
+                assert result["runOutcomes"] == ["rejected"]
+                policies = [
+                    p
+                    for p in store.audit_events
+                    if p.record_type == "policy_evaluation"
+                ]
+                message_policies = [
+                    p for p in policies if p.event_type == "message_send_proposed"
+                ]
+                assert len(message_policies) == 1
+                policy = message_policies[0]
+                assert policy.decision == "deny"
+                assert all(p.decision == "allow" for p in policies if p is not policy)
+                assert not any(
+                    r.path.endswith("/execution-leases/consume") for r in requests
+                )
+                assert ready and all(s and s["ready"] and s["active"] for s in ready)
+                for p in policies:
+                    authority = p.evidence["decision_authority"]["payload"][
+                        "decision_authority"
+                    ]
+                    assert (
+                        authority["source"],
+                        authority["mode"],
+                        authority["selection_basis"],
+                    ) == ("v21", "active", "profile_all")
+                terminals = [
+                    r
+                    for r in requests
+                    if r.path == "/v1/audit/events"
+                    and r.body.get("links", {}).get("policy_audit_id")
+                    == policy.audit_id
+                ]
+                assert len(terminals) == 1
+                terminal = _receipt_public_body(terminals[0])
+                assert terminals[0].status_code == 200
+                assert terminal["metadata"]["outcome_kind"] == "pre_execution_deny"
+                assert terminal["evidence"]["execution"]["status"] == "not_invoked"
+                assert terminal["evidence"]["execution"]["invoked_at"] is None
+                original = next(
+                    r
+                    for r in requests
+                    if r.path == "/v1/guard/evaluate"
+                    and r.body["event_id"] == policy.links["event_id"]
+                )
+                assert original.body["payload"]["recipient"] == PRODUCT_INBOX_TARGET
+                assert original.body["payload"]["channel"] == "agentguard-fixture"
+                actual_hash = canonical_sha256(
+                    terminals[0].body["metadata"]["activation_ack"]["ack_token"]
+                )
+                expected_hash = canonical_sha256(original.activation_ack_header)
+                assert actual_hash == expected_hash
+                saved = store.get_audit_event(terminal["audit_id"])
+                assert saved is not None and saved.links == terminal["links"]
+                assert not any(
+                    r.body.get("metadata", {}).get("outcome_kind") == "approval_release"
+                    for r in requests
+                    if r.path == "/v1/audit/events"
+                )
+                return
             if tainted_memory:
                 assert len(calls) == 2
                 assert resolutions == deliveries == []
@@ -957,6 +1046,19 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
                         if not _is_original_task_message(message)
                     ]
                     assert change.value_preview not in json.dumps(non_task)
+            elif message_decision:
+                assert len(deliveries) == 1
+                assert deliveries[0]["target"] == PRODUCT_INBOX_TARGET
+                assert deliveries[0]["text"] == "composition-message"
+                message_policies = [
+                    p for p in policies if p.event_type == "message_send_proposed"
+                ]
+                assert len(message_policies) == 1
+                assert message_policies[0].decision == message_decision
+                assert len(resolutions) == (1 if message_decision == "ask" else 0)
+                assert sum(
+                    r.path.endswith("/execution-leases/consume") for r in requests
+                ) == len(resolutions)
             else:
                 assert deliveries == []
             transcripts = list(
@@ -973,9 +1075,10 @@ def test_public_product_factory_runs_real_host_tools_after_ack(tmp_path, scenari
             results = [m for m in messages if m.get("role") == "toolResult"]
             assert [m["toolName"] for m in results] == [name for name, _ in program]
             assert all(m.get("isError") is not True for m in results)
-            assert "composition-safe" in json.dumps(
-                next(m for m in results if m["toolName"] == "read")["content"]
-            )
+            if any(name == "read" for name, _ in program):
+                assert "composition-safe" in json.dumps(
+                    next(m for m in results if m["toolName"] == "read")["content"]
+                )
             if all_tools:
                 by_name = {message["toolName"]: message for message in results}
                 process_result = by_name["process"]

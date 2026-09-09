@@ -16,7 +16,7 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FixtureError, requireAcceptanceRoot } from "./memory.mjs";
-import { validateInboxUrl } from "./inbox.mjs";
+import { PRODUCT_INBOX_TARGET, validateInboxUrl } from "./inbox.mjs";
 import { canonical, ownObject, freeze } from "./strict.mjs";
 import {
   PRODUCT_FIXTURE_PLUGIN_ID,
@@ -329,7 +329,7 @@ function derive(input) {
     providerId,
     modelId,
     inboxUrl: input.inboxUrl,
-    inboxTarget: "fixture-inbox",
+    inboxTarget: PRODUCT_INBOX_TARGET,
     runManifestPath: input.runManifestPath,
     config,
     env,
@@ -353,7 +353,7 @@ function derive(input) {
       runtimeToolAllowlist: [...PRODUCT_TOOL_IDS],
       messageProvider: PRODUCT_FIXTURE_CHANNEL_ID,
       messageChannel: PRODUCT_FIXTURE_CHANNEL_ID,
-      messageTo: "fixture-inbox",
+      messageTo: PRODUCT_INBOX_TARGET,
     },
   };
 }

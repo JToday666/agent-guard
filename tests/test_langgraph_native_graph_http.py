@@ -13,6 +13,7 @@ import httpx
 from langchain_core.messages import AIMessage, HumanMessage
 import pytest
 
+from agentguard_core import PolicyBundle
 from agentguard_langgraph_adapter.native_langgraph import build_native_product_graph
 from tests.support.native_product_runtime import HttpFixtureModel
 from tests.test_langgraph_native_model_http import native_model_http  # noqa: F401
@@ -74,7 +75,7 @@ _ACTIONS = {
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "native fixture message",
             },
         ),
@@ -136,6 +137,127 @@ def _automated_test_operator(http, *, decision="allow_once"):
             worker.join(timeout=4)
         assert not worker.is_alive()
         assert not errors, errors
+
+
+@pytest.mark.parametrize(
+    "native_model_http,expected",
+    [
+        (
+            {
+                "policy": PolicyBundle(
+                    allowed_email_domains=[
+                        *PolicyBundle().allowed_email_domains,
+                        "agentguard.invalid",
+                    ]
+                )
+            },
+            "allow",
+        ),
+        ({"policy": PolicyBundle()}, "ask"),
+        (
+            {
+                "policy": PolicyBundle(
+                    rule_overrides={"P005_external_send": {"decision": "deny"}}
+                )
+            },
+            "deny",
+        ),
+    ],
+    indirect=["native_model_http"],
+    ids=["allowed-local-domain", "default-review", "tightened-deny"],
+)
+def test_actual_native_message_policy_matrix(native_model_http, expected):  # noqa: F811
+    """Actual action decisions and local sends; synthetic admission, no Provider."""
+    http, adapter, _, _ = native_model_http
+    arguments = _ACTIONS["message"][0][1].copy()
+    call_id = "native-message-policy-" + expected
+    model = HttpFixtureModel(
+        responses=[
+            AIMessage(
+                content="",
+                tool_calls=[{"name": "message", "args": arguments, "id": call_id}],
+            ),
+            AIMessage(content="The local message fixture completed."),
+        ]
+    )
+    graph = build_native_product_graph(
+        adapter=adapter,
+        model=model,
+        tools=http.tools,
+        provider="controlled-local-contract",
+        model_name="synthetic-admission-message-policy",
+    )
+    graph._executor._approval_timeout = 5.0
+    security = dict(http.event()["security_context"], task_id=http.task_id)
+    try:
+        with _automated_test_operator(http) as resolutions:
+            result = graph.invoke(
+                sources=[
+                    {
+                        "role": "user",
+                        "content": security["user_task"],
+                        "source_id": "native-message-authenticated-task",
+                        "source_type": "user",
+                        "source_trust": "trusted",
+                    }
+                ],
+                security=security,
+                trace_id=http.trace_id,
+            )
+        action_requests = [
+            request
+            for request in http.requests_for("/v1/guard/evaluate")
+            if request.body["event_type"] == "message_send_proposed"
+        ]
+        assert len(action_requests) == 1
+        request = action_requests[0]
+        assert request.status_code == 200
+        event = request.body
+        assert event["payload"]["recipient"] == arguments["target"]
+        assert event["payload"]["channel"] == arguments["channel"]
+        policy = http.store.get_policy_evaluation_by_event_id(event["event_id"])
+        selected = policy.evidence["decision_authority"]["payload"]
+        assert selected["selected_decision"]["decision"] == expected
+        authority = selected["decision_authority"]
+        assert authority["source"] == "v21"
+        assert authority["mode"] == "active"
+        assert authority["selection_basis"] == "profile_all"
+        consume = [
+            item for item in http.requests if "/execution-leases/consume" in item.path
+        ]
+        assert len(consume) == (1 if expected == "ask" else 0)
+        assert len(resolutions) == (1 if expected == "ask" else 0)
+        if expected == "ask":
+            assert resolutions[0]["decision"] == "allow_once"
+            assert consume[0].status_code == 200
+        invoked = expected != "deny"
+        assert result.tool_invocations == int(invoked)
+        assert result.model_calls == (2 if invoked else 1)
+        assert result.blocked is not invoked
+        assert http.received == (
+            [{"target": arguments["target"], "text": arguments["message"]}]
+            if invoked
+            else []
+        )
+        receipts = [
+            item
+            for item in http.requests_for("/v1/audit/events")
+            if item.body["record_type"] == "runtime_outcome"
+            and item.body["links"]["event_id"] == event["event_id"]
+        ]
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.status_code == 200
+        assert receipt.body["evidence"]["execution"]["status"] == (
+            "executed" if invoked else "not_invoked"
+        )
+        assert receipt.body["links"]["policy_audit_id"] == policy.audit_id
+        stored = http.store.get_audit_event(receipt.body["audit_id"])
+        assert stored is not None and stored.metadata["product_ack_validation"]
+        assert adapter.product_delivery_status().pending_count == 0
+        assert not adapter.product_delivery_status().breaker_open
+    finally:
+        graph.close()
 
 
 @pytest.mark.parametrize("category", list(_ACTIONS))
@@ -277,7 +399,10 @@ def test_actual_native_graph_guard_tool_and_next_model(
             assert change.status == "committed" and change.source_trust == "unknown"
         elif category == "message":
             assert received == [
-                {"target": "fixture-inbox", "text": "native fixture message"}
+                {
+                    "target": "fixture-inbox@agentguard.invalid",
+                    "text": "native fixture message",
+                }
             ]
         evaluations = http.requests_for("/v1/guard/evaluate")
         kinds = [item.body["event_type"] for item in evaluations]

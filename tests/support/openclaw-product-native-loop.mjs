@@ -12,6 +12,8 @@ import {
   PRODUCT_FIXTURE_PLUGIN_ID,
 } from "./openclaw-product-runtime/profile.mjs";
 
+import { PRODUCT_INBOX_TARGET } from "./openclaw-product-runtime/inbox.mjs";
+
 const helperPath = fileURLToPath(
   new URL("./openclaw-product-native-plugin.mjs", import.meta.url),
 );
@@ -64,6 +66,11 @@ async function prepare(input) {
   const manifest = JSON.parse(
     await readFile(path.join(fixturePath, "openclaw.plugin.json"), "utf8"),
   );
+  manifest.configSchema.properties.inboxTarget = {
+    type: "string",
+    const: PRODUCT_INBOX_TARGET,
+    default: PRODUCT_INBOX_TARGET,
+  };
   manifest.providers = ["agentguard-acceptance"];
   manifest.contracts.agentToolResultMiddleware = ["openclaw"];
   await privateJson(path.join(pluginRoot, "openclaw.plugin.json"), manifest);
@@ -87,6 +94,10 @@ async function prepare(input) {
     inboxUrl: input.inboxUrl,
     modelId,
   });
+  // This test assembly uses Product mode; the shared B01 factory stays legacy.
+  profile.config.plugins.entries[PRODUCT_FIXTURE_PLUGIN_ID].config.inboxTarget =
+    PRODUCT_INBOX_TARGET;
+  profile.toolOptions.messageTo = PRODUCT_INBOX_TARGET;
   profile.config.agents.defaults.model.fallbacks = [];
   profile.config.agents.defaults.envelopeTimestamp = "off";
   await writeFile(profile.configPath, JSON.stringify(profile.config), {
@@ -230,7 +241,7 @@ async function run(input) {
     "--channel",
     "agentguard-fixture",
     "--to",
-    "fixture-inbox",
+    profile.toolOptions.messageTo,
     "--message",
     input.taskText,
     "--thinking",

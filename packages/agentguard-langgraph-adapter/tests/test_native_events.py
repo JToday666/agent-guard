@@ -83,7 +83,7 @@ def security():
             {
                 "action": "send",
                 "channel": "agentguard-fixture",
-                "target": "fixture-inbox",
+                "target": "fixture-inbox@agentguard.invalid",
                 "message": "content" * 1000 + "tail",
             },
         ),

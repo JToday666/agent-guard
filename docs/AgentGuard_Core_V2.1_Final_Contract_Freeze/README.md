@@ -67,6 +67,8 @@ CLEAR_ALLOW / CLEAR_DENY / DEFER
 | `06_创新点与命题映射.md` | 竞赛命题覆盖、创新点、答辩口径 |
 | `07_当前代码改造映射.md` | 当前 dev 文件级改造范围、模块落点 |
 | `08_参考研究与证据要求.md` | 研究依据、代码事实引用规范、答辩证据格式 |
+| [11_Product数据与控制影响修正.md](11_Product数据与控制影响修正.md) | 独立 Product 数据证明、模型控制影响与审批资格 |
+| [12_Product本机消息目标修正.md](12_Product本机消息目标修正.md) | 唯一本机 recipient、工具语义 v2 与 baseline 兼容边界 |
 | `AgentGuard_Core_V2.1_Final_完整方案.md` | 上述分册聚合版 |
 | `contract_freeze.yaml` / `contract_freeze.schema.json` | JSON-compatible YAML 总冻结清单及机器校验 |
 | `fusion_matrix.yaml` / `fusion_matrix.schema.json` | 可执行 Fusion 规则及 selector/disposition Schema |

@@ -33,7 +33,8 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 | 07 | OpenClaw tool/memory/message 的 official 动作链 | 06 |
 | 08 | OpenClaw context/model/result 的 official 内容链 | 07 |
 | 09 | 完整组合检查与显式启用，默认关闭 | 08 |
-| 10 | 候选版本、制品身份、admission/activation 校验与签署工具 | 09 |
+| 09a | 唯一本机消息目标、语义版本与双宿主 ALLOW/ASK/DENY | 09 |
+| 10 | 候选版本、制品身份、admission/activation 校验与签署工具 | 09a |
 | 11 | 真实宿主预激活基线和确定性 conformance 报告 | 10 |
 | 12 | 双运行时 Product Active、真实 Qwen 与浏览器审批验收 | 11 |
 
@@ -49,6 +50,11 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 修正范围见[产品数据与控制影响契约](../AgentGuard_Core_V2.1_Final_Contract_Freeze/11_Product数据与控制影响修正.md)。
 该授权来自本次隔离验收任务，不代表人工审查已完成或生产风险接受；
 LangGraph strong binding、OpenClaw restricted allow_once 及全部残余边界不变。
+
+09a 将 Product 消息目标固定为 `fixture-inbox@agentguard.invalid`，便于真实 Core
+按签署的策略选择 ALLOW、ASK 或 DENY；实际投递仍只进入本机测试收件端。
+该参数契约升级为 `isolated-product-tools-2`，不修改判定算法或放宽目的地。
+详见[本机消息目标修正](../AgentGuard_Core_V2.1_Final_Contract_Freeze/12_Product本机消息目标修正.md)。
 
 ## 最终验收
 

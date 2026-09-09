@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from agentguard_core.actions.canonical_json import canonical_sha256
+from agentguard_core.actions.product_tools import PRODUCT_INBOX_TARGET
 from agentguard_core.security_context.facts import SourceFact
 from agentguard_core.security_context.product_data import DataContentBinding
 from guard_api.security_state.fact_authority import (
@@ -193,7 +194,7 @@ def test_verified_message_uses_actual_profile_sink_not_payload_alias(tmp_path, r
     assert sent.source_ref == MODEL
     assert sent.target_ref == case.ir.destinations[0].canonical_id
     assert sent.target_ref.startswith("http://127.0.0.1:")
-    assert case.event.payload.recipient == "fixture-inbox"
+    assert case.event.payload.recipient == PRODUCT_INBOX_TARGET
     assert sent.strength == "exact" and sent.origin == "observed"
     control = [flow for flow in bundle.flow_facts if flow.relation == "influenced_by"]
     assert {flow.source_ref for flow in control} == {MODEL, USER}

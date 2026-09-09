@@ -85,6 +85,10 @@ memory refs 始终必检。模型生成的记忆内容不能提升为 user/trust
 | 必检计划 | `v21-04-plan-5` | `v21-04-plan-4` 保留 |
 | 动作事实映射 | `ct-product-fact-1` | `ct-fact-1/2` 保留 |
 
+上表保留 06a 批次的历史版本。后续 09a 将工具语义升级为
+`isolated-product-tools-2`，仅修正 Product 唯一本机消息目标；其他版本不变。
+当前目标与重签要求见[Product 本机消息目标修正](12_Product本机消息目标修正.md)。
+
 只有完整证明匹配真实 ActionIR 的三个 Product 动作事件使用新事实映射。
 模型输出到当前参数、当前内容到清单最终目标的实际传输可记为 `exact/observed`；
 上下文和祖先到模型或动作的控制影响仍为 `possible/semantic_inferred`。

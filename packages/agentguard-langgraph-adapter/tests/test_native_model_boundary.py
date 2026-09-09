@@ -143,7 +143,7 @@ def test_full_memory_message_and_tool_result_actual_resource_identity(builder, t
         {
             "action": "send",
             "channel": "agentguard-fixture",
-            "target": "fixture-inbox",
+            "target": "fixture-inbox@agentguard.invalid",
             "message": body,
         },
     )

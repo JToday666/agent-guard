@@ -6,6 +6,7 @@ import {
 } from "./memory.mjs";
 import {
   DEFAULT_INBOX_TARGET,
+  PRODUCT_INBOX_TARGET,
   MAX_MESSAGE_BYTES,
   deliverInboxMessage,
   validateInboxTarget,
@@ -106,6 +107,8 @@ export function createFixtureChannel(
 ) {
   if (productMode && !isMessagePermitBridge(messagePermitBridge))
     throw new FixtureError("fixture_message_bridge_required");
+  if (productMode && config.inboxTarget !== PRODUCT_INBOX_TARGET)
+    throw new FixtureError("invalid_product_inbox_target");
   if (!productMode && messagePermitBridge !== undefined)
     throw new FixtureError("invalid_fixture_message_mode");
   const account = (cfg, accountId) => {
@@ -256,6 +259,8 @@ export function createFixturePlugin({
       if (productMode && !isMessagePermitBridge(messagePermitBridge))
         throw new FixtureError("fixture_message_bridge_required");
       const config = buildFixtureConfig(api.pluginConfig);
+      if (productMode && config.inboxTarget !== PRODUCT_INBOX_TARGET)
+        throw new FixtureError("invalid_product_inbox_target");
       for (const tool of createFixtureTools(config, { productMode }))
         api.registerTool(tool);
       // The Host's tool-discovery registry does not activate runtime channels.

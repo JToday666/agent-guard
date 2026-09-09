@@ -45,6 +45,8 @@ import {
   initializeGlobalHookRunner,
   resetGlobalHookRunner,
 } from "openclaw/plugin-sdk/plugin-runtime";
+import { PRODUCT_INBOX_TARGET } from "../product-runtime/inbox.mjs";
+
 const TOKEN_A = `hmac-sha256:${"a".repeat(64)}`,
   TOKEN_B = `hmac-sha256:${"b".repeat(64)}`;
 const NS = {
@@ -84,7 +86,7 @@ const ARGS = {
   message: {
     action: "send",
     channel: "agentguard-fixture",
-    target: "fixture-inbox",
+    target: PRODUCT_INBOX_TARGET,
     message: "sample",
   },
 };
@@ -309,6 +311,38 @@ async function fixture(t, options = {}) {
     },
   };
 }
+for (const target of [
+  "fixture-inbox",
+  "other@agentguard.invalid",
+  "fixture-inbox@example.com",
+  "Fixture-inbox@agentguard.invalid",
+  "fixture-inbox@AgentGuard.invalid",
+  ` ${PRODUCT_INBOX_TARGET}`,
+  `${PRODUCT_INBOX_TARGET} `,
+  `mailto:${PRODUCT_INBOX_TARGET}`,
+  `http://${PRODUCT_INBOX_TARGET}/inbox`,
+])
+  test(`native Product message target ${JSON.stringify(target)} is blocked before evaluation or release`, async (t) => {
+    const f = await fixture(t);
+    const { event, context } = native("message");
+    event.params.target = target;
+    assert.equal((await f.runtime.before(event, context)).block, true);
+    assert.equal(f.events.length, 0);
+    assert.equal(f.authorizations.length, 0);
+    assert.equal(f.consumes.length, 0);
+    assert.equal(f.sent.length, 0);
+  });
+
+test("native Product message cannot route its exact recipient through another channel", async (t) => {
+  const f = await fixture(t);
+  const { event, context } = native("message");
+  event.params.channel = "email";
+  assert.equal((await f.runtime.before(event, context)).block, true);
+  assert.equal(f.events.length, 0);
+  assert.equal(f.authorizations.length, 0);
+  assert.equal(f.sent.length, 0);
+});
+
 for (const name of Object.keys(ARGS))
   for (const decision of ["allow", "deny", "ask"])
     test(`${name} ${decision}: full native identity and honest gate/after receipt`, async (t) => {
@@ -617,7 +651,7 @@ test("message_sending only checks existing channel permit; missing native IDs do
   );
   assert.deepEqual(
     f.runtime.messageSending(
-      { to: "fixture-inbox", content: "sample" },
+      { to: PRODUCT_INBOX_TARGET, content: "sample" },
       { channelId: "agentguard-fixture", accountId: "default" },
     ),
     { content: "sample" },
@@ -1233,13 +1267,13 @@ function messageResult(messageId = MESSAGE_ID) {
     content: [{ type: "text", text: "sent" }],
     details: {
       channel: "agentguard-fixture",
-      to: "fixture-inbox",
+      to: PRODUCT_INBOX_TARGET,
       via: "direct",
       mediaUrl: null,
       result: {
         channel: "agentguard-fixture",
         messageId,
-        chatId: "fixture-inbox",
+        chatId: PRODUCT_INBOX_TARGET,
       },
       deliveryStatus: "sent",
       payloadOutcomes: [{ index: 0, status: "sent", resultCount: 1 }],

@@ -137,7 +137,7 @@ class MemoryWriteInput(MemoryReadInput):
 class MessageInput(_Input):
     action: Literal["send"]
     channel: Literal["agentguard-fixture"]
-    target: Literal["fixture-inbox"]
+    target: Literal["fixture-inbox@agentguard.invalid"]
     message: str = Field(max_length=32768)
 
 
@@ -596,7 +596,11 @@ class _IsolatedRuntime:
             resource_type, target = "memory", f"{self.root}/memory.sqlite/{args['key']}"
             direction = "persistent" if spec.operation == "write" else "inbound"
         elif spec.category == "message":
-            resource_type, target, direction = "message", "fixture-inbox", "outbound"
+            resource_type, target, direction = (
+                "message",
+                "fixture-inbox@agentguard.invalid",
+                "outbound",
+            )
         else:
             resource_type, target, direction = (
                 "process",
@@ -744,11 +748,14 @@ class _IsolatedRuntime:
 
 
 def create_isolated_product_tools(
-    *, root: str | Path, inbox_url: str, target: str = "fixture-inbox"
+    *,
+    root: str | Path,
+    inbox_url: str,
+    target: str = "fixture-inbox@agentguard.invalid",
 ) -> tuple[NativeToolSpec, ...]:
     """Create the exact eight-tool profile; never install external channels."""
     if (
-        target != "fixture-inbox"
+        target != "fixture-inbox@agentguard.invalid"
         or not isinstance(inbox_url, str)
         or not re.fullmatch(r"http://127\.0\.0\.1:[1-9][0-9]{0,4}/inbox", inbox_url)
     ):

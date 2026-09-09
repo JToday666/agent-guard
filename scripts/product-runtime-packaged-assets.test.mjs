@@ -26,6 +26,8 @@ import { createProductFixturePlugin } from "../packages/agentguard-openclaw-plug
 import { createMessagePermitBridge } from "../packages/agentguard-openclaw-plugin/product-runtime/message-permits.mjs";
 import { createFixtureMemory } from "../packages/agentguard-openclaw-plugin/product-runtime/memory.mjs";
 
+import { PRODUCT_INBOX_TARGET } from "../packages/agentguard-openclaw-plugin/product-runtime/inbox.mjs";
+
 const requireHost = createRequire(
   new URL(
     "../packages/agentguard-openclaw-plugin/package.json",
@@ -69,6 +71,8 @@ test("installable Product profile passes actual SDK schema and binds private ses
         ),
   );
   assert.equal(profile.scopeSessionId, profile.sessionKey);
+  assert.equal(profile.inboxTarget, PRODUCT_INBOX_TARGET);
+  assert.equal(profile.toolOptions.messageTo, PRODUCT_INBOX_TARGET);
   assert.equal(profile.config.agents.defaults.envelopeTimestamp, "off");
   assert.deepEqual(profile.config.agents.defaults.model.fallbacks, []);
   assert.deepEqual(profile.config.tools.allow, [...PRODUCT_TOOL_IDS]);

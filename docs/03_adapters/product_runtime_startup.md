@@ -79,6 +79,12 @@ const provider = {
 };
 ```
 
+Product 消息仅接受 `fixture-inbox@agentguard.invalid`，由本机渠道投递到固定的
+loopback `inboxUrl`，没有邮件或 DNS 投递。工具语义为 `isolated-product-tools-2`；
+旧目标和旧语义清单均不能用于 Product 启动。策略允许 `agentguard.invalid` 域时，
+Core 可直接 ALLOW；默认外发策略要求 ASK；明确的拒绝策略返回 DENY。三者均由
+签署前固定的真实 PolicyBundle 决定，不能通过更换 ACK 或运行中改策略绕过审批。
+
 调用 `start()` 前，专用运行进程必须提供三项环境凭据：profile 中
 `provider.apiKey.id` 指定的模型凭据、run manifest 中 `adapterTokenRef.id`
 指定的适配器凭据，以及固定名称 `AGENTGUARD_PRODUCT_GATEWAY_TOKEN` 对应的

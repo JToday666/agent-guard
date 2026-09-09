@@ -155,10 +155,11 @@ def product_runtime_http(
     fixture: ProductActivationFixture | None = None,
     product_tool_catalog_path: Path | None = None,
     task_text: str = "exercise the public Product Active HTTP chain",
+    policy: PolicyBundle | None = None,
 ) -> Iterator[ProductRuntimeHttpHarness]:
     """Seed the peer over HTTP; the tested SDK must establish its own heartbeat."""
 
-    policy = PolicyBundle()
+    policy = policy or PolicyBundle()
     fixture = fixture or build_test_product_activation(
         now=datetime.now(timezone.utc),
         policy_digest=canonical_sha256(policy.model_dump(mode="json")),

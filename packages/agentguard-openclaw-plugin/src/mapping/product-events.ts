@@ -1,5 +1,6 @@
 import { types } from "node:util";
 import { posix } from "node:path";
+import { PRODUCT_INBOX_TARGET } from "../../product-runtime/inbox.mjs";
 import type { GuardEvent, JsonObject } from "../types.js";
 import {
   restrictedCanonicalJson,
@@ -173,7 +174,7 @@ export function readNativeProductToolCall(
     name === "message" &&
     (args.action !== "send" ||
       args.channel !== "agentguard-fixture" ||
-      args.target !== "fixture-inbox")
+      args.target !== PRODUCT_INBOX_TARGET)
   )
     productActionError("native_arguments_invalid");
   if (name === "edit") {

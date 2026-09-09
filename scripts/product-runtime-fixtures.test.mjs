@@ -25,7 +25,10 @@ import plugin, {
   startFixtureInbox,
 } from "../packages/agentguard-openclaw-plugin/product-runtime/index.mjs";
 import {
+  DEFAULT_INBOX_TARGET,
+  PRODUCT_INBOX_TARGET,
   deliverInboxMessage,
+  validateInboxTarget,
   validateInboxUrl,
 } from "../packages/agentguard-openclaw-plugin/product-runtime/inbox.mjs";
 
@@ -287,6 +290,63 @@ test("fixture config rejects unknown fields and non-loopback inbox addresses", (
     );
   }
   assert.equal(validateInboxUrl("http://[::1]:1234/inbox").hostname, "[::1]");
+});
+
+test("inbox target validator preserves baseline names and admits only the exact Product alias", () => {
+  for (const target of [
+    DEFAULT_INBOX_TARGET,
+    "other-fixture",
+    PRODUCT_INBOX_TARGET,
+  ])
+    assert.equal(validateInboxTarget(target), target);
+  for (const target of [
+    "other@agentguard.invalid",
+    "fixture-inbox@example.com",
+    "Fixture-inbox@agentguard.invalid",
+    "fixture-inbox@AgentGuard.invalid",
+    ` ${PRODUCT_INBOX_TARGET}`,
+    `${PRODUCT_INBOX_TARGET} `,
+    `mailto:${PRODUCT_INBOX_TARGET}`,
+    `http://${PRODUCT_INBOX_TARGET}/inbox`,
+  ])
+    assert.throws(() => validateInboxTarget(target), /invalid_inbox_target/u);
+});
+
+test("explicit Product alias reaches only literal loopback and remains exact in SQLite readback", async (t) => {
+  const root = rootFor(t);
+  const inbox = await startFixtureInbox({
+    acceptanceRoot: root,
+    target: PRODUCT_INBOX_TARGET,
+  });
+  t.after(() => inbox.close());
+  assert.match(inbox.url, /^http:\/\/127\.0\.0\.1:[0-9]+\/inbox$/u);
+  for (const target of [
+    DEFAULT_INBOX_TARGET,
+    "other@agentguard.invalid",
+    ` ${PRODUCT_INBOX_TARGET}`,
+  ]) {
+    const response = await fetch(inbox.url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target, text: "must not arrive" }),
+    });
+    assert.equal(response.status, 400);
+    await response.text();
+  }
+  assert.deepEqual(inbox.readMessages(), []);
+  const result = await deliverInboxMessage({
+    inboxUrl: inbox.url,
+    inboxTarget: PRODUCT_INBOX_TARGET,
+    to: PRODUCT_INBOX_TARGET,
+    text: "local alias message",
+  });
+  assert.deepEqual(inbox.readMessages(), [
+    {
+      messageId: result.messageId,
+      target: PRODUCT_INBOX_TARGET,
+      text: "local alias message",
+    },
+  ]);
 });
 
 test("channel outbound sends a real HTTP message with SQLite readback after inbox restart", async (t) => {

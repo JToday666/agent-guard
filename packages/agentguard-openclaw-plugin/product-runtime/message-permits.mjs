@@ -4,11 +4,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { types } from "node:util";
 import { FixtureError } from "./memory.mjs";
-import {
-  DEFAULT_INBOX_TARGET,
-  MAX_MESSAGE_BYTES,
-  validateInboxTarget,
-} from "./inbox.mjs";
+import { PRODUCT_INBOX_TARGET, MAX_MESSAGE_BYTES } from "./inbox.mjs";
 
 const CHANNEL = "agentguard-fixture";
 const PERMIT_KEY = "agentguard_fixture_permit";
@@ -93,12 +89,11 @@ function assertCallback(callback) {
 
 export function createMessagePermitBridge({
   sessionKey,
-  inboxTarget = DEFAULT_INBOX_TARGET,
+  inboxTarget = PRODUCT_INBOX_TARGET,
   accountId = "default",
 }) {
   identifier(sessionKey);
-  validateInboxTarget(inboxTarget);
-  if (accountId !== "default") fail();
+  if (inboxTarget !== PRODUCT_INBOX_TARGET || accountId !== "default") fail();
   let closed = false;
   let pending;
   let busy = false;
