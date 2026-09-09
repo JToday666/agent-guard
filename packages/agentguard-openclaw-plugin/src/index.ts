@@ -90,7 +90,8 @@ const plugin: OpenClawPluginDefinition = definePluginEntry({
       api.pluginConfig as OpenClawPluginConfigInput,
     );
     // Product authority must never enter legacy hooks or background delivery.
-    // B09 will inject one Product client through the trusted action composition.
+    // The separate Product entry owns the complete trusted composition. This
+    // compatibility entry cannot enable it through plain JSON configuration.
     if (hasProductConfiguration({ config }))
       assertOpenClawProductExecutionAvailable();
     const makeClient = () => new GuardApiClient({ config });

@@ -23,11 +23,11 @@ import plugin, {
   createFixtureMemory,
   createFixtureTools,
   startFixtureInbox,
-} from "../tests/support/openclaw-product-runtime/index.mjs";
+} from "../packages/agentguard-openclaw-plugin/product-runtime/index.mjs";
 import {
   deliverInboxMessage,
   validateInboxUrl,
-} from "../tests/support/openclaw-product-runtime/inbox.mjs";
+} from "../packages/agentguard-openclaw-plugin/product-runtime/inbox.mjs";
 
 function rootFor(t) {
   const root = mkdtempSync(join(tmpdir(), "agentguard-product-fixture-test-"));
@@ -167,7 +167,7 @@ test("fixture plugin metadata points to the native module and advertises its cha
   const manifest = JSON.parse(
     readFileSync(
       new URL(
-        "../tests/support/openclaw-product-runtime/openclaw.plugin.json",
+        "../packages/agentguard-openclaw-plugin/product-runtime/baseline/openclaw.plugin.json",
         import.meta.url,
       ),
     ),
@@ -175,7 +175,7 @@ test("fixture plugin metadata points to the native module and advertises its cha
   const metadata = JSON.parse(
     readFileSync(
       new URL(
-        "../tests/support/openclaw-product-runtime/package.json",
+        "../packages/agentguard-openclaw-plugin/product-runtime/baseline/package.json",
         import.meta.url,
       ),
     ),

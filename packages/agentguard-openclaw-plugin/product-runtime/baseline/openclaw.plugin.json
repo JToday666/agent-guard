@@ -1,0 +1,28 @@
+{
+  "id": "agentguard-product-runtime-fixture",
+  "name": "AgentGuard Product Runtime Fixture",
+  "description": "Isolated SQLite memory and loopback outbound channel for real-host acceptance.",
+  "version": "0.1.0",
+  "channels": ["agentguard-fixture"],
+  "contracts": {
+    "tools": ["agentguard_memory_read", "agentguard_memory_write"]
+  },
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["acceptanceRoot", "inboxUrl"],
+    "properties": {
+      "acceptanceRoot": { "type": "string", "minLength": 1 },
+      "inboxUrl": {
+        "type": "string",
+        "pattern": "^http://(127\\.0\\.0\\.1|\\[::1\\]):[1-9][0-9]*/inbox$"
+      },
+      "inboxTarget": {
+        "type": "string",
+        "pattern": "^[a-z][a-z0-9-]{0,63}$",
+        "default": "fixture-inbox"
+      }
+    }
+  }
+}

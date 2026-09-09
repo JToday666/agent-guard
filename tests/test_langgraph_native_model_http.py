@@ -1,19 +1,26 @@
 """Deterministic model + actual localhost Guard API, not candidate admission.
 
-Only test metadata and the still-closed composition fuse are substituted. The
+Only test metadata and the private composition boundary are substituted. The
 context plan, original ACKs, policy evaluation, AES-GCM queue and receipts are
 real. The API uses MemoryControlPlaneStore; no external Provider is requested.
 """
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import replace
 from importlib.metadata import version
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
-from agentguard_langgraph_adapter import activation_session, execution_template
+from agentguard_langgraph_adapter import (
+    activation_session,
+    execution_template,
+    native_langgraph,
+    product_composition,
+)
 from agentguard_langgraph_adapter.langgraph_adapter import LangGraphAdapter
 from agentguard_langgraph_adapter.execution_template import GuardedExecutionTemplate
 from agentguard_langgraph_adapter.model_boundary import (
@@ -49,7 +56,32 @@ def native_model_http(tmp_path, monkeypatch, request):
 
         monkeypatch.setattr(activation_session, "_installed_version", assumed_candidate)
         monkeypatch.setattr(
-            execution_template, "assert_product_execution_available", lambda: None
+            execution_template,
+            "assert_product_execution_available",
+            lambda **kwargs: None,
+        )
+        # This older test isolates the HTTP content boundary. B09 composition
+        # tests exercise the real private permits and full native graph factory.
+        monkeypatch.setattr(
+            product_composition,
+            "delegated_invocation",
+            lambda *args, **kwargs: nullcontext(None),
+        )
+        # The historical graph HTTP tests reuse this transport fixture. Keep
+        # their synthetic composition explicit, scoped and separate from B09.
+        monkeypatch.setattr(
+            native_langgraph,
+            "_require_complete_product_composition",
+            lambda graph: None,
+        )
+        monkeypatch.setattr(
+            native_langgraph,
+            "_create_composition",
+            lambda graph: SimpleNamespace(
+                run=lambda: nullcontext(),
+                invocation=lambda *args, **kwargs: nullcontext(None),
+                close=lambda: None,
+            ),
         )
         adapter = LangGraphAdapter(
             config=replace(

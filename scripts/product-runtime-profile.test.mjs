@@ -4,9 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  createProductRuntimeProfile,
+  createBaselineRuntimeProfile as createProductRuntimeProfile,
   PRODUCT_TOOL_IDS,
-} from "../tests/support/openclaw-product-runtime/profile.mjs";
+} from "../packages/agentguard-openclaw-plugin/product-runtime/baseline-profile.mjs";
 
 async function withRoot(fn) {
   const root = await mkdtemp(

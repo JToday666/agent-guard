@@ -32,9 +32,13 @@ if TYPE_CHECKING:
     from .native_events import NativeGuardEventBuilder, NativeModelOrigin
 
 
-def assert_product_execution_available() -> None:
-    """B09 replaces this fixed fuse with the complete composition check."""
-    raise ProductActivationError("product_execution_unavailable")
+def assert_product_execution_available(**kwargs: Any) -> None:
+    """A factory-owned one-use callback permit is required at each boundary."""
+    from .product_composition import assert_invocation_permit
+
+    if not kwargs:
+        raise ProductActivationError("product_execution_unavailable")
+    assert_invocation_permit(**kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,8 +88,19 @@ class GuardedExecutionTemplate:
         trace_id: str,
         invoke_once: Callable[[], Any],
         model_origin: NativeModelOrigin,
+        _permit: Any = None,
     ) -> ToolExecutionResult:
-        assert_product_execution_available()
+        if _permit is None:
+            assert_product_execution_available(
+                owner=self, permit=None, callback=invoke_once, subject=""
+            )
+        from .product_composition import tool_subject
+
+        subject = tool_subject(prepared, security, trace_id, model_origin)
+        permit_check = dict(
+            owner=self, permit=_permit, callback=invoke_once, subject=subject
+        )
+        assert_product_execution_available(**permit_check)
         if not isinstance(prepared, PreparedNativeToolCall):
             raise ProductActivationError("native_tool_call_invalid")
         if not self._slot.acquire(blocking=False):
@@ -177,16 +192,38 @@ class GuardedExecutionTemplate:
                     delivery,
                 )
 
-            result = self._run_guarded_action(
-                event,
-                decision,
-                action_id=action_id,
-                invoke_once=invoke,
+            from .product_composition import action_subject, delegated_invocation
+
+            subject = action_subject(event, decision, action_id, "tool_call")
+            with delegated_invocation(
+                _permit,
+                owner=self,
+                executor=self,
+                callback=invoke,
+                subject=subject,
                 postprocess=postprocess,
-                start_kind="tool_call",
-                strong_release=release,
-                approval_resolution=release.approval_resolution if release else None,
-            )
+            ) as action_permit:
+                child_check = dict(
+                    owner=self,
+                    permit=action_permit,
+                    callback=invoke,
+                    subject=subject,
+                    postprocess=postprocess,
+                )
+                assert_product_execution_available(**child_check)
+                result = self._run_guarded_action(
+                    event,
+                    decision,
+                    action_id=action_id,
+                    invoke_once=invoke,
+                    postprocess=postprocess,
+                    start_kind="tool_call",
+                    strong_release=release,
+                    approval_resolution=(
+                        release.approval_resolution if release else None
+                    ),
+                    _permit_check=child_check,
+                )
             return self._tool_result(
                 prepared, result, decision=decision, strong_release=release
             )
@@ -206,8 +243,22 @@ class GuardedExecutionTemplate:
         start_kind: Literal["tool_call", "model_call"],
         strong_release: StrongBindingRelease | None = None,
         approval_resolution: dict[str, Any] | None = None,
+        _permit: Any = None,
     ) -> GuardedInvocationResult:
-        assert_product_execution_available()
+        if _permit is None:
+            assert_product_execution_available(
+                owner=self, permit=None, callback=invoke_once, subject=""
+            )
+        from .product_composition import action_subject
+
+        permit_check = dict(
+            owner=self,
+            permit=_permit,
+            callback=invoke_once,
+            subject=action_subject(event, decision, action_id, start_kind),
+            postprocess=postprocess,
+        )
+        assert_product_execution_available(**permit_check)
         if not self._slot.acquire(blocking=False):
             return _failure("action_already_active")
         try:
@@ -220,6 +271,7 @@ class GuardedExecutionTemplate:
                 start_kind=start_kind,
                 strong_release=strong_release,
                 approval_resolution=approval_resolution,
+                _permit_check=permit_check,
             )
         finally:
             self._slot.release()
@@ -235,7 +287,18 @@ class GuardedExecutionTemplate:
         start_kind: Literal["tool_call", "model_call"],
         strong_release: StrongBindingRelease | None,
         approval_resolution: dict[str, Any] | None,
+        _permit_check: dict[str, Any],
     ) -> GuardedInvocationResult:
+        from .product_composition import action_subject
+
+        if (
+            _permit_check.get("owner") is not self
+            or _permit_check.get("callback") is not invoke_once
+            or _permit_check.get("postprocess") is not postprocess
+            or _permit_check.get("subject")
+            != action_subject(event, decision, action_id, start_kind)
+        ):
+            raise ProductActivationError("product_execution_unavailable")
         barrier = self._adapter.product_action_barrier
         ready = False
         begin_attempted = False
@@ -320,6 +383,31 @@ class GuardedExecutionTemplate:
 
         # Start confirmation commits exactly one callback. No refresh, retry, or
         # approval re-consumption is permitted between this point and invocation.
+        try:
+            ack.remaining_seconds(
+                now=datetime.now(timezone.utc),
+                max_age_seconds=self._adapter.config.activation_ack_max_age_seconds,
+            )
+            if strong_release is not None:
+                validate_strong_release_for_invocation(strong_release)
+            assert_product_execution_available(**_permit_check, consume=True)
+        except Exception:
+            # The start is recorded, but the owned callback has not been entered.
+            # Preserve a truthful terminal using the original ACK and ticket.
+            terminal = build_runtime_outcome(
+                event,
+                decision,
+                execution_status="not_invoked",
+                approval_resolution=approval_resolution,
+                parent_audit_id=started.audit_id,
+                intervention_type="runtime_receipt_failure",
+                intervention_reason="Composition changed before invocation.",
+                **_release_fields(strong_release),
+            )
+            delivery = barrier.finish_action(begun.ticket, terminal)
+            return GuardedInvocationResult(
+                "not_invoked", None, True, delivery, "product_composition_drift"
+            )
         invoked_at = utc_now_iso()
         try:
             value = invoke_once()

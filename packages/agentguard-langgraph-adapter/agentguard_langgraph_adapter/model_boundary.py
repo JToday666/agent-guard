@@ -246,10 +246,37 @@ class GuardedModelBoundary:
         provider: str,
         model: str,
         tool_descriptors: list[dict[str, Any]],
+        _permit: Any = None,
     ) -> NativeModelResult:
         # Import lazily: the execution template only TYPE_CHECKING-imports the
         # event builder, keeping the base SDK independent of native Host deps.
-        from .execution_template import GuardedResultDisposition
+        from .execution_template import (
+            GuardedResultDisposition,
+            assert_product_execution_available,
+        )
+        from .product_composition import (
+            invocation_subject,
+            action_subject,
+            delegated_invocation,
+        )
+
+        assert_product_execution_available(
+            owner=self,
+            permit=_permit,
+            callback=invoke_model,
+            subject=invocation_subject(
+                dict(
+                    sources=sources,
+                    security=security,
+                    trace_id=trace_id,
+                    model_call_id=model_call_id,
+                    provider=provider,
+                    model=model,
+                    tool_descriptors=tool_descriptors,
+                )
+            ),
+            postprocess=normalize_output,
+        )
 
         invoked = False
         returned = False
@@ -370,14 +397,26 @@ class GuardedModelBoundary:
                 returned = True
                 return raw
 
-            invocation = self.executor.run_guarded_action(
-                input_event,
-                input_decision,
-                action_id=f"act_{input_event.event_id}",
-                invoke_once=invoke_once,
+            action_id = f"act_{input_event.event_id}"
+            with delegated_invocation(
+                _permit,
+                owner=self,
+                executor=self.executor,
+                callback=invoke_once,
+                subject=action_subject(
+                    input_event, input_decision, action_id, "model_call"
+                ),
                 postprocess=postprocess,
-                start_kind="model_call",
-            )
+            ) as action_permit:
+                invocation = self.executor.run_guarded_action(
+                    input_event,
+                    input_decision,
+                    action_id=action_id,
+                    invoke_once=invoke_once,
+                    postprocess=postprocess,
+                    start_kind="model_call",
+                    _permit=action_permit,
+                )
             safe_output = (
                 invocation.value
                 if type(invocation.value) is NativeModelOutput

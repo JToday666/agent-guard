@@ -12,8 +12,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { fileURLToPath } from "node:url";
-import { createProductRuntimeProfile } from "../tests/support/openclaw-product-runtime/profile.mjs";
-import { startFixtureInbox } from "../tests/support/openclaw-product-runtime/inbox.mjs";
+import { createBaselineRuntimeProfile as createProductRuntimeProfile } from "../packages/agentguard-openclaw-plugin/product-runtime/baseline-profile.mjs";
+import { startFixtureInbox } from "../packages/agentguard-openclaw-plugin/product-runtime/inbox.mjs";
 import { runProductRuntimeInventoryProbe } from "../tests/support/openclaw-product-runtime/probe.mjs";
 
 /** Keep bounded private diagnostics for both successful and failed native runs. */

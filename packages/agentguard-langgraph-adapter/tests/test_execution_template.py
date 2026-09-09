@@ -511,7 +511,15 @@ def _decision(token="a", mode="active", decision="allow"):
 
 @pytest.fixture
 def env(factory, monkeypatch):
-    monkeypatch.setattr(module, "assert_product_execution_available", lambda: None)
+    monkeypatch.setattr(
+        module, "assert_product_execution_available", lambda **kwargs: None
+    )
+    from contextlib import nullcontext
+    from agentguard_langgraph_adapter import product_composition
+
+    monkeypatch.setattr(
+        product_composition, "delegated_invocation", lambda *a, **kw: nullcontext(None)
+    )
 
     def make(sender=_ok):
         outbox, store, clock = factory(sender)
@@ -564,7 +572,7 @@ def _run(env, invoke=lambda: "result", post=None):
 def test_public_fuse_is_fixed_and_zero_callback(env, monkeypatch):
     setup = env()
 
-    def fused():
+    def fused(**kwargs):
         raise ProductActivationError("product_execution_unavailable")
 
     monkeypatch.setattr(module, "assert_product_execution_available", fused)
@@ -894,8 +902,12 @@ def test_original_ack_expiring_after_start_confirmation_does_not_rebind(
     monkeypatch.setattr(
         type(setup.decision._evaluation_activation_ack), "remaining_seconds", remaining
     )
-    assert _run(setup).delivery.status == "recorded"
-    assert len(observed) == 1
+    calls = []
+    result = _run(setup, invoke=lambda: calls.append(True))
+    assert result.delivery.status == "recorded"
+    assert result.invocation_status == "not_invoked"
+    assert len(observed) == 2 and not calls
+    assert all(item is observed[0] for item in observed)
 
 
 def test_terminal_disk_failure_leaves_unknown_and_never_publishes(env, monkeypatch):

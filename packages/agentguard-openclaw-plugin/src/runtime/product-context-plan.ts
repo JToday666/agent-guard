@@ -9,6 +9,7 @@ import {
   productActionError,
 } from "../mapping/product-events.js";
 import { restrictedCanonicalJson, restrictedDigest } from "./canonical.js";
+import { productMemorySourceId } from "../mapping/product-content-events.js";
 import type {
   ProductContextConsumer,
   ProductContextSource,
@@ -64,6 +65,37 @@ function keys(value: JsonObject, expected: string): void {
 }
 function identity(value: unknown): string {
   if (typeof value !== "string" || !ID.test(value)) fail();
+  return value;
+}
+/** Memory resource identities escape segment slashes/backslashes rather than
+ * using the event-ID alphabet. Accept only the exact canonical two segments. */
+function localSourceIdentity(source: JsonObject): string {
+  if (source.source_type !== "memory") return identity(source.source_id);
+  const value = source.source_id;
+  if (
+    typeof value !== "string" ||
+    !value.startsWith("memory://") ||
+    value.length > 2 * (4096 + 256) + 10
+  )
+    fail();
+  const segments = [""];
+  for (let i = "memory://".length; i < value.length; i++) {
+    let character = value[i]!;
+    if (character === "\\") {
+      character = value[++i]!;
+      if (character !== "\\" && character !== "/") fail();
+    } else if (character === "/") {
+      if (segments.length !== 1) fail();
+      segments.push("");
+      continue;
+    }
+    segments[segments.length - 1] += character;
+  }
+  if (
+    segments.length !== 2 ||
+    productMemorySourceId(segments[0]!, segments[1]!) !== value
+  )
+    fail();
   return value;
 }
 function texts(value: unknown, max = 256): string[] {
@@ -220,7 +252,7 @@ function prepare(
     const source = object(sources[i]),
       descriptor = object(descriptors[i]),
       chunk = object(chunks[i]);
-    const localId = identity(source.source_id);
+    const localId = localSourceIdentity(source);
     if (localIds.has(localId)) fail();
     localIds.add(localId);
     if (
