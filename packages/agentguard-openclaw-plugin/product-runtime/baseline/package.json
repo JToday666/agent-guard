@@ -1,0 +1,19 @@
+{
+  "name": "@agentguard-internal/product-runtime-fixture",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "engines": {
+    "node": ">=24"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.mjs"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.7.1-2",
+      "minGatewayVersion": "2026.7.1-2"
+    }
+  }
+}

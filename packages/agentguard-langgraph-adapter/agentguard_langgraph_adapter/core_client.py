@@ -88,6 +88,11 @@ class AgentGuardCoreClient:
         default=None, init=False, repr=False
     )
     _product_session_lock: Any = field(default_factory=Lock, init=False, repr=False)
+    _product_session_owner: object | None = field(default=None, init=False, repr=False)
+    _product_session_observer: Any = field(default=None, init=False, repr=False)
+    _composed_session: ProductActivationSession | None = field(
+        default=None, init=False, repr=False
+    )
 
     def __post_init__(self) -> None:
         if getattr(self.config, "product_manifest_path", None) is not None:
@@ -135,6 +140,8 @@ class AgentGuardCoreClient:
     ) -> ActivationAckV1:
         manifest = self._check_product()
         with self._product_session_lock:
+            if self._product_session_owner is not None:
+                raise ProductActivationError("session_owner_mismatch")
             if self._product_session is None:
                 self._product_session = ProductActivationSession(
                     manifest,
@@ -145,6 +152,53 @@ class AgentGuardCoreClient:
                 )
             session = self._product_session
         return session.start()
+
+    def _start_composed_session(
+        self, owner: object, *, observe: Callable[[], ProductRuntimeObservation]
+    ) -> ActivationAckV1:
+        manifest = self._check_product()
+        with self._product_session_lock:
+            if self._product_session_owner is not owner:
+                if (
+                    self._product_session_owner is not None
+                    or self._product_session is not None
+                ):
+                    raise ProductActivationError("session_owner_mismatch")
+                self._product_session_owner = owner
+                self._product_session_observer = observe
+            if self._product_session_observer is not observe:
+                raise ProductActivationError("session_owner_mismatch")
+            if self._product_session is None:
+                self._product_session = ProductActivationSession(
+                    manifest,
+                    send_heartbeat=self._send_product_heartbeat,
+                    observe=observe,
+                    refresh_interval_seconds=self.config.product_refresh_interval_seconds,
+                    max_ack_age_seconds=self.config.activation_ack_max_age_seconds,
+                )
+            session = self._product_session
+            if self._composed_session is None:
+                self._composed_session = session
+            if session is not self._composed_session or session._observe is not observe:
+                raise ProductActivationError("session_owner_mismatch")
+        return session.start()
+
+    def _assert_composed_session(self, owner: object, observe: Any) -> None:
+        with self._product_session_lock:
+            if (
+                self._product_session_owner is not owner
+                or self._product_session_observer is not observe
+                or self._product_session is None
+                or self._product_session is not self._composed_session
+                or self._product_session._observe is not observe
+                or self._product_session._manifest is not self._product_manifest
+                or self._product_session._send_heartbeat != self._send_product_heartbeat
+                or self._product_session._refresh_interval
+                != self.config.product_refresh_interval_seconds
+                or self._product_session._max_ack_age
+                != self.config.activation_ack_max_age_seconds
+            ):
+                raise ProductActivationError("session_owner_mismatch")
 
     def _send_product_heartbeat(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._check_product()
@@ -164,8 +218,13 @@ class AgentGuardCoreClient:
 
     def close_product_session(self) -> None:
         self._product_failed = True
-        if self._product_session is not None:
-            self._product_session.close()
+        session = (
+            self._composed_session
+            if self._composed_session is not None
+            else self._product_session
+        )
+        if session is not None:
+            session.close()
 
     def _headers(self, activation_ack: ActivationAckV1 | None = None) -> dict[str, str]:
         headers = {

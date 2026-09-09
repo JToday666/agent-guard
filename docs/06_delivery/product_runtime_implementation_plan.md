@@ -41,6 +41,9 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 替换在途动作的快照；无 lease 回执绑定 evaluate ACK，有 lease 回执绑定 consume ACK。
 开始确认失败不得调用工具，终态失败不得重新执行；持久回执补投只重发证据。
 
+两侧正式工厂、受保护清单与启动检查见
+[Product Active 完整启动入口](../03_adapters/product_runtime_startup.md)。
+
 2026-09-08 用户明确授权增加 06a：真实模型驱动的 `write/exec` 暴露出
 旧契约把模型控制影响的 `possible` 等同于实际参数数据缺证的问题。
 修正范围见[产品数据与控制影响契约](../AgentGuard_Core_V2.1_Final_Contract_Freeze/11_Product数据与控制影响修正.md)。

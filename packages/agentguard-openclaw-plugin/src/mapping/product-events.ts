@@ -206,12 +206,15 @@ export function readNativeProductToolCall(
 }
 export function readNativeProductAfter(
   event: unknown,
+  verifiedToolName?: string,
 ): Readonly<{ failed: boolean; result: unknown }> {
   const e = readNativeProductFields(event);
   if (e.error !== undefined && typeof e.error !== "string")
     productActionError("native_terminal_invalid");
   const result =
-    e.result === undefined ? undefined : snapshotNativeProductResult(e.result);
+    e.result === undefined
+      ? undefined
+      : snapshotNativeProductResult(e.result, verifiedToolName);
   return {
     failed:
       (typeof e.error === "string" && e.error.length > 0) ||
@@ -219,9 +222,13 @@ export function readNativeProductAfter(
     result,
   };
 }
-/** Pinned Host constructs these optional result-envelope fields with undefined.
- * Only absent envelope values are omitted; content and nested details stay strict. */
-export function snapshotNativeProductResult(value: unknown): unknown {
+/** Pinned Host constructs optional envelope fields and message.details.mediaUrls
+ * with undefined. The caller must verify the native tool identity before opting
+ * into that one message path; all other content and nested details stay strict. */
+export function snapshotNativeProductResult(
+  value: unknown,
+  verifiedToolName?: string,
+): unknown {
   if (value === null || typeof value !== "object" || Array.isArray(value))
     return snapshotProductJson(value);
   const fields = readNativeProductFields(value);
@@ -232,7 +239,17 @@ export function snapshotNativeProductResult(value: unknown): unknown {
       ["details", "isError", "terminate"].includes(key)
     )
       continue;
-    result[key] = child;
+    if (
+      verifiedToolName === "message" &&
+      key === "details" &&
+      child !== null &&
+      typeof child === "object" &&
+      !Array.isArray(child)
+    ) {
+      const details = readNativeProductFields(child);
+      if (details.mediaUrls === undefined) delete details.mediaUrls;
+      result[key] = details;
+    } else result[key] = child;
   }
   return snapshotProductJson(result);
 }
@@ -362,9 +379,12 @@ export function buildProductToolEvent(
         ? "send"
         : name === "process"
           ? "list"
-          : "write",
-    target,
-    direction: name === "message" ? "outbound" : "internal",
+          : name === "exec"
+            ? "execute"
+            : "write",
+    target: name === "exec" ? args.command : target,
+    direction:
+      name === "message" ? "outbound" : name === "exec" ? "local" : "internal",
   };
   let payload: JsonObject;
   if (name === "message")

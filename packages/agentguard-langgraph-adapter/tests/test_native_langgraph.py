@@ -140,8 +140,22 @@ class SyntheticExecutor:
 @pytest.fixture
 def controlled_composition(monkeypatch: Any) -> Any:
     # Explicit non-candidate test seam. Public code has no corresponding flag.
+    from contextlib import nullcontext
+
     monkeypatch.setattr(
-        native._execution, "assert_product_execution_available", lambda: None
+        native, "_require_complete_product_composition", lambda graph: None
+    )
+    monkeypatch.setattr(
+        native,
+        "_create_composition",
+        lambda graph: SimpleNamespace(
+            run=lambda: nullcontext(),
+            invocation=lambda *a, **kw: nullcontext(None),
+            close=lambda: None,
+        ),
+    )
+    monkeypatch.setattr(
+        native._execution, "assert_product_execution_available", lambda **kwargs: None
     )
     monkeypatch.setattr(
         native._execution, "GuardedExecutionTemplate", SyntheticExecutor

@@ -54,7 +54,10 @@ export type ProductResultCheckpoint = Readonly<{
   /** A complete safe Host ToolResult message; only the trusted B08 boundary supplies it. */
   message?: unknown;
 }>;
-export type ProductMessageAuthorization = NativeProductToolCall &
+export type ProductMessageAuthorization = Pick<
+  NativeProductToolCall,
+  "runId" | "toolCallId" | "sessionKey" | "toolName" | "argumentsJson"
+> &
   Readonly<{
     actionId: string;
     assertCanSend(): void;
@@ -112,11 +115,11 @@ const BLOCKED: ToolHookResult = Object.freeze({
   block: true,
   blockReason: "Product action withheld",
 });
-/** The public Host composition remains unavailable until B09. No enable override. */
+/** A partial or legacy Host composition cannot grant Product execution. */
 export function assertOpenClawProductExecutionAvailable(): never {
   return productActionError("product_execution_unavailable");
 }
-/** B07 internal orchestration; production registration remains behind the fixed fuse. */
+/** Internal orchestration; the public Product factory verifies all registered consumers. */
 export class OpenClawProductActionRuntime {
   #options: ProductActionRuntimeOptions;
   #profile: OpenClawProductToolProfile;
@@ -321,7 +324,11 @@ export class OpenClawProductActionRuntime {
         const current = entry;
         this.#options.messageBridge.authorize(
           Object.freeze({
-            ...call,
+            runId: call.runId,
+            toolCallId: call.toolCallId,
+            sessionKey: call.sessionKey,
+            toolName: call.toolName,
+            argumentsJson: call.argumentsJson,
             actionId: productCanonicalActionId(entry.event),
             assertCanSend: () => this.#assertCanSend(current),
             assertReadyToSend: async () => {
@@ -410,7 +417,7 @@ export class OpenClawProductActionRuntime {
         this.#unknown(entry);
         return Promise.resolve(undefined);
       }
-      const terminal = readNativeProductAfter(event);
+      const terminal = readNativeProductAfter(event, entry.call.toolName);
       if (entry.middlewareObserved) {
         if (
           !entry.approvedAfterDigest ||
@@ -508,7 +515,7 @@ export class OpenClawProductActionRuntime {
       if (raw.isError !== undefined && typeof raw.isError !== "boolean")
         productActionError("native_terminal_invalid");
       const result = readNativeProductFields(
-        snapshotNativeProductResult(raw.result),
+        snapshotNativeProductResult(raw.result, entry.call.toolName),
       );
       if (
         !Array.isArray(result.content) ||
@@ -529,12 +536,15 @@ export class OpenClawProductActionRuntime {
         )
           productActionError("native_terminal_invalid");
       }
-      const terminal = readNativeProductAfter({
-        result: {
-          ...result,
-          isError: raw.isError === true || result.isError === true,
+      const terminal = readNativeProductAfter(
+        {
+          result: {
+            ...result,
+            isError: raw.isError === true || result.isError === true,
+          },
         },
-      });
+        entry.call.toolName,
+      );
       const digest = restrictedDigest(terminal);
       if (entry.middlewareDigest && entry.middlewareDigest !== digest)
         productActionError("native_result_identity_invalid");
@@ -566,10 +576,13 @@ export class OpenClawProductActionRuntime {
         sanitizeToolResult(afterProjection),
       );
       entry.approvedAfterDigest = restrictedDigest(expectedAfter);
-      entry.approvedAfterFailed = readNativeProductAfter({
-        result: expectedAfter,
-        ...(returned.isError ? { error: "native_tool_failed" } : {}),
-      }).failed;
+      entry.approvedAfterFailed = readNativeProductAfter(
+        {
+          result: expectedAfter,
+          ...(returned.isError ? { error: "native_tool_failed" } : {}),
+        },
+        entry.call.toolName,
+      ).failed;
       this.#checkOpen();
       return { result: freezeProductValue(returned) };
     } catch {
@@ -766,8 +779,8 @@ function memoryWritten(call: NativeProductToolCall, result: unknown): boolean {
   const details = (result as JsonObject).details as JsonObject | undefined;
   return Boolean(
     details &&
-    Object.keys(details).sort().join("|") === "key|written" &&
-    details.key === (JSON.parse(call.argumentsJson) as JsonObject).key &&
+    Object.keys(details).sort().join("|") === "entryId|written" &&
+    details.entryId === (JSON.parse(call.argumentsJson) as JsonObject).key &&
     details.written === true,
   );
 }

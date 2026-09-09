@@ -1,6 +1,7 @@
 // B07 synthetic authority + real encrypted journal + actual pinned hook runner.
 // These contracts do not claim a Provider-backed or public Product activation.
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -21,6 +22,7 @@ import {
 } from "../dist/runtime/product-action-runtime.js";
 import {
   readNativeProductAfter,
+  snapshotNativeProductResult,
   snapshotProductJson,
 } from "../dist/mapping/product-events.js";
 import { restrictedDigest } from "../dist/runtime/canonical.js";
@@ -31,6 +33,7 @@ import {
 } from "../dist/runtime/product-authority-context.js";
 import { OpenClawProductEnvelopeStore } from "../dist/runtime/product-envelope-store.js";
 import { OpenClawProductReceiptOutbox } from "../dist/runtime/product-receipt-outbox.js";
+import { createMessagePermitBridge } from "../product-runtime/message-permits.mjs";
 import {
   registerBeforeToolCall,
   registerAfterToolCall,
@@ -320,6 +323,20 @@ for (const name of Object.keys(ARGS))
         f.events[0].security_context.session_key,
         context.sessionKey,
       );
+      if (name === "exec") {
+        assert.deepEqual(f.events[0].payload.derived_resources, [
+          {
+            resource_type: "process",
+            operation: "execute",
+            target: ARGS.exec.command,
+            direction: "local",
+          },
+        ]);
+        assert.deepEqual(f.events[0].payload.arguments, ARGS.exec);
+        assert.deepEqual(f.events[0].security_context.derived_paths, [
+          PROFILE.workspaceRoot,
+        ]);
+      }
       if (decision === "deny") {
         assert.equal(before.block, true);
         await f.runtime.after({ ...event, error: "blocked by host" }, context);
@@ -346,7 +363,7 @@ for (const name of Object.keys(ARGS))
         f.authorizations[0].onMessageDelivered(MESSAGE_ID);
       const result =
         name === "agentguard_memory_write"
-          ? { content: [], details: { key: "fixture", written: true } }
+          ? { content: [], details: { entryId: "fixture", written: true } }
           : name === "message"
             ? messageResult()
             : { content: [{ type: "text", text: "actual" }] };
@@ -679,10 +696,13 @@ for (const decision of ["allow", "deny", "ask"])
         },
       }),
       n = native("agentguard_memory_write");
-    const tools = createFixtureTools({
-        acceptanceRoot: root,
-        inboxUrl: PROFILE.inboxUrl,
-      }),
+    const tools = createFixtureTools(
+        {
+          acceptanceRoot: root,
+          inboxUrl: PROFILE.inboxUrl,
+        },
+        { productMode: true },
+      ),
       tool = tools.find((value) => value.name === n.event.toolName);
     let invocations = 0;
     const actualExecute = tool.execute;
@@ -953,7 +973,7 @@ test("resolved tool result isError true produces failed terminal and cannot comm
       ...n.event,
       result: {
         isError: true,
-        details: { key: "fixture", written: true },
+        details: { entryId: "fixture", written: true },
         content: [],
       },
     },
@@ -964,6 +984,56 @@ test("resolved tool result isError true produces failed terminal and cannot comm
   assert.equal(r.evidence.execution.persisted, null);
   assert.equal(r.evidence.execution.error, "native_tool_failed");
 });
+for (const decision of ["allow", "ask"])
+  test(`message ${decision} authorizes the real exact-shape one-shot bridge`, async (t) => {
+    // The policy is synthetic, but authorize/prepare/claim and their freshness
+    // callbacks are the production implementations. No delivery is fabricated.
+    const n = native("message"),
+      bridge = createMessagePermitBridge({ sessionKey: n.context.sessionKey }),
+      f = await fixture(t, { decision, bridge });
+    const before = await f.runtime.before(n.event, n.context);
+    assert.deepEqual(before.params, ARGS.message);
+    assert.equal(before.block, undefined);
+    assert.equal(f.outbox.status().breakerOpen, false);
+    assert.equal(f.consumes.length, decision === "ask" ? 1 : 0);
+    assert.deepEqual(
+      f.sent.map((receipt) => JSON.parse(receipt).metadata.outcome_kind),
+      decision === "ask" ? ["approval_release"] : [],
+    );
+    const args = Object.fromEntries(Object.entries(ARGS.message).sort()),
+      fingerprint = createHash("sha256")
+        .update(JSON.stringify({ action: "send", params: args }))
+        .digest("base64url")
+        .slice(0, 24);
+    const payload = bridge.prepareSendPayload({
+      ctx: {
+        channel: args.channel,
+        action: args.action,
+        sessionKey: n.context.sessionKey,
+        params: {
+          ...args,
+          idempotencyKey: `${n.context.runId}:message-tool:${fingerprint}:${n.context.toolCallId}`,
+        },
+      },
+      to: args.target,
+      payload: { text: args.message },
+    });
+    const outbound = { to: args.target, text: args.message, payload },
+      permit = bridge.claimSend(outbound);
+    await permit.assertReadyToSend();
+    assert.equal(permit.text, args.message);
+    assert.equal(permit.to, args.target);
+    assert.throws(
+      () => bridge.claimSend(outbound),
+      /fixture_message_permit_invalid/u,
+    );
+    f.runtime.onRunEnd(n.context.runId);
+    assert.equal(f.outbox.status().unknownActionCount, 1);
+    assert.equal(f.outbox.status().breakerOpen, true);
+    assert.equal(f.checkpoints, 0);
+    assert.throws(() => permit.assertCanSend());
+  });
+
 test("message permit expires with its original ACK even if a newer session ACK exists", async (t) => {
   const now = Date.now();
   t.mock.timers.enable({ apis: ["Date"], now });
@@ -1019,7 +1089,7 @@ test("confirmed native memory write acknowledgement permits lifecycle receipt, w
   await f.runtime.after(
     {
       ...n.event,
-      result: { content: [], details: { key: "fixture", written: true } },
+      result: { content: [], details: { entryId: "fixture", written: true } },
     },
     n.context,
   );
@@ -1030,6 +1100,132 @@ test("confirmed native memory write acknowledgement permits lifecycle receipt, w
   assert.equal(f.outbox.status().breakerOpen, true);
   assert.equal(receipt.evidence.execution.status, "executed");
 });
+
+for (const variant of [
+  "unchanged",
+  "entry",
+  "written",
+  "content",
+  "legacy-key",
+  "extra",
+])
+  test(`actual Product SQLite acknowledgement survives SDK redaction and strict persistence: ${variant}`, async (t) => {
+    // The policy/ACK are synthetic; SQLite execution and the public pinned
+    // sanitizer are real. The public Host HTTP suite covers native scheduling.
+    const root = await mkdtemp(join(tmpdir(), "ag-product-memory-persist-"));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    let confirmed;
+    const f = await fixture(t, {
+        profile: {
+          ...PROFILE,
+          workspaceRoot: root,
+          memoryNamespace: join(root, "memory.sqlite"),
+        },
+        checkpoint: async (input) => {
+          confirmed = {
+            role: "toolResult",
+            toolCallId: input.call.toolCallId,
+            toolName: input.call.toolName,
+            ...input.result,
+            timestamp: Date.now(),
+          };
+          return { status: "recorded", message: confirmed };
+        },
+      }),
+      n = native("agentguard_memory_write"),
+      tool = createFixtureTools(
+        { acceptanceRoot: root, inboxUrl: PROFILE.inboxUrl },
+        { productMode: true },
+      ).find((item) => item.name === n.event.toolName);
+    await f.runtime.before(n.event, n.context);
+    const raw = await tool.execute(n.event.toolCallId, n.event.params);
+    assert.deepEqual(raw.details, { entryId: "fixture", written: true });
+    assert.deepEqual(JSON.parse(raw.content[0].text), {
+      key: "fixture",
+      written: true,
+    });
+    assert.deepEqual(
+      sanitizeToolResult({ details: raw.details }).details,
+      raw.details,
+    );
+    assert.notEqual(
+      sanitizeToolResult({ details: { key: "fixture" } }).details.key,
+      "fixture",
+    );
+    const observed = await f.runtime.observeToolResultMiddleware(
+      {
+        toolCallId: n.event.toolCallId,
+        toolName: n.event.toolName,
+        args: n.event.params,
+        isError: false,
+        result: raw,
+      },
+      { runtime: "openclaw", ...n.context },
+    );
+    await f.runtime.after(
+      {
+        ...n.event,
+        result: sanitizeToolResult({
+          content: observed.result.content,
+          details: observed.result.details,
+        }),
+      },
+      n.context,
+    );
+    assert.equal(f.outbox.status().breakerOpen, false);
+    const persisted = structuredClone(confirmed);
+    persisted.details = sanitizeToolResult({
+      details: persisted.details,
+    }).details;
+    if (variant === "entry") persisted.details.entryId = "different";
+    if (variant === "written") persisted.details.written = false;
+    if (variant === "content") persisted.content[0].text = "changed";
+    if (variant === "legacy-key") {
+      persisted.details.key = persisted.details.entryId;
+      delete persisted.details.entryId;
+    }
+    if (variant === "extra") persisted.details.extra = true;
+    const saved = f.runtime.resultForPersistence(
+      {
+        toolName: n.event.toolName,
+        toolCallId: n.event.toolCallId,
+        message: persisted,
+      },
+      n.context,
+    );
+    assert.equal(f.sent.length, 1);
+    assert.equal(f.checkpoints, 1);
+    assert.equal(JSON.parse(f.sent[0]).evidence.execution.persisted, true);
+    assert.equal(f.outbox.status().breakerOpen, variant !== "unchanged");
+    if (variant === "unchanged")
+      assert.equal(
+        restrictedDigest(saved.message),
+        restrictedDigest(confirmed),
+      );
+    else assert.equal(saved.message.isError, true);
+  });
+
+for (const details of [
+  { key: "fixture", written: true },
+  { entryId: "different", written: true },
+  { entryId: "fixture", written: true, extra: true },
+])
+  test(`memory commit evidence rejects noncanonical metadata ${Object.keys(details).join("/")}`, async (t) => {
+    const f = await fixture(t),
+      n = native("agentguard_memory_write");
+    await f.runtime.before(n.event, n.context);
+    await f.runtime.after(
+      {
+        ...n.event,
+        result: {
+          content: [{ type: "text", text: '{"key":"fixture","written":true}' }],
+          details,
+        },
+      },
+      n.context,
+    );
+    assert.equal(JSON.parse(f.sent[0]).evidence.execution.persisted, null);
+  });
 
 const MESSAGE_ID = "fixture:00000000-0000-4000-8000-000000000001";
 function messageResult(messageId = MESSAGE_ID) {
@@ -1095,3 +1291,122 @@ test("pinned sanitizeToolResult preserves actual message delivery identity for a
   );
   assert.equal(JSON.parse(f.sent[0]).evidence.execution.status, "executed");
 });
+
+for (const seam of ["after", "middleware"])
+  test(`message ${seam} normalizes only the pinned optional mediaUrls path before terminal correlation`, async (t) => {
+    const f = await fixture(t, {
+        checkpoint: async (input) => {
+          assert.equal(Object.hasOwn(input.result.details, "mediaUrls"), false);
+          assert.equal(input.result.details.mediaUrl, null);
+          return {
+            status: "recorded",
+            message: {
+              role: "toolResult",
+              toolCallId: input.call.toolCallId,
+              toolName: input.call.toolName,
+              ...input.result,
+            },
+          };
+        },
+      }),
+      n = native("message");
+    await f.runtime.before(n.event, n.context);
+    f.authorizations[0].onMessageDelivered(MESSAGE_ID);
+    const result = messageResult();
+    result.details.mediaUrl = null;
+    result.details.mediaUrls = undefined;
+    if (seam === "middleware") {
+      const observed = await f.runtime.observeToolResultMiddleware(
+        {
+          toolCallId: n.event.toolCallId,
+          toolName: "message",
+          args: n.event.params,
+          isError: false,
+          result,
+        },
+        { runtime: "openclaw", ...n.context },
+      );
+      assert.equal(observed.result.isError, false);
+      const afterResult = sanitizeToolResult({
+        content: observed.result.content,
+        details: observed.result.details,
+      });
+      // Host optional absence and omission must retain the same approved digest.
+      afterResult.details.mediaUrls = undefined;
+      await f.runtime.after({ ...n.event, result: afterResult }, n.context);
+      delete afterResult.details.mediaUrls;
+      await f.runtime.after({ ...n.event, result: afterResult }, n.context);
+    } else {
+      await f.runtime.after({ ...n.event, result }, n.context);
+      const normalized = snapshotNativeProductResult(result, "message");
+      await f.runtime.after({ ...n.event, result: normalized }, n.context);
+    }
+    assert.equal(Object.hasOwn(result.details, "mediaUrls"), true);
+    assert.equal(f.checkpoints, 1);
+    assert.equal(f.sent.length, 1);
+    assert.equal(JSON.parse(f.sent[0]).evidence.execution.status, "executed");
+    assert.equal(f.outbox.status().unknownActionCount, 0);
+    assert.equal(f.outbox.status().breakerOpen, false);
+  });
+
+test("message optional result handling requires verified tool identity and preserves concrete media values", () => {
+  const result = messageResult();
+  result.details.mediaUrls = undefined;
+  for (const toolName of [undefined, "read", "exec"])
+    assert.throws(() => snapshotNativeProductResult(result, toolName));
+  result.details.mediaUrls = ["fixture-media"];
+  assert.deepEqual(
+    snapshotNativeProductResult(result, "message").details.mediaUrls,
+    ["fixture-media"],
+  );
+});
+
+for (const invalid of [
+  "unknown-details",
+  "nested-mediaUrls",
+  "undefined-array-item",
+  "content",
+  "mediaUrls-getter",
+  "details-getter",
+  "details-proxy",
+])
+  test(`message optional result handling rejects ${invalid} without executing accessors`, () => {
+    let executions = 0;
+    const result = messageResult();
+    result.details.mediaUrls = undefined;
+    if (invalid === "unknown-details") result.details.extra = undefined;
+    if (invalid === "nested-mediaUrls")
+      result.details.result.mediaUrls = undefined;
+    if (invalid === "undefined-array-item")
+      result.details.mediaUrls = [undefined];
+    if (invalid === "content") result.content[0].extra = undefined;
+    if (invalid === "mediaUrls-getter")
+      Object.defineProperty(result.details, "mediaUrls", {
+        enumerable: true,
+        get() {
+          executions++;
+          return undefined;
+        },
+      });
+    if (invalid === "details-getter")
+      Object.defineProperty(result, "details", {
+        enumerable: true,
+        get() {
+          executions++;
+          return {};
+        },
+      });
+    if (invalid === "details-proxy")
+      result.details = new Proxy(result.details, {
+        ownKeys() {
+          executions++;
+          return [];
+        },
+        getPrototypeOf() {
+          executions++;
+          return Object.prototype;
+        },
+      });
+    assert.throws(() => snapshotNativeProductResult(result, "message"));
+    assert.equal(executions, 0);
+  });

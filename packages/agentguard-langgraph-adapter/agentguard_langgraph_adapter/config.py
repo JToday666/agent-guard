@@ -95,6 +95,10 @@ class AgentGuardLangGraphConfig:
     # eventual native composition require both protected local locations.
     product_receipt_directory: str | None = None
     product_receipt_key_path: str | None = None
+    # Native execution is an additional explicit opt-in, independent of ACK
+    # transport and recovery of historical receipts.
+    product_execution_enabled: bool = False
+    product_adapter_wheel_path: str | None = None
 
     def __post_init__(self) -> None:
         self.core_base_url = validate_guard_api_base_url(self.core_base_url)
@@ -108,6 +112,10 @@ class AgentGuardLangGraphConfig:
         warn_if_legacy_api_mode(self.api_mode)
         if self.timeout <= 0:
             raise ValueError("timeout must be greater than 0")
+        if type(self.product_execution_enabled) is not bool:
+            raise ValueError("Product execution opt-in must be boolean")
+        if self.product_execution_enabled:
+            validate_product_execution_configuration(self)
         if self.product_manifest_path is not None:
             validate_product_configuration(self)
         validate_product_receipt_paths(self)
@@ -171,6 +179,19 @@ def validate_product_receipt_paths(config: Any, *, required: bool = False) -> No
         raise ValueError("Product receipt key must be outside the queue")
 
 
+def validate_product_execution_configuration(config: Any) -> None:
+    validate_product_configuration(config)
+    validate_product_receipt_paths(config, required=True)
+    wheel = getattr(config, "product_adapter_wheel_path", None)
+    if (
+        getattr(config, "product_execution_enabled", False) is not True
+        or not isinstance(wheel, str)
+        or not wheel
+        or not Path(wheel).is_absolute()
+    ):
+        raise ValueError("Product execution composition is incomplete")
+
+
 def product_configuration_digest(config: Any) -> str:
     """Detect mutable compatibility config changes without retaining secrets."""
 
@@ -192,6 +213,8 @@ def product_configuration_digest(config: Any) -> str:
         "activation_ack_max_age_seconds",
         "product_receipt_directory",
         "product_receipt_key_path",
+        "product_execution_enabled",
+        "product_adapter_wheel_path",
     )
     projection = {name: getattr(config, name, None) for name in fields}
     return hashlib.sha256(

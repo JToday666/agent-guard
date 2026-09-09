@@ -26,7 +26,13 @@ from langgraph.types import RetryPolicy
 from langsmith import tracing_context
 from pydantic import SecretBytes, SecretStr
 
-from .activation_ack import ProductActivationError
+from .activation_ack import ActivationAckV1, ProductActivationError
+from .product_composition import (
+    ProductComposition,
+    _create_composition,
+    invocation_subject,
+    tool_subject,
+)
 from . import execution_template as _execution
 from .model_boundary import GuardedModelBoundary, NativeModelOutput
 from .native_events import NativeGuardEventBuilder, NativeModelOrigin, native_json
@@ -63,12 +69,13 @@ def _copy(value: Any) -> Any:
     return json.loads(_json(value))
 
 
-def _require_complete_product_composition(adapter: Any) -> None:
-    # One shared, unconditional fuse, including the lower-level executor.
-    # Tests may replace this private boundary explicitly; no config enables it.
-    _execution.assert_product_execution_available()
-    if not adapter.product_enabled:
-        raise ProductActivationError("official_client_required")
+def _require_complete_product_composition(graph: Any) -> None:
+    if (
+        type(graph._composition) is not ProductComposition
+        or graph._composition.graph() is not graph
+    ):
+        raise ProductActivationError("product_execution_unavailable")
+    graph._composition.assert_current()
 
 
 @dataclass(frozen=True, slots=True)
@@ -218,6 +225,7 @@ class NativeProductGraph:
         self._max_model_calls = max_model_calls
         self._lock = Lock()
         self._closed = False
+        self._composition: ProductComposition | None = None
         self._assert_model_configuration()
         self._model_configuration_digest = self._capture_model_configuration()
         # LangChain 1.4.8 returns a typed, behaviorally identical binding
@@ -377,7 +385,7 @@ class NativeProductGraph:
     def _assert_current(self) -> None:
         if self._closed:
             raise NativeRuntimeError("native_runtime_closed")
-        _require_complete_product_composition(self._adapter)
+        _require_complete_product_composition(self)
         if native_tool_inventory_digest(self._tools) != self._inventory_digest:
             raise NativeRuntimeError("native_inventory_drift")
         self._assert_binding()
@@ -415,7 +423,8 @@ class NativeProductGraph:
             }
             # No external callbacks, streaming, checkpoint, parent interrupts,
             # or caller-supplied RunnableConfig cross this entrypoint.
-            with tracing_context(enabled=False):
+            assert self._composition is not None
+            with self._composition.run(), tracing_context(enabled=False):
                 final = self._compiled.invoke(
                     state,
                     config={
@@ -440,9 +449,36 @@ class NativeProductGraph:
         finally:
             self._lock.release()
 
+    def start(self) -> ActivationAckV1:
+        """Verify the complete candidate and acquire this graph's ACK session."""
+        if (
+            self._closed
+            or type(self._composition) is not ProductComposition
+            or self._composition.graph() is not self
+        ):
+            raise ProductActivationError("product_execution_unavailable")
+        return self._composition.start()
+
+    def snapshot(self) -> dict[str, Any]:
+        """Return bounded state without credentials, sources or provider config."""
+        self._assert_current()
+        assert self._composition is not None
+        ack = self._adapter._product_client().snapshot_product_ack()
+        return {
+            "ready": True,
+            "runtime": "langgraph",
+            "inventory_digest": self._inventory_digest,
+            "ack_expires_at": ack.expires_at,
+        }
+
     def close(self) -> None:
-        """Reject further work; the owner closes the separately owned tool set."""
+        """Revoke invocation/session ownership; retain historical delivery transport."""
         self._closed = True
+        if (
+            type(self._composition) is ProductComposition
+            and self._composition.graph() is self
+        ):
+            self._composition.close()
 
     def _model_step(self, state: _State) -> dict[str, Any]:
         self._assert_current()
@@ -461,17 +497,29 @@ class NativeProductGraph:
                 config={"callbacks": [], "max_concurrency": 1},
             )
 
-        result = self._model_boundary.invoke(
+        request = dict(
             sources=_copy(state["history"]),
             security=_copy(state["security"]),
             trace_id=state["trace_id"],
             model_call_id="model_" + uuid4().hex,
-            invoke_model=invoke_model,
-            normalize_output=_normalize_model_output,
             provider=self._provider,
             model=self._model_name,
             tool_descriptors=_copy(self._bound_model.kwargs["tools"]),
         )
+        assert self._composition is not None
+        with self._composition.invocation(
+            self._model_boundary,
+            invoke_model,
+            invocation_subject(request),
+            _normalize_model_output,
+        ) as permit:
+            result = self._model_boundary.invoke(
+                **request,
+                invoke_model=invoke_model,
+                normalize_output=_normalize_model_output,
+                _permit=permit,
+            )
+        self._assert_current()
         update: dict[str, Any] = {"model_calls": state["model_calls"] + invocations}
         if (
             result.blocked
@@ -600,13 +648,21 @@ class NativeProductGraph:
                 raise NativeRuntimeError("native_tool_output_invalid")
             return _copy(response.content)
 
-        result = self._executor.execute_action(
-            prepared,
-            security=_copy(request.state["tool_security"]),
-            trace_id=request.state["trace_id"],
-            invoke_once=invoke_once,
-            model_origin=origin,
-        )
+        security = _copy(request.state["tool_security"])
+        trace = request.state["trace_id"]
+        assert self._composition is not None
+        with self._composition.invocation(
+            self._executor, invoke_once, tool_subject(prepared, security, trace, origin)
+        ) as permit:
+            result = self._executor.execute_action(
+                prepared,
+                security=security,
+                trace_id=trace,
+                invoke_once=invoke_once,
+                model_origin=origin,
+                _permit=permit,
+            )
+        self._assert_current()
         blocked = bool(
             result.blocked
             or result.runtime_receipt_status != "recorded"
@@ -690,8 +746,8 @@ def build_native_product_graph(
     model_name: str,
     max_model_calls: int = 16,
 ) -> NativeProductGraph:
-    """Build the native topology; execution remains Product-fused until B09."""
-    return NativeProductGraph(
+    """Build a closed native topology; call start() to verify explicit admission."""
+    graph = NativeProductGraph(
         adapter=adapter,
         model=model,
         tools=tools,
@@ -699,3 +755,6 @@ def build_native_product_graph(
         model_name=model_name,
         max_model_calls=max_model_calls,
     )
+
+    graph._composition = _create_composition(graph)
+    return graph

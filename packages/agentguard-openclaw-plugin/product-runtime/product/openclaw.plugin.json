@@ -1,0 +1,28 @@
+{
+  "id": "agentguard-product-runtime-fixture",
+  "name": "AgentGuard Product Runtime",
+  "description": "Complete guarded runtime with explicit protected provisioning.",
+  "version": "0.1.0-beta.1",
+  "channels": ["agentguard-fixture"],
+  "providers": ["agentguard-acceptance"],
+  "contracts": {
+    "tools": ["agentguard_memory_read", "agentguard_memory_write"],
+    "agentToolResultMiddleware": ["openclaw"]
+  },
+  "activation": { "onStartup": true },
+  "channelConfigs": {
+    "agentguard-fixture": {
+      "schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": { "enabled": { "type": "boolean" } }
+      }
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["runManifestPath"],
+    "properties": { "runManifestPath": { "type": "string", "minLength": 1 } }
+  }
+}

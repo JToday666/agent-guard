@@ -15,8 +15,12 @@ import defaultPlugin, {
   createFixturePlugin,
   createMessagePermitBridge,
   startFixtureInbox,
-} from "../tests/support/openclaw-product-runtime/index.mjs";
-import { createProductRuntimeProfile } from "../tests/support/openclaw-product-runtime/profile.mjs";
+} from "../packages/agentguard-openclaw-plugin/product-runtime/index.mjs";
+import { createBaselineRuntimeProfile as createProductRuntimeProfile } from "../packages/agentguard-openclaw-plugin/product-runtime/baseline-profile.mjs";
+import {
+  readNativeProductAfter,
+  snapshotNativeProductResult,
+} from "../packages/agentguard-openclaw-plugin/dist/mapping/product-events.js";
 
 const SESSION = "agent:main:product-message-test";
 const ARGS = Object.freeze({
@@ -517,7 +521,7 @@ test(
     const { config, inbox } = await fixture(t);
     const root = config.acceptanceRoot;
     const fixtureUrl = new URL(
-      "../tests/support/openclaw-product-runtime/",
+      "../packages/agentguard-openclaw-plugin/product-runtime/baseline/",
       import.meta.url,
     );
     const wrapper = join(root, "trusted-wrapper");
@@ -596,13 +600,56 @@ export default {id:"agentguard-product-runtime-fixture",name:"synthetic release 
     );
     const tools = sdk.createOpenClawCodingTools({
       ...profile.toolOptions,
+      agentAccountId: "default",
       runId: synthetic.runId,
     });
     const message = tools.find((tool) => tool.name === "message");
     assert.ok(message);
-    const result = await message.execute(synthetic.toolCallId, { ...ARGS });
+    const args = { ...ARGS };
+    const result = await message.execute(synthetic.toolCallId, args);
+    assert.deepEqual(args, ARGS);
     assert.equal(result.isError ?? false, false);
     assert.equal(result.details.deliveryStatus, "sent");
+    // The actual pinned emitter retains this optional own undefined value, and
+    // its middleware validator accepts it unchanged. Normalize only the path
+    // owned by this verified message call before taking our strict snapshot.
+    assert.equal(Object.hasOwn(result.details, "mediaUrls"), true);
+    assert.equal(result.details.mediaUrls, undefined);
+    assert.equal(result.details.mediaUrl, null);
+    assert.throws(() => snapshotNativeProductResult(result));
+    const { t: createActualMiddlewareRunner } = await import(
+      pathToFileURL(
+        join(hostRoot, "dist/tool-result-middleware-D2HOtSKh.js"),
+      ).href
+    );
+    let observed = false;
+    const runner = createActualMiddlewareRunner({ runtime: "openclaw" }, [
+      async (event) => {
+        assert.equal(event.toolName, "message");
+        assert.deepEqual(event.args, ARGS);
+        assert.equal(Object.hasOwn(event.result.details, "mediaUrls"), true);
+        assert.equal(event.result.details.mediaUrls, undefined);
+        observed = true;
+        return {
+          result: snapshotNativeProductResult(event.result, event.toolName),
+        };
+      },
+    ]);
+    const normalized = await runner.applyToolResultMiddleware({
+      toolCallId: synthetic.toolCallId,
+      toolName: "message",
+      args,
+      isError: false,
+      result,
+    });
+    assert.equal(observed, true);
+    assert.equal(Object.hasOwn(normalized.details, "mediaUrls"), false);
+    assert.equal(normalized.details.mediaUrl, null);
+    assert.deepEqual(
+      readNativeProductAfter({ result }, "message"),
+      readNativeProductAfter({ result: normalized }, "message"),
+    );
+    assert.equal(Object.hasOwn(result.details, "mediaUrls"), true);
     assert.deepEqual(inbox.readMessages(), [
       {
         messageId: result.details.result.messageId,
