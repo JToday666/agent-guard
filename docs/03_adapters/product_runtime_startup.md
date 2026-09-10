@@ -144,6 +144,8 @@ run manifest 是权限为 `0600`、父目录为 `0700` 的规范 JSON 文件，�
 activation 或本地安装漂移都会阻断新动作。LangGraph 所需的 invocation-start 回执、
 OpenClaw ASK 所需的 approval-release 回执，分别必须获得服务端确认后才能执行。
 终态回执没有确认时阻断后续副作用，重启后只补投保存的原始 payload 和历史 ACK。
+永久拒绝的记录须使用[回执定向补投](product_runtime_receipt_recovery.md)显式选择，
+完成确认后仍保留动作熔断。
 
 模型生成的记忆不会因一次审批或写入成功而成为可信内容；控制面保留 unknown 或
 quarantined 状态。继承工具输出污点的记忆写入按冻结覆盖规则阻断；读取受限记忆时，

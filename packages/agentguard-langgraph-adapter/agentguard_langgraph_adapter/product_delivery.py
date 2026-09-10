@@ -43,3 +43,50 @@ class ProductReceiptDeliveryResult:
                 else {}
             ),
         }
+
+
+@dataclass(frozen=True, slots=True)
+class ProductReceiptRejectionFact:
+    audit_id: str
+    wire_digest: str
+    item_kind: Literal["start", "terminal"]
+    http_status: int | None
+    error_code: str
+    observed_at_ms: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProductReceiptReconciliationAttempt:
+    attempt_id: str
+    audit_id: str
+    wire_digest: str
+    item_kind: Literal["start", "terminal"]
+    prepared_at_ms: int
+    finished_at_ms: int | None
+    outcome: Literal[
+        "prepared",
+        "outcome_unknown",
+        "recorded",
+        "retryable",
+        "permanent_rejected",
+        "failed",
+    ]
+    http_status: int | None
+    error_code: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ProductReceiptReconciliationSnapshot:
+    """Bounded delivery facts only; never contains wire, ACK or credentials."""
+
+    audit_id: str
+    wire_digest: str
+    owner_kind: Literal["action", "receipt"]
+    item_kind: Literal["start", "terminal"]
+    confirmed: bool
+    pending: bool
+    requires_explicit_retry: bool
+    transport_binding_digest: str | None
+    original_rejection: ProductReceiptRejectionFact | None
+    attempts: tuple[ProductReceiptReconciliationAttempt, ...]
+    breaker_open: bool

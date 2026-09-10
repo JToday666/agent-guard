@@ -31,6 +31,7 @@ from guard_api.services.product_model_content import (
     verify_product_model_content,
 )
 from tests.test_product_activation_ack_receipt import _rig
+from tests.support.product_evaluation import create_product_evaluation_harness
 from tests.test_v21_security_state_models import make_source_fact
 from tests.test_v21_05_provenance import make_flow
 
@@ -70,8 +71,18 @@ def _fixture(
     model_taints=("UNTRUSTED",),
     runtime="langgraph",
     message=False,
+    evaluation_clock=None,
 ):
-    harness, original, receipt_payload, service = _rig(tmp_path, runtime=runtime)
+    harness = (
+        create_product_evaluation_harness(
+            tmp_path, runtime=runtime, clock=evaluation_clock
+        )
+        if evaluation_clock is not None
+        else None
+    )
+    harness, original, receipt_payload, service = _rig(
+        tmp_path, runtime=runtime, harness=harness
+    )
     phase = harness.pipeline.prepare_phase_a(
         harness.event(event_id="snapshot"), auth_context=harness.auth_context
     )

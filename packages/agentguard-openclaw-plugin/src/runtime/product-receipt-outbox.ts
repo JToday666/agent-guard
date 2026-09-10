@@ -1,4 +1,11 @@
-import { createHash } from "node:crypto";
+import {
+  exactDataObject,
+  permanentHttpStatus,
+  readReconciliation,
+  PRODUCT_RECONCILIATION_LIMIT,
+  type Reconciliation,
+} from "./product-reconciliation.js";
+import { createHash, randomBytes } from "node:crypto";
 import {
   ProductContentCheckpoint,
   type ProductCheckpointRole,
@@ -42,6 +49,14 @@ const ACTION_TERMINAL_KINDS = new Set([
 ]);
 const CODES = new Set([
   "outbox_closed",
+  "receipt_reconciliation_invalid",
+  "receipt_reconciliation_worker_required",
+  "receipt_reconciliation_not_eligible",
+  "receipt_reconciliation_limit",
+  "receipt_reconciliation_busy",
+  "receipt_transport_binding_missing",
+  "receipt_transport_binding_mismatch",
+  "outbox_receipts_only",
   "outbox_storage_failed",
   "outbox_recovery_failed",
   "outbox_invalid_configuration",
@@ -74,9 +89,16 @@ export type OpenClawProductOutboxStatus = Readonly<{
   errorCode?: string;
 }>;
 
+export type OpenClawProductReconciliationResult = ProductReceiptDeliveryResult &
+  Readonly<{ manualRetryRequired?: true }>;
+
 export type OpenClawProductReceiptOutboxOptions = {
   store: OpenClawProductEnvelopeStore;
   sendReceipt: (wire: string) => Promise<ProductReceiptTransportResult>;
+  transportBindingDigest?: string;
+  receiptsOnly?: boolean;
+  transportIdle?: () => Promise<void>;
+  transportBusy?: () => boolean;
   retryBaseMs?: number;
   retryMaxMs?: number;
   drainIntervalMs?: number;
@@ -124,8 +146,10 @@ type Anchor = {
 };
 type ReceiptItem = { auditId: string; wire: string; wireDigest: string };
 type Pending = {
-  version: 1 | 2;
-  checkpointRole?: ProductCheckpointRole;
+  version: 1 | 2 | 3;
+  checkpointRole?: ProductCheckpointRole | null;
+  transportBindingDigest?: string;
+  reconciliation?: Reconciliation | null;
   type: "action" | "receipt";
   phase:
     | "prepared"
@@ -141,8 +165,10 @@ type Pending = {
   httpStatus: number | null;
 };
 type Tombstone = {
-  version: 1 | 2;
-  checkpointRole?: ProductCheckpointRole;
+  version: 1 | 2 | 3;
+  checkpointRole?: ProductCheckpointRole | null;
+  transportBindingDigest?: string;
+  reconciliation?: Reconciliation | null;
   type: "tombstone";
   ownerKind: "action" | "receipt";
   actionId: string | null;
@@ -165,6 +191,18 @@ export class OpenClawProductReceiptOutbox {
   #control?: OpenClawStoredEnvelope;
   #failure?: string;
   #closed = false;
+  #ownerReleased = false;
+  #closing = false;
+  #expectedBinding?: string;
+  #binding?: string;
+  #receiptsOnly: boolean;
+  #transportIdle: () => Promise<void>;
+  #transportBusy: () => boolean;
+  #works = new Set<Promise<unknown>>();
+  #reconciling?: {
+    selector: string;
+    promise: Promise<OpenClawProductReconciliationResult>;
+  };
   #active?: string;
   #tickets = new WeakMap<OpenClawProductActionTicket, string>();
   #sending?: string;
@@ -188,6 +226,22 @@ export class OpenClawProductReceiptOutbox {
     ) {
       fail("outbox_invalid_configuration");
     }
+    if (
+      (options.transportBindingDigest !== undefined &&
+        (typeof options.transportBindingDigest !== "string" ||
+          !DIGEST.test(options.transportBindingDigest))) ||
+      (options.receiptsOnly !== undefined &&
+        typeof options.receiptsOnly !== "boolean") ||
+      (options.transportIdle !== undefined &&
+        typeof options.transportIdle !== "function") ||
+      (options.transportBusy !== undefined &&
+        typeof options.transportBusy !== "function")
+    )
+      fail("outbox_invalid_configuration");
+    this.#expectedBinding = options.transportBindingDigest;
+    this.#receiptsOnly = options.receiptsOnly ?? false;
+    this.#transportIdle = options.transportIdle ?? (async () => undefined);
+    this.#transportBusy = options.transportBusy ?? (() => false);
     this.#store = options.store;
     this.#send = options.sendReceipt;
     this.#now = options.now ?? Date.now;
@@ -200,10 +254,18 @@ export class OpenClawProductReceiptOutbox {
       this.#clock();
       this.#load();
       if (!this.#control) {
+        if (
+          this.#receiptsOnly ||
+          this.#records.size ||
+          (this.#expectedBinding && !this.#store.freshForProducer)
+        )
+          fail("receipt_transport_binding_missing");
+        this.#binding = this.#expectedBinding;
         this.#control = this.#store.create(
           CONTROL_ID,
           encode({
-            version: 1,
+            version: this.#binding ? 2 : 1,
+            ...(this.#binding ? { transportBindingDigest: this.#binding } : {}),
             type: "breaker",
             tripped: false,
             errorCode: null,
@@ -211,12 +273,20 @@ export class OpenClawProductReceiptOutbox {
           { kind: "breaker" },
         );
       }
+      if (this.#receiptsOnly && !this.#binding)
+        fail("receipt_transport_binding_missing");
       if (this.#unknownCount()) this.#trip("action_outcome_unknown");
       else if (this.#failure) this.#trip(this.#failure);
-    } catch {
+    } catch (error) {
       this.#closed = true;
       void this.#store.close();
-      fail("outbox_recovery_failed");
+      const code = errorCode(error);
+      fail(
+        code === "receipt_transport_binding_missing" ||
+          code === "receipt_transport_binding_mismatch"
+          ? code
+          : "outbox_recovery_failed",
+      );
     }
   }
 
@@ -228,7 +298,7 @@ export class OpenClawProductReceiptOutbox {
   }
 
   start(): void {
-    this.#assertOpen();
+    this.#assertProducer();
     if (this.#timer) return;
     this.#timer = setInterval(() => {
       void this.drain().catch(() => this.#trip("outbox_storage_failed"));
@@ -238,14 +308,73 @@ export class OpenClawProductReceiptOutbox {
 
   close(): Promise<void> {
     if (this.#closePromise) return this.#closePromise;
+    this.#closing = true;
     this.#active = undefined;
-    this.status();
-    this.#closed = true;
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
-    // Never wait for a network callback. Its eventual result cannot change disk.
-    this.#closePromise = this.#store.close();
+    this.#closePromise = (async () => {
+      while (this.#works.size) await Promise.allSettled([...this.#works]);
+      await this.#transportIdle();
+      this.status();
+      this.#closed = true;
+      await this.#store.close();
+      this.#ownerReleased = true;
+    })();
     return this.#closePromise;
+  }
+
+  async closeWithin(
+    timeoutMs: number,
+  ): Promise<Readonly<{ status: "closed" | "pending"; ownerHeld: boolean }>> {
+    interval(timeoutMs);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const pending = new Promise<"pending">((resolve) => {
+      timer = setTimeout(() => resolve("pending"), timeoutMs);
+    });
+    try {
+      const status = await Promise.race([
+        this.close().then(() => "closed" as const),
+        pending,
+      ]);
+      return Object.freeze({ status, ownerHeld: status !== "closed" });
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  reconciliationStatus(): object {
+    const status = this.status();
+    return Object.freeze({
+      ...status,
+      transportBound: Boolean(this.#binding),
+      receiptsOnly: this.#receiptsOnly,
+      closing: this.#closing,
+      ownerHeld: !this.#ownerReleased,
+      reconciliations: Object.freeze(
+        [...this.#records.values()]
+          .filter(({ record }) => record.reconciliation)
+          .map(({ record }) =>
+            Object.freeze({
+              auditId:
+                record.type === "tombstone"
+                  ? record.auditId
+                  : record.terminal!.auditId,
+              wireDigest:
+                record.type === "tombstone"
+                  ? record.wireDigest
+                  : record.terminal!.wireDigest,
+              completed: record.type === "tombstone",
+              originalHttpStatus:
+                record.reconciliation!.originalRejection.httpStatus,
+              attempts: Object.freeze(
+                record.reconciliation!.attempts.map((attempt) =>
+                  Object.freeze({ ...attempt }),
+                ),
+              ),
+            }),
+          ),
+      ),
+    });
   }
 
   status(): OpenClawProductOutboxStatus {
@@ -289,7 +418,7 @@ export class OpenClawProductReceiptOutbox {
   }
 
   assertReady(): void {
-    this.#assertOpen();
+    this.#assertProducer();
     const status = this.status();
     if (status.breakerOpen) fail(status.errorCode ?? "outbox_barrier_open");
     if (this.#active) fail("action_already_active");
@@ -336,6 +465,7 @@ export class OpenClawProductReceiptOutbox {
     encoded: string,
     role?: ProductCheckpointRole,
   ): Promise<ProductReceiptDeliveryResult> {
+    if (this.#receiptsOnly) return failed("outbox_receipts_only");
     let item: ReceiptItem;
     let wire: RuntimeOutcomeWire;
     try {
@@ -369,7 +499,7 @@ export class OpenClawProductReceiptOutbox {
       const previous = this.#records.get(id);
       if (previous) {
         if (
-          previous.record.checkpointRole !== role ||
+          (previous.record.checkpointRole ?? undefined) !== role ||
           !matches(previous.record, item)
         ) {
           this.#trip("outbox_receipt_conflict");
@@ -392,7 +522,7 @@ export class OpenClawProductReceiptOutbox {
 
   /** A required native boundary failed; persist the breaker without inventing an outcome. */
   tripActionBarrier(): void {
-    this.#assertOpen();
+    this.#assertProducer();
     this.#trip("action_barrier_failed");
   }
 
@@ -444,7 +574,7 @@ export class OpenClawProductReceiptOutbox {
 
   /** A gate release is not an authoritative invocation-start observation. */
   releaseAction(ticket: OpenClawProductActionTicket): void {
-    this.#assertOpen();
+    this.#assertProducer();
     const id = this.#ticketId(ticket);
     try {
       this.#load();
@@ -476,7 +606,7 @@ export class OpenClawProductReceiptOutbox {
 
   /** Host lifecycle ended without a correlated terminal callback. Never infer execution. */
   markActionUnknown(ticket: OpenClawProductActionTicket): void {
-    this.#assertOpen();
+    this.#assertProducer();
     const id = this.#ticketId(ticket);
     try {
       this.#load();
@@ -498,6 +628,7 @@ export class OpenClawProductReceiptOutbox {
     ticket: OpenClawProductActionTicket,
     receipt: RuntimeOutcomeReceipt,
   ): Promise<ProductReceiptDeliveryResult> {
+    if (this.#receiptsOnly) return failed("outbox_receipts_only");
     let id: string;
     try {
       id = this.#ticketId(ticket);
@@ -573,7 +704,8 @@ export class OpenClawProductReceiptOutbox {
   }
 
   drain(): Promise<readonly ProductReceiptDeliveryResult[]> {
-    if (this.#closed) return Promise.resolve([failed("outbox_closed")]);
+    if (this.#closed || this.#closing)
+      return Promise.resolve([failed("outbox_closed")]);
     if (this.#drainPromise) return this.#drainPromise;
     const promise = this.#drainPending();
     this.#drainPromise = promise;
@@ -583,6 +715,202 @@ export class OpenClawProductReceiptOutbox {
       })
       .catch(() => undefined);
     return promise;
+  }
+
+  /** An explicit retry of one immutable, previously rejected receipt; never execution authority. */
+  reconcileRejectedReceipt(
+    input: Readonly<{ auditId: string; expectedWireDigest: string }>,
+  ): Promise<OpenClawProductReconciliationResult> {
+    let auditId: string;
+    let expectedWireDigest: string;
+    try {
+      this.#assertOpen();
+      const data = exactDataObject(input, ["auditId", "expectedWireDigest"]);
+      identifier(data.auditId);
+      hex(data.expectedWireDigest);
+      auditId = data.auditId;
+      expectedWireDigest = data.expectedWireDigest as string;
+    } catch (error) {
+      return Promise.resolve(
+        failed(
+          isClosed(error) ? "outbox_closed" : "receipt_reconciliation_invalid",
+        ),
+      );
+    }
+    const selector = `${auditId}/${expectedWireDigest}`;
+    if (this.#reconciling)
+      return this.#reconciling.selector === selector
+        ? this.#reconciling.promise
+        : Promise.resolve(failed("receipt_reconciliation_busy", auditId));
+    const promise = this.#track(
+      Promise.resolve().then(() =>
+        this.#reconcileOne(auditId, expectedWireDigest),
+      ),
+    );
+    this.#reconciling = { selector, promise };
+    void promise.then(
+      () => {
+        this.#reconciling = undefined;
+      },
+      () => {
+        this.#reconciling = undefined;
+      },
+    );
+    return promise;
+  }
+
+  async #reconcileOne(
+    auditId: string,
+    expectedWireDigest: string,
+  ): Promise<OpenClawProductReconciliationResult> {
+    let loaded: Loaded;
+    let record: Pending;
+    let item: ReceiptItem;
+    let reconciliation: Reconciliation;
+    try {
+      this.#assertOpen();
+      if (!this.#receiptsOnly) fail("receipt_reconciliation_worker_required");
+      this.#load();
+      if (!this.#binding) fail("receipt_transport_binding_missing");
+      const matches = [...this.#records.values()].filter(
+        ({ record }) =>
+          (record.type === "tombstone"
+            ? record.auditId
+            : record.terminal?.auditId) === auditId,
+      );
+      if (matches.length !== 1) fail("receipt_reconciliation_invalid");
+      loaded = matches[0];
+      const found = loaded.record;
+      if (
+        (found.type === "tombstone"
+          ? found.wireDigest
+          : found.terminal?.wireDigest) !== expectedWireDigest
+      )
+        fail("receipt_reconciliation_invalid");
+      if (found.type === "tombstone") {
+        if (!found.reconciliation) fail("receipt_reconciliation_not_eligible");
+        return result(
+          "recorded",
+          auditId,
+          found.reconciliation.attempts.at(-1)!.httpStatus,
+          null,
+        );
+      }
+      if (
+        found.phase !== "permanent_rejected" ||
+        !found.terminal ||
+        !permanentHttpStatus(found.httpStatus) ||
+        found.errorCode !== "receipt_permanently_rejected"
+      )
+        fail("receipt_reconciliation_not_eligible");
+      if (this.#sending || this.#active || this.#transportBusy())
+        fail("receipt_reconciliation_busy");
+      record = found;
+      item = found.terminal;
+      const previous = found.reconciliation;
+      if (previous?.attempts.at(-1)?.status === "failed")
+        fail("receipt_reconciliation_not_eligible");
+      if (previous && previous.attempts.length >= PRODUCT_RECONCILIATION_LIMIT)
+        fail("receipt_reconciliation_limit");
+      reconciliation = {
+        originalRejection: previous?.originalRejection ?? {
+          httpStatus: found.httpStatus,
+          errorCode: "receipt_permanently_rejected",
+        },
+        attempts: [
+          ...(previous?.attempts ?? []).map((attempt) =>
+            attempt.status === "inflight"
+              ? { ...attempt, status: "unknown" as const }
+              : attempt,
+          ),
+          {
+            attemptId: randomBytes(16).toString("hex"),
+            startedAt: this.#clock(),
+            finishedAt: null,
+            status: "inflight",
+            httpStatus: null,
+            errorCode: null,
+          },
+        ],
+      };
+      readReconciliation(reconciliation, false);
+      loaded = this.#replace(loaded, { ...record, reconciliation });
+      this.#sending = loaded.stored.recordId;
+    } catch (error) {
+      const code = errorCode(error);
+      if (!code) this.#trip("outbox_storage_failed");
+      return failed(code ?? "outbox_storage_failed", auditId);
+    }
+    let reply: ProductReceiptTransportResult;
+    try {
+      reply = await this.#send(item.wire);
+    } catch {
+      reply = { status: "retryable" };
+    }
+    try {
+      this.#load();
+      const current = this.#store.get(loaded.stored.recordId);
+      if (
+        !current ||
+        current.revision !== loaded.stored.revision ||
+        current.payload !== loaded.stored.payload
+      ) {
+        this.#trip("outbox_receipt_conflict");
+        return failed("outbox_receipt_conflict", auditId);
+      }
+      const fact = transportFact(reply, auditId, true);
+      const attempts = reconciliation.attempts.slice();
+      attempts[attempts.length - 1] = {
+        ...attempts.at(-1)!,
+        finishedAt: this.#clock(),
+        status: fact.status,
+        httpStatus: fact.httpStatus,
+        errorCode: fact.errorCode,
+      };
+      const completed = { ...reconciliation, attempts };
+      readReconciliation(completed, fact.status === "recorded");
+      if (fact.status === "recorded") {
+        const wire = readHistoricalProductReceiptWire(
+          item.wire,
+          this.#store.namespace,
+        );
+        this.#replace(loaded, {
+          version: 3,
+          transportBindingDigest: this.#binding!,
+          checkpointRole: record.checkpointRole ?? null,
+          reconciliation: completed,
+          type: "tombstone",
+          ownerKind: record.type,
+          actionId: wire.links.action_id ?? null,
+          actionTerminal:
+            !record.checkpointRole &&
+            ACTION_TERMINAL_KINDS.has(wire.metadata.outcome_kind),
+          auditId,
+          wireDigest: expectedWireDigest,
+        });
+        this.#trip("receipt_permanently_rejected");
+        return result("recorded", auditId, fact.httpStatus, null);
+      }
+      // Manual network failure stays permanently blocked, with its original rejection intact.
+      this.#replace(loaded, { ...record, reconciliation: completed });
+      this.#trip("receipt_permanently_rejected");
+      return fact.status === "retryable"
+        ? Object.freeze({
+            ...result(
+              "queued_durable",
+              auditId,
+              fact.httpStatus,
+              fact.errorCode,
+            ),
+            manualRetryRequired: true as const,
+          })
+        : result(fact.status, auditId, fact.httpStatus, fact.errorCode);
+    } catch {
+      this.#trip("outbox_storage_failed");
+      return failed("outbox_storage_failed", auditId);
+    } finally {
+      this.#sending = undefined;
+    }
   }
 
   async #drainPending(): Promise<readonly ProductReceiptDeliveryResult[]> {
@@ -609,8 +937,12 @@ export class OpenClawProductReceiptOutbox {
     return Object.freeze(results);
   }
 
-  async #deliver(id: string): Promise<ProductReceiptDeliveryResult> {
-    if (this.#closed) return failed("outbox_closed");
+  #deliver(id: string): Promise<ProductReceiptDeliveryResult> {
+    return this.#track(Promise.resolve().then(() => this.#deliverOne(id)));
+  }
+
+  async #deliverOne(id: string): Promise<ProductReceiptDeliveryResult> {
+    if (this.#closed || this.#closing) return failed("outbox_closed");
     let loaded: Loaded;
     let record: Pending;
     let item: ReceiptItem;
@@ -632,7 +964,12 @@ export class OpenClawProductReceiptOutbox {
           record.errorCode,
         );
       }
-      if (this.#sending || record.nextAttemptAt > this.#clock()) {
+      if (
+        this.#sending ||
+        this.#reconciling ||
+        this.#transportBusy() ||
+        record.nextAttemptAt > this.#clock()
+      ) {
         return result(
           "queued_durable",
           item.auditId,
@@ -651,9 +988,9 @@ export class OpenClawProductReceiptOutbox {
     } catch {
       reply = { status: "retryable" };
     }
-    this.#sending = undefined;
     if (this.#closed) return failed("outbox_closed", item.auditId);
     try {
+      this.#load();
       const current = this.#store.get(id);
       if (
         !current ||
@@ -663,7 +1000,7 @@ export class OpenClawProductReceiptOutbox {
         this.#trip("outbox_receipt_conflict");
         return failed("outbox_receipt_conflict", item.auditId);
       }
-      const fact = transportFact(reply, item.auditId);
+      const fact = transportFact(reply, item.auditId, record.version === 3);
       if (fact.status === "recorded") {
         const confirmed = readHistoricalProductReceiptWire(
           item.wire,
@@ -671,6 +1008,13 @@ export class OpenClawProductReceiptOutbox {
         );
         this.#replace(loaded, {
           version: record.version,
+          ...(record.version === 3
+            ? {
+                transportBindingDigest: record.transportBindingDigest,
+                reconciliation: record.reconciliation,
+                checkpointRole: record.checkpointRole ?? null,
+              }
+            : {}),
           ...(record.checkpointRole
             ? { checkpointRole: record.checkpointRole }
             : {}),
@@ -720,6 +1064,8 @@ export class OpenClawProductReceiptOutbox {
     } catch {
       this.#trip("outbox_storage_failed");
       return failed("outbox_storage_failed", item.auditId);
+    } finally {
+      this.#sending = undefined;
     }
   }
 
@@ -802,16 +1148,24 @@ export class OpenClawProductReceiptOutbox {
       const value: unknown = JSON.parse(stored.payload);
       if (encode(value) !== stored.payload) fail("outbox_storage_failed");
       if (stored.kind === "breaker") {
-        const data = object(value, ["version", "type", "tripped", "errorCode"]);
+        const bound = (value as { version?: unknown })?.version === 2;
+        const data = object(value, [
+          "version",
+          "type",
+          "tripped",
+          "errorCode",
+          ...(bound ? ["transportBindingDigest"] : []),
+        ]);
         if (
           stored.recordId !== CONTROL_ID ||
-          data.version !== 1 ||
+          (data.version !== 1 && data.version !== 2) ||
           data.type !== "breaker" ||
           typeof data.tripped !== "boolean" ||
           (data.errorCode !== null && !safeCode(data.errorCode)) ||
           (!data.tripped && data.errorCode !== null)
         )
           fail("outbox_storage_failed");
+        if (bound) hex(data.transportBindingDigest);
         control = stored;
         if (data.tripped)
           this.#failure ??=
@@ -824,22 +1178,81 @@ export class OpenClawProductReceiptOutbox {
         // The record phase itself is durable failure evidence if a later
         // breaker-control update failed or the process crashed between writes.
         if (
-          record.type !== "tombstone" &&
-          ["failed", "permanent_rejected"].includes(record.phase)
+          (record.type !== "tombstone" &&
+            ["failed", "permanent_rejected"].includes(record.phase)) ||
+          Boolean(record.reconciliation)
         ) {
           this.#failure ??=
-            record.phase === "permanent_rejected"
+            record.reconciliation ||
+            (record.type !== "tombstone" &&
+              record.phase === "permanent_rejected")
               ? "receipt_permanently_rejected"
               : "receipt_transport_failed";
         }
       }
     }
     if (this.#control && !control) fail("outbox_storage_failed");
+    const binding = control
+      ? (JSON.parse(control.payload).transportBindingDigest as
+          string | undefined)
+      : undefined;
+    if (binding && binding !== this.#expectedBinding)
+      fail("receipt_transport_binding_mismatch");
+    if (this.#binding && binding !== this.#binding)
+      fail("receipt_transport_binding_mismatch");
+    for (const { record } of records.values()) {
+      if (
+        record.transportBindingDigest !== binding ||
+        (binding && record.version !== 3)
+      )
+        fail("receipt_transport_binding_mismatch");
+    }
+    this.#binding = binding;
     this.#records = records;
     this.#control = control;
   }
 
   #readRecord(stored: OpenClawStoredEnvelope, value: unknown): JournalRecord {
+    if ((value as { version?: unknown })?.version === 3) {
+      const data = value as Record<string, unknown>;
+      hex(data.transportBindingDigest);
+      if (
+        !Object.hasOwn(data, "checkpointRole") ||
+        !Object.hasOwn(data, "reconciliation") ||
+        (data.checkpointRole !== null && !checkpointRole(data.checkpointRole))
+      )
+        fail("outbox_storage_failed");
+      const {
+        transportBindingDigest,
+        reconciliation,
+        checkpointRole: role,
+        ...rest
+      } = data;
+      const legacy = this.#readRecord(stored, {
+        ...rest,
+        version: role ? 2 : 1,
+        ...(role ? { checkpointRole: role } : {}),
+      });
+      const parsed = readReconciliation(
+        reconciliation,
+        legacy.type === "tombstone",
+      );
+      if (
+        parsed &&
+        legacy.type !== "tombstone" &&
+        (legacy.phase !== "permanent_rejected" ||
+          legacy.httpStatus !== parsed.originalRejection.httpStatus ||
+          legacy.errorCode !== parsed.originalRejection.errorCode)
+      )
+        fail("outbox_storage_failed");
+      return {
+        ...legacy,
+        version: 3,
+        checkpointRole: role as ProductCheckpointRole | null,
+        transportBindingDigest: transportBindingDigest as string,
+        reconciliation: parsed,
+      };
+    }
     const newer = (value as { version?: unknown })?.version === 2;
     const roleFields = newer ? ["checkpointRole"] : [];
     if (stored.kind === "tombstone") {
@@ -979,18 +1392,28 @@ export class OpenClawProductReceiptOutbox {
   }
 
   #create(id: string, record: JournalRecord): void {
+    if (this.#binding)
+      record = {
+        ...record,
+        version: 3,
+        transportBindingDigest: this.#binding,
+        checkpointRole: record.checkpointRole ?? null,
+        reconciliation: null,
+      };
     const stored = this.#store.create(id, encode(record), {
       kind: record.type,
     });
     this.#records.set(id, { stored, record });
   }
 
-  #replace(loaded: Loaded, record: JournalRecord): void {
+  #replace(loaded: Loaded, record: JournalRecord): Loaded {
     const stored = this.#store.replace(loaded.stored.recordId, encode(record), {
       expectedRevision: loaded.stored.revision,
       kind: record.type as OpenClawProductRecordKind,
     });
-    this.#records.set(stored.recordId, { stored, record });
+    const next = { stored, record };
+    this.#records.set(stored.recordId, next);
+    return next;
   }
 
   #trip(code: string): void {
@@ -1000,7 +1423,7 @@ export class OpenClawProductReceiptOutbox {
       this.#control = this.#store.replace(
         CONTROL_ID,
         encode({
-          version: 1,
+          ...JSON.parse(this.#control.payload),
           type: "breaker",
           tripped: true,
           errorCode: this.#failure,
@@ -1039,8 +1462,22 @@ export class OpenClawProductReceiptOutbox {
     return now;
   }
 
+  #track<T>(work: Promise<T>): Promise<T> {
+    this.#works.add(work);
+    void work.then(
+      () => this.#works.delete(work),
+      () => this.#works.delete(work),
+    );
+    return work;
+  }
+
+  #assertProducer(): void {
+    this.#assertOpen();
+    if (this.#receiptsOnly) fail("outbox_receipts_only");
+  }
+
   #assertOpen(): void {
-    if (this.#closed) fail("outbox_closed");
+    if (this.#closed || this.#closing) fail("outbox_closed");
   }
 }
 
@@ -1163,6 +1600,7 @@ function pending(
 function transportFact(
   reply: ProductReceiptTransportResult,
   auditId: string,
+  strictHttp = false,
 ): {
   status: ProductReceiptTransportResult["status"];
   httpStatus: number | null;
@@ -1211,7 +1649,9 @@ function transportFact(
     : null;
   if (status === "recorded") {
     return snapshot.auditId === auditId &&
-      (httpStatus === null || (httpStatus >= 200 && httpStatus < 300))
+      (httpStatus === null
+        ? !strictHttp
+        : httpStatus >= 200 && httpStatus < 300)
       ? { status: "recorded", httpStatus, errorCode: null }
       : {
           status: "failed",
@@ -1219,6 +1659,16 @@ function transportFact(
           errorCode: "receipt_acknowledgement_invalid",
         };
   }
+  if (
+    strictHttp &&
+    status === "permanent_rejected" &&
+    !permanentHttpStatus(httpStatus)
+  )
+    return {
+      status: "failed",
+      httpStatus,
+      errorCode: "receipt_transport_invalid",
+    };
   return {
     status,
     httpStatus,

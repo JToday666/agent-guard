@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -84,9 +84,9 @@ def _rebind_authority(audit, activation):
     authority["profile_digest"] = entry.profile_digest
     authority["policy_digest"] = activation.policy_digest
     authority["dataset_digest"] = activation.dataset_digest
-    authority["decision_authority"]["activation_ref_digest"] = (
-        activation.activation_ref_digest
-    )
+    authority["decision_authority"][
+        "activation_ref_digest"
+    ] = activation.activation_ref_digest
     authority["approval_release_directive"].update(
         activation_ref_digest=activation.activation_ref_digest,
         capability_digest=entry.capability_report_digest,
@@ -591,9 +591,9 @@ def _read_ancestor(
         activation,
     )
     result_parent.links["action_id"] = "unit-read-call"
-    result_parent.metadata["product_model_task"]["task_digest"] = (
-        snapshot.task.task_digest
-    )
+    result_parent.metadata["product_model_task"][
+        "task_digest"
+    ] = snapshot.task.task_digest
     result_parent.evidence["product_tool_result"] = result_proof.model_dump(mode="json")
     result_parent.evidence["decision_v21"]["payload"]["evidence_refs"] = [
         {
@@ -860,6 +860,10 @@ def make_policy_replay(
     scope_id = scope_id or f"unit-{runtime}-{group}-{category}"
     source = root / "source"
     source.mkdir(mode=0o700)
+    # Offline evidence exercises protocol readers, not the machine's wall clock.
+    # Keep issuance and Phase A/B on one explicit instant; live HTTP/PG callers
+    # continue using the harness's default real-time clock.
+    fixture_time = datetime.now(timezone.utc)
     rig = _fixture(
         source,
         runtime=runtime,
@@ -869,6 +873,7 @@ def make_policy_replay(
         and not memory_first_write,
         message=category == "message",
         model_taints=(),
+        evaluation_clock=lambda: fixture_time,
     )
     if memory_first_write:
         _first_write_ids(rig)
@@ -999,9 +1004,9 @@ def make_policy_replay(
     elif category == "command":
         name = "exec"
         arguments = {
-            "command": "python marker.py"
-            if runtime == "langgraph"
-            else "node marker.mjs"
+            "command": (
+                "python marker.py" if runtime == "langgraph" else "node marker.mjs"
+            )
         }
     else:
         name = rig.tool.tool_name
@@ -1014,16 +1019,12 @@ def make_policy_replay(
         kind = (
             "command_exec"
             if category == "command"
-            else "file_write"
-            if name == "write"
-            else "file_read"
+            else "file_write" if name == "write" else "file_read"
         )
         operation = (
             "execute"
             if category == "command"
-            else "write"
-            if name == "write"
-            else "read"
+            else "write" if name == "write" else "read"
         )
         target = (
             execution["root"]
@@ -1360,9 +1361,9 @@ def make_policy_replay(
             "accepted": save(
                 "prior-read-accepted.json", prior_read.accepted.model_dump(mode="json")
             ),
-            "start": prior_read.start.reference
-            if prior_read.start is not None
-            else None,
+            "start": (
+                prior_read.start.reference if prior_read.start is not None else None
+            ),
         }
         replay["prior_actions"] = [save("prior-read-row.json", prior_row)]
     row = {
@@ -1485,9 +1486,9 @@ def test_changed_policy_material_cannot_be_rehashed_into_a_pass(
         )
         fixture.row["assessment"] = assessment.model_dump(mode="json")
     elif mutation == "fake_legacy":
-        fixture.row["authority"]["current_decision"]["reason"] = (
-            "fabricated current policy"
-        )
+        fixture.row["authority"]["current_decision"][
+            "reason"
+        ] = "fabricated current policy"
     elif mutation == "active":
         fixture.replay["product_active_enabled"] = True
     elif mutation == "coverage":
@@ -1501,9 +1502,9 @@ def test_changed_policy_material_cannot_be_rehashed_into_a_pass(
         def change(raw):
             payload = raw["events"][0]["payload"]
             projection = json.loads(payload["content_preview"])
-            projection["tool_calls"][0]["args"]["content"] = (
-                "different original content"
-            )
+            projection["tool_calls"][0]["args"][
+                "content"
+            ] = "different original content"
             payload["content_preview"] = canonical_json(projection)
 
         _rewrite(fixture, "history", change)

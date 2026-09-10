@@ -61,6 +61,8 @@ LangGraph strong binding、OpenClaw restricted allow_once 及全部残余边界�
 必须能够显式重发同一份 payload 与历史 ACK。只有服务端确认后才清理原记录；
 不会自动解除动作熔断，也不会重执行工具。该批次沿用既有回执接口，属于本轮恢复
 验收的必要依赖。候选校验与签署命令见[候选与签署工具](product_runtime_candidate_admission.md)。
+原端点绑定、历史 ACK、显式补投和退出码见
+[Product 回执恢复](../03_adapters/product_runtime_receipt_recovery.md)。
 
 ## 最终验收
 
