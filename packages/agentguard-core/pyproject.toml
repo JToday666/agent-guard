@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-agentguard-core"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 description = "Stateless AgentGuard Core security decision engine"
 readme = "README.md"
 requires-python = ">=3.12"

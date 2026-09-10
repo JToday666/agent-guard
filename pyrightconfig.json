@@ -3,7 +3,10 @@
     "apps/cli/agentguard_cli",
     "apps/guard-api/guard_api",
     "packages/agentguard-core/agentguard_core",
-    "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter"
+    "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter",
+    "scripts/product_runtime",
+    "scripts/product-runtime-candidate.py",
+    "scripts/product-runtime-admission.py"
   ],
   "exclude": [
     "**/.*",

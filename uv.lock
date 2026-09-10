@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "aegis-agentguard-api"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 source = { editable = "apps/guard-api" }
 dependencies = [
     { name = "aegis-agentguard-core" },
@@ -20,7 +20,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aegis-agentguard-core", specifier = "==0.1.0b1" },
+    { name = "aegis-agentguard-core", editable = "packages/agentguard-core" },
     { name = "alembic", specifier = ">=1.16" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28" },
@@ -33,7 +33,7 @@ requires-dist = [
 
 [[package]]
 name = "aegis-agentguard-cli"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 source = { editable = "apps/cli" }
 dependencies = [
     { name = "httpx" },
@@ -44,7 +44,7 @@ requires-dist = [{ name = "httpx", specifier = ">=0.28" }]
 
 [[package]]
 name = "aegis-agentguard-core"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 source = { editable = "packages/agentguard-core" }
 dependencies = [
     { name = "pydantic" },
@@ -102,7 +102,7 @@ dev = [
 
 [[package]]
 name = "agentguard-langgraph-adapter"
-version = "0.1.0"
+version = "0.1.0rc1"
 source = { editable = "packages/agentguard-langgraph-adapter" }
 dependencies = [
     { name = "cryptography" },

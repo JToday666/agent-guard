@@ -1,6 +1,7 @@
 /** Actual Node SDK / localhost API transport tests. No Host tool or provider runs. */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { inspect } from "node:util";
@@ -9,6 +10,27 @@ import { createSyntheticProductPackage } from "./openclaw-product-transport-pack
 
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 let phase = "input";
+
+async function sdkTreeDigest(root) {
+  const entries = [];
+  async function visit(relative) {
+    for (const entry of await readdir(path.join(root, relative), {
+      withFileTypes: true,
+    })) {
+      const name = path.posix.join(relative, entry.name);
+      if (entry.isDirectory()) await visit(name);
+      else {
+        assert.equal(entry.isFile(), true);
+        const bytes = await readFile(path.join(root, name));
+        entries.push([name, bytes.length, hash(bytes)]);
+      }
+    }
+  }
+  await visit("");
+  entries.sort((a, b) => a[0].localeCompare(b[0], "en"));
+  assert.ok(entries.length > 0);
+  return hash(JSON.stringify(entries));
+}
 
 async function rejection(callback) {
   let rejected;
@@ -30,14 +52,37 @@ async function run(input) {
   assert.equal(url.protocol, "http:");
   assert.equal(url.hostname, "127.0.0.1");
   phase = "test-package";
-  const synthetic = input.scenario !== "beta-rejected";
-  const fixturePackage = synthetic
-    ? await createSyntheticProductPackage({
-        directory: input.packageDirectory,
-        sourcePackageRoot: input.sourcePackageRoot,
-      })
-    : null;
-  const packageRoot = fixturePackage?.packageRoot ?? input.sourcePackageRoot;
+  const fixturePackage = await createSyntheticProductPackage({
+    directory: input.packageDirectory,
+    sourcePackageRoot: input.sourcePackageRoot,
+  });
+  const packageRoot = fixturePackage.packageRoot;
+  let betaIdentity;
+  if (input.scenario === "beta-rejected") {
+    // Exercise installed beta identity rejection with the actual current SDK
+    // code. This is a negative fixture, never a historical Beta artifact claim.
+    const installedMetadata = path.join(packageRoot, "package.json");
+    const metadata = JSON.parse(await readFile(installedMetadata, "utf8"));
+    const betaVersion = "0.1.0-beta.1";
+    await writeFile(
+      installedMetadata,
+      JSON.stringify({ ...metadata, version: betaVersion }),
+    );
+    const sourceSdkDigest = await sdkTreeDigest(
+      path.join(input.sourcePackageRoot, "dist"),
+    );
+    const copiedSdkDigest = await sdkTreeDigest(path.join(packageRoot, "dist"));
+    assert.equal(copiedSdkDigest, sourceSdkDigest);
+    assert.equal(
+      JSON.parse(await readFile(installedMetadata, "utf8")).version,
+      betaVersion,
+    );
+    betaIdentity = {
+      assumedVersion: betaVersion,
+      sourceSdkDigest,
+      copiedSdkDigest,
+    };
+  }
   const moduleUrl = (relative) =>
     pathToFileURL(path.join(packageRoot, "dist", relative)).href;
   const { GuardApiClient, buildPluginConfig } = await import(
@@ -94,7 +139,10 @@ async function run(input) {
       return {
         ok: true,
         rejected: true,
-        syntheticPackageMetadata: false,
+        syntheticPackageMetadata: true,
+        sourceVersion: fixturePackage.sourceVersion,
+        actualHostVersion: fixturePackage.actualHostVersion,
+        ...betaIdentity,
         ...(await rejection(() => client.startProductSession(observe))),
       };
     }

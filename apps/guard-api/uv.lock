@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "aegis-agentguard-api"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 source = { editable = "." }
 dependencies = [
     { name = "aegis-agentguard-core" },
@@ -20,7 +20,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aegis-agentguard-core", specifier = "==0.1.0b1" },
+    { name = "aegis-agentguard-core", editable = "../../packages/agentguard-core" },
     { name = "alembic", specifier = ">=1.16" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28" },
@@ -33,15 +33,14 @@ requires-dist = [
 
 [[package]]
 name = "aegis-agentguard-core"
-version = "0.1.0b1"
-source = { registry = "https://pypi.org/simple" }
+version = "0.1.0rc1"
+source = { editable = "../../packages/agentguard-core" }
 dependencies = [
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/50/28/60ad4883b4ec4b3162f456e0217792050fa1b29c7a3a32b07adae2f30f73/aegis_agentguard_core-0.1.0b1.tar.gz", hash = "sha256:3aec3da84faa43ed1aea7626097819e5070664da9705fb1474f504dd7d30b4ba", size = 35849, upload-time = "2026-08-05T06:45:04.244Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d3/f6/a136c52a10d6ad029b8dc64396556bcb91f31f6242d0b6b9a205d205b643/aegis_agentguard_core-0.1.0b1-py3-none-any.whl", hash = "sha256:9866c0fa2aaf7a18db202c134c202b87a8ae1e18cef3867ae9d4770f6ecd7d62", size = 54223, upload-time = "2026-08-05T06:43:51.778Z" },
-]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.9" }]
 
 [[package]]
 name = "alembic"

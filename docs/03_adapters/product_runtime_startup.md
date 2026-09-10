@@ -6,7 +6,7 @@
 [双运行时验收计划](../06_delivery/product_runtime_implementation_plan.md)。
 
 默认配置不启用 Product 执行。候选身份要求 Python `0.1.0rc1` 和 OpenClaw
-`0.1.0-rc.1`；开发树的 beta metadata、editable 安装以及测试的 synthetic
+`0.1.0-rc.1`；旧 beta 制品、editable 安装以及测试的 synthetic
 admission 不构成正式候选证据。候选必须由最终固定 `dev` SHA 构建并干净安装。
 
 ## LangGraph
@@ -55,7 +55,8 @@ finally:
 连接。wheel 保存于受保护目录，摘要必须与 activation 清单一致；实际安装文件、
 RECORD、加载来源和七类消费者也要通过检查。
 
-安装时使用 `--no-compile`，运行进程设置 `PYTHONDONTWRITEBYTECODE=1`。候选包目录内的
+使用 pip 安装时设置 `--no-compile`；uv 安装保持 `UV_COMPILE_BYTECODE=0`，
+运行进程设置 `PYTHONDONTWRITEBYTECODE=1`。候选包目录内的
 旧 bytecode 不满足源码执行验证要求。完整入口独占对应 ACK 会话和执行权限；已有的
 transport 会话、任意 callback 或仅设置配置标志不能获得副作用执行权限。
 

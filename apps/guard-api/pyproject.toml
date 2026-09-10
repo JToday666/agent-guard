@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aegis-agentguard-api"
-version = "0.1.0b1"
+version = "0.1.0rc1"
 description = "Guard API / Control Plane service for AgentGuard"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -20,7 +20,7 @@ classifiers = [
   "Topic :: Security",
 ]
 dependencies = [
-  "aegis-agentguard-core==0.1.0b1",
+  "aegis-agentguard-core==0.1.0rc1",
   "alembic>=1.16",
   "fastapi>=0.141.1",
   "httpx>=0.28",
@@ -48,3 +48,6 @@ guard_api = [
   "migrations/*.py",
   "migrations/versions/*.py",
 ]
+
+[tool.uv.sources]
+aegis-agentguard-core = { path = "../../packages/agentguard-core", editable = true }

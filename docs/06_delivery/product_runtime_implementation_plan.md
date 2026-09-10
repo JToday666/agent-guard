@@ -35,7 +35,8 @@ Product Active 闭环。所有适用判定必须满足 `source=v21`、`mode=acti
 | 09 | 完整组合检查与显式启用，默认关闭 | 08 |
 | 09a | 唯一本机消息目标、语义版本与双宿主 ALLOW/ASK/DENY | 09 |
 | 10 | 候选版本、制品身份、admission/activation 校验与签署工具 | 09a |
-| 11 | 真实宿主预激活基线和确定性 conformance 报告 | 10 |
+| 10a | 永久拒绝回执的显式定向补投，确认后清理原记录且保留动作熔断 | 10 |
+| 11 | 真实宿主预激活基线和确定性 conformance 报告 | 10a |
 | 12 | 双运行时 Product Active、真实 Qwen 与浏览器审批验收 | 11 |
 
 实现中保留未接完产品链的注册限制。LangGraph 和 OpenClaw 的 ACK 更新不能
@@ -55,6 +56,11 @@ LangGraph strong binding、OpenClaw restricted allow_once 及全部残余边界�
 按签署的策略选择 ALLOW、ASK 或 DENY；实际投递仍只进入本机测试收件端。
 该参数契约升级为 `isolated-product-tools-2`，不修改判定算法或放宽目的地。
 详见[本机消息目标修正](../AgentGuard_Core_V2.1_Final_Contract_Freeze/12_Product本机消息目标修正.md)。
+
+10a 补齐原计划要求的永久拒绝恢复：409/422 记录仍保留在加密队列中，修复拒绝原因后
+必须能够显式重发同一份 payload 与历史 ACK。只有服务端确认后才清理原记录；
+不会自动解除动作熔断，也不会重执行工具。该批次沿用既有回执接口，属于本轮恢复
+验收的必要依赖。候选校验与签署命令见[候选与签署工具](product_runtime_candidate_admission.md)。
 
 ## 最终验收
 

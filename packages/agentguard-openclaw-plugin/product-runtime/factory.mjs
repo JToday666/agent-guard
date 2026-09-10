@@ -43,7 +43,7 @@ export function createProductFixturePlugin(options) {
   const plugin = Object.freeze({
     id: PLUGIN_ID,
     name: "AgentGuard Product Runtime Fixture",
-    version: "0.1.0",
+    version: "0.1.0-rc.1",
     register(api) {
       const mode = api.registrationMode ?? "full";
       if (!["full", "discovery", "tool-discovery"].includes(mode)) return;

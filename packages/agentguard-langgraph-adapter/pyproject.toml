@@ -1,11 +1,14 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "agentguard-langgraph-adapter"
-version = "0.1.0"
+version = "0.1.0rc1"
 description = "LangGraph runtime adapter SDK for AgentGuard"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
   "cryptography>=46.0.5",
