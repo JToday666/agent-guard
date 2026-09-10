@@ -1,4 +1,19 @@
-import { isIP } from "node:net";
+import {
+  GuardApiError,
+  GuardApiResponseError,
+  validateGuardApiBaseUrl,
+  readBoundedJsonResponse,
+} from "./guard-api-http.js";
+export {
+  GuardApiError,
+  GuardApiResponseError,
+  validateGuardApiBaseUrl,
+  type GuardApiResponseFailure,
+} from "./guard-api-http.js";
+import {
+  OpenClawProductTransport,
+  productTransportBindingDigest,
+} from "./runtime/product-transport.js";
 import { types } from "node:util";
 import { isAbsolute, relative, sep } from "node:path";
 
@@ -64,8 +79,6 @@ type ApprovalWaiter = {
   waitForApproval?: (approvalId: string) => Promise<ApprovalWaitResponse>;
 };
 
-const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/u;
-const ENCODED_LINE_BREAK = /%0[ad]/iu;
 const AUTHORIZATION_FINGERPRINT = /^hmac-sha256:[0-9a-f]{64}$/u;
 const SECRET_FINGERPRINT = /hmac-sha256:[0-9a-f]{64}/gu;
 const LEASE_TOKEN = /lease-v1:[0-9a-f]{64}/gu;
@@ -75,7 +88,6 @@ const RUNTIME_BINDING_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const RFC3339_TIMESTAMP =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,9}))?(Z|([+-])(\d{2}):(\d{2}))$/u;
 const MAX_LEASE_CONSUME_ATTEMPTS = 5;
-const MAX_GUARD_API_RESPONSE_BYTES = 1024 * 1024;
 const PRODUCT_DRIFT_CODES = new Set([
   "V21_PRODUCT_ACTIVATION_NOT_CURRENT",
   "V21_PRODUCT_RUNTIME_IDENTITY_MISMATCH",
@@ -104,120 +116,6 @@ const DEFAULT_CONFIG: AgentGuardPluginConfig = {
   diagnosticLogging: false,
   agentId: "main",
 };
-
-export class GuardApiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "GuardApiError";
-  }
-}
-
-export type GuardApiResponseFailure = "timed_out" | "too_large" | "malformed";
-
-/** Stable, body-free classification for bounded response handling failures. */
-export class GuardApiResponseError extends GuardApiError {
-  readonly failure: GuardApiResponseFailure;
-
-  constructor(failure: GuardApiResponseFailure) {
-    super(`Guard API response failed: ${failure}`);
-    this.name = "GuardApiResponseError";
-    this.failure = failure;
-  }
-}
-
-export function validateGuardApiBaseUrl(value: unknown): string {
-  if (typeof value !== "string" || value === "" || value.trim() !== value) {
-    throw new GuardApiError("Guard API URL must be a non-empty absolute URL");
-  }
-  if (
-    CONTROL_CHARACTER.test(value) ||
-    ENCODED_LINE_BREAK.test(value) ||
-    value.includes("\\")
-  ) {
-    throw new GuardApiError("Guard API URL contains forbidden characters");
-  }
-  if (value.includes("?") || value.includes("#")) {
-    throw new GuardApiError("Guard API URL cannot contain a query or fragment");
-  }
-
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    throw new GuardApiError("Guard API URL is invalid");
-  }
-  if (!["http:", "https:"].includes(parsed.protocol)) {
-    throw new GuardApiError("Guard API URL must use http or https");
-  }
-  if (parsed.username || parsed.password) {
-    throw new GuardApiError("Guard API URL cannot contain user information");
-  }
-
-  const rawHost = rawHostname(value);
-  const hostname = parsed.hostname.replace(/^\[|\]$/gu, "").toLowerCase();
-  if (
-    !rawHost ||
-    hostname.includes("%") ||
-    !hasCanonicalIpSpelling(rawHost, hostname)
-  ) {
-    throw new GuardApiError("Guard API URL must contain a valid host and port");
-  }
-  if (parsed.protocol === "http:" && !isExplicitLoopback(rawHost, hostname)) {
-    throw new GuardApiError(
-      "Guard API HTTP is allowed only for explicit loopback addresses",
-    );
-  }
-
-  const normalizedPath = parsed.pathname.replace(/\/+$/u, "");
-  return `${parsed.protocol}//${parsed.host}${normalizedPath}`;
-}
-
-function rawHostname(value: string): string {
-  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/iu.exec(value)?.[1];
-  if (!authority || authority.includes("@")) {
-    return "";
-  }
-  if (authority.startsWith("[")) {
-    const end = authority.indexOf("]");
-    return end >= 0 ? authority.slice(0, end + 1) : "";
-  }
-  return authority.split(":", 1)[0] ?? "";
-}
-
-function hasCanonicalIpSpelling(
-  rawHost: string,
-  parsedHostname: string,
-): boolean {
-  const unwrapped = rawHost.replace(/^\[|\]$/gu, "");
-  const parsedKind = isIP(parsedHostname);
-  if (parsedKind === 4) {
-    return (
-      isIP(unwrapped) === 4 &&
-      unwrapped
-        .split(".")
-        .every((part) => String(Number.parseInt(part, 10)) === part)
-    );
-  }
-  if (parsedKind === 6) {
-    return rawHost.startsWith("[") && isIP(unwrapped) === 6;
-  }
-  return !/^(?:0x[0-9a-f]+|[0-9.]+)$/iu.test(unwrapped);
-}
-
-function isExplicitLoopback(rawHost: string, parsedHostname: string): boolean {
-  if (parsedHostname === "localhost") {
-    return rawHost.toLowerCase() === "localhost";
-  }
-  if (isIP(parsedHostname) === 4) {
-    return (
-      parsedHostname.startsWith("127.") &&
-      hasCanonicalIpSpelling(rawHost, parsedHostname)
-    );
-  }
-  return (
-    parsedHostname === "::1" && hasCanonicalIpSpelling(rawHost, parsedHostname)
-  );
-}
 
 /**
  * HTTP 409：同 audit_id 已绑定不同内容（§12.3 AUDIT_ID_CONFLICT）。
@@ -301,6 +199,7 @@ export class GuardApiClient {
   #productAbort = new AbortController();
   #productDelivery: Promise<OpenClawProductReceiptOutbox> | undefined;
   #productDeliveryClosed = false;
+  #productTransport?: OpenClawProductTransport;
   #consumptions = new WeakMap<
     GuardEvaluationResponse,
     Promise<ExecutionLeaseReference>
@@ -618,6 +517,12 @@ export class GuardApiClient {
           const delivery = new OpenClawProductReceiptOutbox({
             store,
             sendReceipt: (wire) => this.submitProductReceiptWire(wire),
+            transportBindingDigest: productTransportBindingDigest(
+              this.#config.guardApiBaseUrl,
+              store.namespace,
+            ),
+            transportIdle: () => this.#receiptTransport().whenIdle(),
+            transportBusy: () => this.#receiptTransport().busy,
           });
           delivery.start();
           return delivery;
@@ -662,138 +567,25 @@ export class GuardApiClient {
   async submitProductReceiptWire(
     wire: string,
   ): Promise<ProductReceiptTransportResult> {
-    let auditId: string;
     try {
       this.assertProductConfiguration(true);
-      if (
-        !Number.isSafeInteger(this.#config.requestTimeoutMs) ||
-        this.#config.requestTimeoutMs < 1 ||
-        this.#config.requestTimeoutMs > 600_000
-      )
-        throw new Error();
-      if (
-        typeof wire !== "string" ||
-        Buffer.byteLength(wire, "utf8") > 512 * 1024
-      )
-        throw new Error();
-      const value: unknown = JSON.parse(wire);
-      if (
-        !isRecord(value) ||
-        value.record_type !== "runtime_outcome" ||
-        value.runtime !== "openclaw" ||
-        typeof value.audit_id !== "string" ||
-        value.audit_id.length < 1 ||
-        value.audit_id.length > 256 ||
-        !isRecord(value.metadata) ||
-        value.metadata.agent_id !== this.#config.agentId ||
-        !isRecord(value.metadata.activation_ack) ||
-        value.metadata.activation_ack.runtime_binding_id !==
-          this.#config.runtimeBindingId
-      )
-        throw new Error();
-      auditId = value.audit_id;
+      return await this.#receiptTransport().send(wire);
     } catch {
       return { status: "failed", errorCode: "receipt_transport_invalid" };
     }
-    const controller = new AbortController();
-    const deadline = performance.now() + this.#config.requestTimeoutMs;
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.#config.requestTimeoutMs,
-    );
-    let abortListener: () => void;
-    const aborted = new Promise<never>((_resolve, reject) => {
-      abortListener = () => reject(new GuardApiResponseError("timed_out"));
-      controller.signal.addEventListener("abort", abortListener, {
-        once: true,
-      });
-    });
-    let httpStatus: number | undefined;
-    try {
-      const response = await Promise.race([
-        this.#fetchImpl(
-          `${trimTrailingSlash(this.#config.guardApiBaseUrl)}/v1/audit/events`,
-          {
-            method: "POST",
-            body: wire,
-            redirect: "manual",
-            signal: controller.signal,
-            headers: {
-              Accept: "application/json",
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${this.#config.adapterToken}`,
-            },
-          },
-        ),
-        aborted,
-      ]);
-      httpStatus = response.status;
-      if (controller.signal.aborted || performance.now() >= deadline)
-        throw new GuardApiResponseError("timed_out");
-      if (httpStatus === 408 || httpStatus === 429 || httpStatus >= 500) {
-        controller.abort();
-        return {
-          status: "retryable",
-          auditId,
-          httpStatus,
-          errorCode: "http_retryable",
-        };
-      }
-      if (httpStatus >= 300) {
-        controller.abort();
-        return {
-          status: "permanent_rejected",
-          auditId,
-          httpStatus,
-          errorCode: "http_permanent_rejection",
-        };
-      }
-      if (httpStatus < 200)
-        return {
-          status: "failed",
-          auditId,
-          httpStatus,
-          errorCode: "receipt_response_invalid",
-        };
-      const body = await readBoundedJsonResponse(
-        response,
-        controller.signal,
-        aborted,
-      );
-      if (controller.signal.aborted || performance.now() >= deadline)
-        throw new GuardApiResponseError("timed_out");
-      if (
-        !isRecord(body) ||
-        body.ok !== true ||
-        body.audit_id !== auditId ||
-        "skipped" in body
-      )
-        return {
-          status: "failed",
-          auditId,
-          httpStatus,
-          errorCode: "receipt_confirmation_invalid",
-        };
-      return { status: "recorded", auditId, httpStatus };
-    } catch (error) {
-      const retryable =
-        controller.signal.aborted ||
-        error instanceof TypeError ||
-        (error instanceof GuardApiResponseError &&
-          error.failure === "timed_out");
-      return {
-        status: retryable ? "retryable" : "failed",
-        auditId,
-        httpStatus,
-        errorCode: retryable
-          ? "receipt_transport_unavailable"
-          : "receipt_response_invalid",
-      };
-    } finally {
-      clearTimeout(timeout);
-      controller.signal.removeEventListener("abort", abortListener!);
-      controller.abort();
-    }
+  }
+
+  #receiptTransport(): OpenClawProductTransport {
+    return (this.#productTransport ??= new OpenClawProductTransport(
+      {
+        guardApiBaseUrl: this.#config.guardApiBaseUrl,
+        adapterToken: this.#config.adapterToken,
+        agentId: this.#config.agentId,
+        runtimeBindingId: this.#config.runtimeBindingId,
+        requestTimeoutMs: this.#config.requestTimeoutMs,
+      },
+      this.#fetchImpl,
+    ));
   }
 
   async submitHeartbeat(
@@ -1263,80 +1055,6 @@ export class GuardApiClient {
       this.closeProductSession();
       throw new OpenClawProductActivationError(code);
     }
-  }
-}
-
-async function readBoundedJsonResponse(
-  response: Response,
-  signal: AbortSignal,
-  abortPromise: Promise<never>,
-): Promise<unknown> {
-  const declaredLength = response.headers.get("content-length");
-  if (
-    declaredLength !== null &&
-    /^\d+$/u.test(declaredLength) &&
-    Number(declaredLength) > MAX_GUARD_API_RESPONSE_BYTES
-  ) {
-    throw new GuardApiResponseError("too_large");
-  }
-  if (!response.body) {
-    if (response.ok) {
-      throw new GuardApiResponseError("malformed");
-    }
-    return null;
-  }
-
-  const reader = response.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  let completed = false;
-  try {
-    while (true) {
-      const chunk = await Promise.race([reader.read(), abortPromise]);
-      if (chunk.done) {
-        completed = true;
-        break;
-      }
-      totalBytes += chunk.value.byteLength;
-      if (totalBytes > MAX_GUARD_API_RESPONSE_BYTES) {
-        throw new GuardApiResponseError("too_large");
-      }
-      chunks.push(chunk.value);
-    }
-  } finally {
-    if (!completed) {
-      void reader.cancel().catch(() => undefined);
-    }
-  }
-  if (signal.aborted) {
-    throw new GuardApiResponseError("timed_out");
-  }
-
-  const bytes = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  let text: string;
-  try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  } catch {
-    throw new GuardApiResponseError("malformed");
-  }
-  if (!text.trim()) {
-    if (response.ok) {
-      throw new GuardApiResponseError("malformed");
-    }
-    return null;
-  }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    if (response.ok) {
-      throw new GuardApiResponseError("malformed");
-    }
-    return null;
   }
 }
 

@@ -121,17 +121,23 @@ class ProductEnvelopeStore:
         max_records: int = MAX_RECORDS,
         max_record_bytes: int = MAX_RECORD_BYTES,
         max_total_bytes: int = MAX_TOTAL_BYTES,
+        existing_only: bool = False,
     ) -> None:
         self._mutex = threading.RLock()
         self._directory_fd = -1
         self._key_directory_fd = -1
         self._lock_fd = -1
+        self._fresh_owner_anchor = False
         self._cipher: Any = None
         self._closed = True
         self._owner_pid = os.getpid()
         self._records: dict[str, StoredEnvelope] = {}
-        if not isinstance(namespace, ProductStoreNamespace):
+        if (
+            not isinstance(namespace, ProductStoreNamespace)
+            or type(existing_only) is not bool
+        ):
             raise ProductEnvelopeStoreError("invalid_configuration")
+        self._existing_only = existing_only
         for value, upper in (
             (max_records, MAX_RECORDS),
             (max_record_bytes, MAX_RECORD_BYTES),
@@ -177,13 +183,25 @@ class ProductEnvelopeStore:
         except ImportError:
             raise ProductEnvelopeStoreError("crypto_unavailable") from None
         try:
-            self._directory_fd = _open_private_directory(directory_path)
-            self._lock_fd = os.open(
-                ".lock",
-                os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK,
-                0o600,
-                dir_fd=self._directory_fd,
+            self._directory_fd = _open_private_directory(
+                directory_path, existing_only=existing_only
             )
+            lock_flags = os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK
+            if not existing_only:
+                try:
+                    self._lock_fd = os.open(
+                        ".lock",
+                        lock_flags | os.O_CREAT | os.O_EXCL,
+                        0o600,
+                        dir_fd=self._directory_fd,
+                    )
+                    self._fresh_owner_anchor = True
+                    os.fsync(self._lock_fd)
+                    os.fsync(self._directory_fd)
+                except FileExistsError:
+                    pass
+            if self._lock_fd < 0:
+                self._lock_fd = os.open(".lock", lock_flags, dir_fd=self._directory_fd)
             _check_private_file(os.fstat(self._lock_fd))
             if os.fstat(self._lock_fd).st_size != 0:
                 raise ProductEnvelopeStoreError("record_invalid")
@@ -191,7 +209,9 @@ class ProductEnvelopeStore:
                 fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 raise ProductEnvelopeStoreError("store_locked") from None
-            self._key_directory_fd = _open_private_directory(secret_path.parent)
+            self._key_directory_fd = _open_private_directory(
+                secret_path.parent, existing_only=existing_only
+            )
             self._key_name = secret_path.name
             key = self._load_or_create_key(secret_path.name)
             self._key_digest = hashlib.sha256(key).digest()
@@ -214,6 +234,11 @@ class ProductEnvelopeStore:
     @property
     def namespace(self) -> ProductStoreNamespace:
         return self._identity
+
+    @property
+    def fresh_owner_anchor(self) -> bool:
+        """True only when this opening created the owner anchor atomically."""
+        return self._fresh_owner_anchor
 
     def __enter__(self) -> ProductEnvelopeStore:
         self._assert_open()
@@ -305,6 +330,8 @@ class ProductEnvelopeStore:
         try:
             return _read_private_file(self._key_directory_fd, name, 32, key=True)
         except FileNotFoundError:
+            if self._existing_only:
+                raise ProductEnvelopeStoreError("key_missing") from None
             with os.scandir(self._directory_fd) as entries:
                 if any(entry.name != ".lock" for entry in entries):
                     raise ProductEnvelopeStoreError("key_missing") from None
@@ -533,7 +560,7 @@ def _absolute_path(value: str | Path) -> Path:
         raise ProductEnvelopeStoreError("invalid_configuration") from None
 
 
-def _open_private_directory(path: Path) -> int:
+def _open_private_directory(path: Path, *, existing_only: bool = False) -> int:
     descriptor = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in path.parts[1:]:
@@ -545,6 +572,8 @@ def _open_private_directory(path: Path) -> int:
                     dir_fd=descriptor,
                 )
             except FileNotFoundError:
+                if existing_only:
+                    raise
                 os.mkdir(part, mode=0o700, dir_fd=descriptor)
                 created = True
                 next_descriptor = os.open(

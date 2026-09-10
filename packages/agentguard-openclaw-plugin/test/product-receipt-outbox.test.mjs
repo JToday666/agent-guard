@@ -563,7 +563,7 @@ test("forged and foreign tickets cannot release or finish", async (t) => {
   );
 });
 
-test("close during network wait cannot mutate journal on late success", async (t) => {
+test("close during network wait retains ownership until the original confirmation is durable", async (t) => {
   const { make } = await setup(t);
   const entered = deferred();
   const finish = deferred();
@@ -574,13 +574,19 @@ test("close during network wait cannot mutate journal on late success", async (t
   });
   const pending = outbox.submit(fixture());
   await entered.promise;
-  await outbox.close();
+  assert.deepEqual(await outbox.closeWithin(5), {
+    status: "pending",
+    ownerHeld: true,
+  });
   assert.equal(outbox.status().pendingCount, 1);
+  await assert.rejects(make(), (error) => error.code === "store_locked");
   finish.resolve();
-  assert.equal((await pending).errorCode, "outbox_closed");
+  assert.equal((await pending).status, "recorded");
+  await outbox.close();
   const { outbox: recovered } = await make();
-  assert.equal(recovered.status().pendingCount, 1);
-  assert.equal((await recovered.drain())[0].status, "recorded");
+  assert.equal(recovered.status().pendingCount, 0);
+  assert.equal(recovered.status().completedCount, 1);
+  assert.deepEqual(await recovered.drain(), []);
 });
 
 test("parallel drain and repeated submissions never send one record concurrently", async (t) => {

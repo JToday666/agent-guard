@@ -9,7 +9,8 @@ import math
 import re
 from threading import Event, RLock, Thread, current_thread
 import time
-from typing import Any, Callable
+from typing import Any, Callable, Literal, cast
+import uuid
 
 from .activation_ack import (
     ActivationAckV1,
@@ -19,6 +20,9 @@ from .activation_ack import (
 from .event_models import AuditEvent, RuntimeOutcomeReceipt
 from .product_delivery import (
     ProductReceiptDeliveryResult,
+    ProductReceiptReconciliationAttempt,
+    ProductReceiptReconciliationSnapshot,
+    ProductReceiptRejectionFact,
     ProductReceiptTransportResult,
 )
 from .product_envelope_store import ProductEnvelopeStore, StoredEnvelope
@@ -56,6 +60,9 @@ _TOMBSTONE_FIELDS = frozenset(
     }
 )
 _ITEM_FIELDS = frozenset({"audit_id", "wire", "wire_digest", "activation_ack"})
+_BOUND_FIELDS = frozenset({"transport_binding_digest", "reconciliation"})
+_EXPLICIT_PHASE = "reconcile_pending"
+_MAX_RECONCILIATION_ATTEMPTS = 32
 
 
 def _now_ms() -> int:
@@ -71,6 +78,7 @@ class ProductOutboxStatus:
     record_count: int
     stored_bytes: int
     error_code: str | None = None
+    closing: bool = False
 
 
 class ProductReceiptOutbox:
@@ -84,8 +92,16 @@ class ProductReceiptOutbox:
         retry_base_seconds: float = 0.25,
         retry_max_seconds: float = 30.0,
         drain_interval_seconds: float = 1.0,
+        receipts_only: bool = False,
+        transport_binding_digest: str | None = None,
     ) -> None:
-        if not isinstance(store, ProductEnvelopeStore) or not callable(send_receipt):
+        if (
+            not isinstance(store, ProductEnvelopeStore)
+            or not callable(send_receipt)
+            or type(receipts_only) is not bool
+            or transport_binding_digest is not None
+            and not _hex_digest(transport_binding_digest)
+        ):
             raise ProductActivationError("outbox_invalid_configuration")
         for value in (retry_base_seconds, retry_max_seconds, drain_interval_seconds):
             if (
@@ -106,6 +122,11 @@ class ProductReceiptOutbox:
         self._stop = Event()
         self._worker: Thread | None = None
         self._closed = False
+        self._store_closed = False
+        self._receipts_only = receipts_only
+        self._requested_transport_binding = transport_binding_digest
+        self._transport_binding_digest: str | None = None
+        self._control_data: dict[str, Any] | None = None
         self._failure: str | None = None
         self._sending: set[str] = set()
         self._starting: str | None = None
@@ -117,20 +138,31 @@ class ProductReceiptOutbox:
             with self._mutex:
                 self._load_locked()
                 if self._control is None:
+                    if self._records or receipts_only or not store.fresh_owner_anchor:
+                        raise ProductActivationError("outbox_control_missing")
+                    control_data = {
+                        "schema_version": "1.0",
+                        "record_type": "breaker",
+                        "tripped": False,
+                        "code": None,
+                    }
+                    if transport_binding_digest is not None:
+                        control_data.update(
+                            schema_version="1.1",
+                            transport_binding_digest=transport_binding_digest,
+                        )
                     self._control = store.create(
                         _CONTROL_ID,
-                        _encode(
-                            {
-                                "schema_version": "1.0",
-                                "record_type": "breaker",
-                                "tripped": False,
-                                "code": None,
-                            }
-                        ),
+                        _encode(control_data),
                         kind="breaker",
                     )
+                    self._control_data = control_data
+                    self._transport_binding_digest = transport_binding_digest
                 if self._unknown_count_locked():
                     self._trip_locked("action_outcome_unknown")
+        except ProductActivationError as exc:
+            store.close()
+            raise ProductActivationError(_safe_local_code(exc.code)) from None
         except Exception:
             store.close()
             raise ProductActivationError("outbox_recovery_failed") from None
@@ -138,29 +170,48 @@ class ProductReceiptOutbox:
     def __repr__(self) -> str:
         return f"ProductReceiptOutbox(closed={self._closed})"
 
+    @property
+    def transport_binding_digest(self) -> str | None:
+        with self._mutex:
+            self._assert_open()
+            self._load_locked()
+            return self._transport_binding_digest
+
     def start(self) -> None:
         with self._mutex:
             self._assert_open()
+            self._assert_execution_mode()
             if self._worker is None:
                 self._worker = Thread(
                     target=self._loop, name="agentguard-product-outbox", daemon=True
                 )
                 self._worker.start()
 
-    def close(self) -> None:
+    def close(self) -> ProductOutboxStatus:
         with self._mutex:
-            if self._closed:
-                return
-            self._starting = None
-            self._active = None
-            self.status()
-            self._closed = True
-            self._stop.set()
+            if not self._closed:
+                self._starting = None
+                self._active = None
+                self.status()
+                self._closed = True
+                self._stop.set()
+            self._close_store_if_idle_locked()
             worker = self._worker
+        # Preserve the normal close contract for an idle background worker.
+        # A timed-out sender still owns the store/flock until its call returns.
         if worker is not None and worker is not current_thread():
             worker.join(timeout=1.0)
-        # A late HTTP success cannot delete or change the durable journal.
-        self._store.close()
+        with self._mutex:
+            return self.status()
+
+    def _close_store_if_idle_locked(self) -> None:
+        if self._closed and not self._sending and not self._store_closed:
+            self._store.close()
+            self._store_closed = True
+
+    def _sending_finished_locked(self, record_id: str) -> None:
+        self._sending.discard(record_id)
+        self._close_store_if_idle_locked()
 
     def status(self) -> ProductOutboxStatus:
         with self._mutex:
@@ -172,7 +223,8 @@ class ProductReceiptOutbox:
                     True,
                     self._last_status.record_count,
                     self._last_status.stored_bytes,
-                    "outbox_closed",
+                    "outbox_closing" if self._sending else "outbox_closed",
+                    bool(self._sending),
                 )
             try:
                 self._load_locked()
@@ -225,6 +277,7 @@ class ProductReceiptOutbox:
             record_id = _record_id("receipt", item["audit_id"])
             with self._mutex:
                 self._assert_open()
+                self._assert_execution_mode()
                 self._load_locked()
                 previous = self._records.get(record_id)
                 if previous is None:
@@ -258,7 +311,8 @@ class ProductReceiptOutbox:
                     record_id
                     for record_id, (_, data) in self._records.items()
                     if data["record_type"] != "tombstone"
-                    and data["phase"] not in {"failed", "permanent_rejected"}
+                    and data["phase"]
+                    not in {"failed", "permanent_rejected", _EXPLICIT_PHASE}
                     and self._pending_item(data) is not None
                     and data["next_attempt_at_ms"] <= _now_ms()
                 ]
@@ -267,9 +321,236 @@ class ProductReceiptOutbox:
                 return (_failed("outbox_storage_failed"),)
         return tuple(self._deliver(record_id) for record_id in selected)
 
+    def _select_locked(
+        self, audit_id: str, expected_wire_digest: str
+    ) -> tuple[str, StoredEnvelope, dict[str, Any], str, bool]:
+        if (
+            not _identifier(audit_id)
+            or _SECRET.search(audit_id)
+            or not _hex_digest(expected_wire_digest)
+        ):
+            raise ProductActivationError("receipt_reconciliation_selector_invalid")
+        matches = []
+        for record_id, (stored, data) in self._records.items():
+            for stage in ("start", "terminal"):
+                if data["record_type"] == "tombstone":
+                    identity, digest = (
+                        data[f"{stage}_audit_id"],
+                        data[f"{stage}_digest"],
+                    )
+                    confirmed = True
+                else:
+                    item = data[stage]
+                    if item is None:
+                        continue
+                    identity, digest = item["audit_id"], item["wire_digest"]
+                    confirmed = stage == "start" and data["start_acknowledged"]
+                if identity == audit_id:
+                    matches.append((record_id, stored, data, stage, confirmed, digest))
+        if not matches:
+            raise ProductActivationError("receipt_reconciliation_not_found")
+        if len(matches) != 1:
+            self._trip_locked("outbox_receipt_conflict")
+            raise ProductActivationError("outbox_receipt_conflict")
+        record_id, stored, data, stage, confirmed, digest = matches[0]
+        if digest != expected_wire_digest:
+            raise ProductActivationError("receipt_reconciliation_digest_mismatch")
+        return record_id, stored, data, stage, confirmed
+
+    def reconciliation_snapshot(
+        self, audit_id: str, expected_wire_digest: str
+    ) -> ProductReceiptReconciliationSnapshot:
+        with self._mutex:
+            self._assert_open()
+            try:
+                self._load_locked()
+                _, _, data, stage, confirmed = self._select_locked(
+                    audit_id, expected_wire_digest
+                )
+                lineage = data.get("reconciliation")
+                return ProductReceiptReconciliationSnapshot(
+                    audit_id=audit_id,
+                    wire_digest=expected_wire_digest,
+                    owner_kind=data.get("owner_kind", data["record_type"]),
+                    item_kind=cast(Literal["start", "terminal"], stage),
+                    confirmed=confirmed,
+                    pending=not confirmed,
+                    requires_explicit_retry=not confirmed
+                    and data["phase"] in {"permanent_rejected", _EXPLICIT_PHASE},
+                    transport_binding_digest=self._transport_binding_digest,
+                    original_rejection=(
+                        ProductReceiptRejectionFact(**lineage["original_rejection"])
+                        if lineage
+                        else None
+                    ),
+                    attempts=tuple(
+                        ProductReceiptReconciliationAttempt(**attempt)
+                        for attempt in (lineage["attempts"] if lineage else [])
+                    ),
+                    breaker_open=bool(self._failure or self._unknown_count_locked()),
+                )
+            except ProductActivationError:
+                raise
+            except Exception:
+                self._trip_locked("outbox_storage_failed")
+                raise ProductActivationError("outbox_storage_failed") from None
+
+    def reconcile_rejected_receipt(
+        self, audit_id: str, expected_wire_digest: str
+    ) -> ProductReceiptDeliveryResult:
+        """Explicitly send one existing immutable item; never grant execution."""
+        with self._mutex:
+            try:
+                self._assert_open()
+                if not self._receipts_only:
+                    raise ProductActivationError(
+                        "receipt_reconciliation_worker_required"
+                    )
+                self._load_locked()
+                if self._transport_binding_digest is None:
+                    raise ProductActivationError("outbox_transport_binding_missing")
+                record_id, stored, data, stage, confirmed = self._select_locked(
+                    audit_id, expected_wire_digest
+                )
+                if (
+                    self._control_data
+                    and self._control_data["code"] == "outbox_receipt_conflict"
+                ):
+                    raise ProductActivationError("outbox_receipt_conflict")
+                if confirmed:
+                    lineage = data.get("reconciliation")
+                    if lineage is None or not any(
+                        attempt["audit_id"] == audit_id
+                        and attempt["wire_digest"] == expected_wire_digest
+                        and attempt["item_kind"] == stage
+                        and attempt["outcome"] == "recorded"
+                        for attempt in lineage["attempts"]
+                    ):
+                        raise ProductActivationError(
+                            "receipt_reconciliation_ineligible"
+                        )
+                    return ProductReceiptDeliveryResult("recorded", audit_id)
+                if self._active is not None or self._starting is not None:
+                    raise ProductActivationError("action_already_active")
+                if self._sending:
+                    return ProductReceiptDeliveryResult(
+                        "queued_durable",
+                        audit_id,
+                        error_code="receipt_reconciliation_busy",
+                    )
+                if (
+                    data["phase"] not in {"permanent_rejected", _EXPLICIT_PHASE}
+                    or data.get("reconciliation") is None
+                    or data["record_type"] == "action"
+                    and data["terminal"] is None
+                ):
+                    raise ProductActivationError("receipt_reconciliation_ineligible")
+                item = self._pending_item(data)
+                if item is None or item["audit_id"] != audit_id:
+                    raise ProductActivationError("receipt_reconciliation_order_invalid")
+                lineage = data["reconciliation"]
+                if len(lineage["attempts"]) >= _MAX_RECONCILIATION_ATTEMPTS:
+                    raise ProductActivationError("receipt_reconciliation_limit")
+                attempts = [dict(value) for value in lineage["attempts"]]
+                if attempts and attempts[-1]["outcome"] == "prepared":
+                    # The previous owner cannot establish whether its HTTP call
+                    # arrived. Keep that uncertainty, then explicitly retry once.
+                    attempts[-1]["outcome"] = "outcome_unknown"
+                attempt = {
+                    "attempt_id": "reconcile_" + uuid.uuid4().hex,
+                    "audit_id": audit_id,
+                    "wire_digest": expected_wire_digest,
+                    "item_kind": stage,
+                    "prepared_at_ms": _now_ms(),
+                    "finished_at_ms": None,
+                    "outcome": "prepared",
+                    "http_status": None,
+                    "error_code": None,
+                }
+                updated = {
+                    **data,
+                    "phase": _EXPLICIT_PHASE,
+                    "next_attempt_at_ms": 0,
+                    "reconciliation": {**lineage, "attempts": [*attempts, attempt]},
+                }
+                _validate_reconciliation(updated)
+                self._replace_locked(stored, updated)
+                stored, data = self._records[record_id]
+                self._sending.add(record_id)
+                wire = item["wire"].encode("utf-8")
+            except ProductActivationError as exc:
+                return _failed(exc.code)
+            except Exception:
+                self._trip_locked("outbox_storage_failed")
+                return _failed("outbox_storage_failed")
+        try:
+            reply = self._send(wire)
+        except Exception:
+            reply = ProductReceiptTransportResult("retryable")
+        except BaseException:
+            with self._mutex:
+                self._sending_finished_locked(record_id)
+            raise
+        with self._mutex:
+            self._sending_finished_locked(record_id)
+            if self._closed:
+                return _failed("outbox_closed", audit_id)
+            try:
+                self._load_locked()
+                current = self._store.get(record_id)
+                if current is None or current.revision != stored.revision:
+                    self._trip_locked("outbox_receipt_conflict")
+                    return _failed("outbox_receipt_conflict", audit_id)
+                status, http_status, error_code = _transport_fact(
+                    reply, audit_id, strict_http=True
+                )
+                attempt = {
+                    **data["reconciliation"]["attempts"][-1],
+                    "finished_at_ms": _now_ms(),
+                    "outcome": status,
+                    "http_status": http_status,
+                    "error_code": error_code,
+                }
+                updated = {
+                    **data,
+                    "http_status": http_status,
+                    "error_code": error_code,
+                    "phase": "failed" if status == "failed" else _EXPLICIT_PHASE,
+                    "reconciliation": {
+                        **data["reconciliation"],
+                        "attempts": [*data["reconciliation"]["attempts"][:-1], attempt],
+                    },
+                }
+                if status == "recorded":
+                    if stage == "start":
+                        updated["start_acknowledged"] = True
+                    else:
+                        updated = _tombstone(updated)
+                _validate_reconciliation(updated)
+                self._replace_locked(
+                    stored,
+                    updated,
+                    kind=(
+                        "tombstone"
+                        if updated["record_type"] == "tombstone"
+                        else stored.kind
+                    ),
+                )
+                self._trip_locked("receipt_reconciliation_required")
+                return ProductReceiptDeliveryResult(
+                    "queued_durable" if status == "retryable" else status,
+                    audit_id,
+                    http_status,
+                    error_code,
+                )
+            except Exception:
+                self._trip_locked("outbox_storage_failed")
+                return _failed("outbox_storage_failed", audit_id)
+
     def _assert_ready(self) -> None:
         with self._mutex:
             self._assert_open()
+            self._assert_execution_mode()
             status = self.status()
             if status.breaker_open:
                 raise ProductActivationError(status.error_code or "outbox_barrier_open")
@@ -357,6 +638,7 @@ class ProductReceiptOutbox:
 
             try:
                 self._assert_open()
+                self._assert_execution_mode()
                 self._load_locked()
                 if self._failure is not None:
                     return refuse(self._failure)
@@ -391,6 +673,7 @@ class ProductReceiptOutbox:
             item, action_id, event_id = self._receipt_item(receipt, None)
             with self._mutex:
                 self._assert_open()
+                self._assert_execution_mode()
                 self._load_locked()
                 stored, data = self._records[record_id]
                 if data["record_type"] == "tombstone":
@@ -448,6 +731,7 @@ class ProductReceiptOutbox:
             item, action_id, event_id = self._receipt_item(receipt, None)
             with self._mutex:
                 self._assert_open()
+                self._assert_execution_mode()
                 self._load_locked()
                 stored, data = self._records[record_id]
                 if data["record_type"] == "tombstone":
@@ -517,6 +801,12 @@ class ProductReceiptOutbox:
                         data["http_status"],
                         data["error_code"],
                     )
+                if data["phase"] == _EXPLICIT_PHASE:
+                    return ProductReceiptDeliveryResult(
+                        "queued_durable",
+                        item["audit_id"],
+                        error_code="receipt_reconciliation_required",
+                    )
                 if self._sending or data["next_attempt_at_ms"] > _now_ms():
                     return ProductReceiptDeliveryResult(
                         "queued_durable",
@@ -534,11 +824,16 @@ class ProductReceiptOutbox:
             reply = ProductReceiptTransportResult(
                 "retryable", error_code="receipt_transport_unavailable"
             )
+        except BaseException:
+            with self._mutex:
+                self._sending_finished_locked(record_id)
+            raise
         with self._mutex:
-            self._sending.discard(record_id)
+            self._sending_finished_locked(record_id)
             if self._closed:
                 return _failed("outbox_closed", item["audit_id"])
             try:
+                self._load_locked()
                 current = self._store.get(record_id)
                 if current is not None and current.revision != stored.revision:
                     # A same-process abort may append a terminal while this exact
@@ -562,7 +857,7 @@ class ProductReceiptOutbox:
                     self._trip_locked("outbox_receipt_conflict")
                     return _failed("outbox_receipt_conflict", item["audit_id"])
                 status, http_status, error_code = _transport_fact(
-                    reply, item["audit_id"]
+                    reply, item["audit_id"], strict_http=data["schema_version"] == "1.1"
                 )
                 if status == "recorded":
                     if (
@@ -607,14 +902,32 @@ class ProductReceiptOutbox:
                     return ProductReceiptDeliveryResult(
                         "queued_durable", item["audit_id"], http_status, error_code
                     )
+                updated = {
+                    **data,
+                    "phase": status,
+                    "http_status": http_status,
+                    "error_code": error_code,
+                }
+                if status == "permanent_rejected" and data["schema_version"] == "1.1":
+                    updated["reconciliation"] = {
+                        "original_rejection": {
+                            "audit_id": item["audit_id"],
+                            "wire_digest": item["wire_digest"],
+                            "item_kind": (
+                                "start"
+                                if data["start"] is not None
+                                and item["audit_id"] == data["start"]["audit_id"]
+                                else "terminal"
+                            ),
+                            "http_status": http_status,
+                            "error_code": error_code,
+                            "observed_at_ms": _now_ms(),
+                        },
+                        "attempts": [],
+                    }
                 self._replace_locked(
                     stored,
-                    {
-                        **data,
-                        "phase": status,
-                        "http_status": http_status,
-                        "error_code": error_code,
-                    },
+                    updated,
                 )
                 self._trip_locked(
                     "receipt_permanently_rejected"
@@ -704,22 +1017,36 @@ class ProductReceiptOutbox:
     def _load_locked(self) -> None:
         records: dict[str, tuple[StoredEnvelope, dict[str, Any]]] = {}
         control = None
+        control_data = None
+        binding = None
         for stored in self._store.records():
             data = json.loads(stored.payload)
             if _encode(data) != stored.payload:
                 raise ValueError
             if stored.kind == "breaker":
+                version = data.get("schema_version")
                 if (
                     stored.record_id != _CONTROL_ID
-                    or set(data) != {"schema_version", "record_type", "tripped", "code"}
-                    or data["schema_version"] != "1.0"
+                    or version not in {"1.0", "1.1"}
+                    or set(data)
+                    != {"schema_version", "record_type", "tripped", "code"}
+                    | ({"transport_binding_digest"} if version == "1.1" else set())
                     or data["record_type"] != "breaker"
                     or type(data["tripped"]) is not bool
                     or data["code"] is not None
                     and data["code"] not in _LOCAL_CODES
                 ):
                     raise ValueError
+                if version == "1.1":
+                    binding = data["transport_binding_digest"]
+                    if not _hex_digest(binding):
+                        raise ValueError
+                    if binding != self._requested_transport_binding:
+                        raise ProductActivationError(
+                            "outbox_transport_binding_mismatch"
+                        )
                 control = stored
+                control_data = data
                 if data["tripped"]:
                     self._failure = data["code"] or "outbox_barrier_open"
                 continue
@@ -730,17 +1057,37 @@ class ProductReceiptOutbox:
                     if data["phase"] == "permanent_rejected"
                     else "receipt_transport_failed"
                 )
+            if data.get("reconciliation") is not None:
+                # Includes completed tombstones: a failed breaker CAS must not
+                # turn successful historical delivery into new action authority.
+                self._failure = "receipt_reconciliation_required"
             records[stored.record_id] = stored, data
-        if self._control is not None and control is None:
-            raise ValueError
+        if control is None and (self._control is not None or records):
+            raise ProductActivationError("outbox_control_missing")
+        if self._control is not None and binding != self._transport_binding_digest:
+            raise ProductActivationError("outbox_transport_binding_mismatch")
+        for _, data in records.values():
+            if data.get("transport_binding_digest") != binding or (
+                data["schema_version"] == "1.1"
+            ) != (binding is not None):
+                raise ProductActivationError("outbox_transport_binding_mismatch")
         self._records, self._control = records, control
+        self._control_data = control_data
+        self._transport_binding_digest = binding
 
     def _validate_record(self, stored: StoredEnvelope, data: dict[str, Any]) -> None:
-        if not isinstance(data, dict) or data.get("schema_version") != "1.0":
+        if not isinstance(data, dict) or data.get("schema_version") not in {
+            "1.0",
+            "1.1",
+        }:
+            raise ValueError
+        bound = data["schema_version"] == "1.1"
+        extra_fields = _BOUND_FIELDS if bound else frozenset()
+        if bound and not _hex_digest(data.get("transport_binding_digest")):
             raise ValueError
         if stored.kind == "tombstone":
             if (
-                set(data) != _TOMBSTONE_FIELDS
+                set(data) != _TOMBSTONE_FIELDS | extra_fields
                 or data["record_type"] != "tombstone"
                 or data["owner_kind"] not in {"action", "receipt"}
             ):
@@ -767,9 +1114,11 @@ class ProductReceiptOutbox:
                     raise ValueError
             elif data["start_audit_id"] is not None or data["start_digest"] is not None:
                 raise ValueError
+            if bound:
+                _validate_reconciliation(data)
             return
         if (
-            set(data) != _RECORD_FIELDS
+            set(data) != _RECORD_FIELDS | extra_fields
             or stored.kind != data["record_type"]
             or stored.kind not in {"action", "receipt"}
             or not _identifier(data["event_id"])
@@ -780,7 +1129,12 @@ class ProductReceiptOutbox:
                 "terminal_pending",
                 "permanent_rejected",
                 "failed",
+                _EXPLICIT_PHASE,
             }
+        ):
+            raise ValueError
+        if data["phase"] == _EXPLICIT_PHASE and (
+            not bound or data.get("reconciliation") is None
         ):
             raise ValueError
         for field in ("attempts", "next_attempt_at_ms"):
@@ -869,8 +1223,17 @@ class ProductReceiptOutbox:
             raise ValueError
         elif data["start_acknowledged"] or data["phase"] in {"intent", "active"}:
             raise ValueError
+        if bound:
+            _validate_reconciliation(data)
 
     def _create_locked(self, record_id: str, data: dict[str, Any], kind: Any) -> None:
+        if self._transport_binding_digest is not None:
+            data = {
+                **data,
+                "schema_version": "1.1",
+                "transport_binding_digest": self._transport_binding_digest,
+                "reconciliation": None,
+            }
         stored = self._store.create(record_id, _encode(data), kind=kind)
         self._records[record_id] = stored, data
 
@@ -887,22 +1250,16 @@ class ProductReceiptOutbox:
 
     def _trip_locked(self, code: str) -> None:
         self._failure = code = _safe_local_code(code)
-        if self._closed or self._control is None:
+        if self._closed or self._control is None or self._control_data is None:
             return
         try:
             self._control = self._store.replace(
                 _CONTROL_ID,
-                _encode(
-                    {
-                        "schema_version": "1.0",
-                        "record_type": "breaker",
-                        "tripped": True,
-                        "code": code,
-                    }
-                ),
+                _encode({**self._control_data, "tripped": True, "code": code}),
                 expected_revision=self._control.revision,
                 kind="breaker",
             )
+            self._control_data = {**self._control_data, "tripped": True, "code": code}
         except Exception:
             # No successful persistence claim is possible when storage fails.
             # Existing intent/terminal records remain the recovery boundary.
@@ -956,6 +1313,10 @@ class ProductReceiptOutbox:
         if self._closed:
             raise ProductActivationError("outbox_closed")
 
+    def _assert_execution_mode(self) -> None:
+        if self._receipts_only:
+            raise ProductActivationError("outbox_receipts_only")
+
     def _loop(self) -> None:
         while not self._stop.wait(self._drain_interval):
             try:
@@ -969,6 +1330,20 @@ class ProductReceiptOutbox:
 _LOCAL_CODES = frozenset(
     {
         "outbox_closed",
+        "outbox_closing",
+        "outbox_control_missing",
+        "outbox_receipts_only",
+        "outbox_transport_binding_missing",
+        "outbox_transport_binding_mismatch",
+        "receipt_reconciliation_worker_required",
+        "receipt_reconciliation_selector_invalid",
+        "receipt_reconciliation_not_found",
+        "receipt_reconciliation_digest_mismatch",
+        "receipt_reconciliation_order_invalid",
+        "receipt_reconciliation_ineligible",
+        "receipt_reconciliation_limit",
+        "receipt_reconciliation_required",
+        "receipt_reconciliation_busy",
         "outbox_storage_failed",
         "outbox_recovery_failed",
         "outbox_receipt_conflict",
@@ -1068,7 +1443,7 @@ def _new_record(
 
 def _tombstone(data: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": "1.0",
+        "schema_version": data["schema_version"],
         "record_type": "tombstone",
         "owner_kind": data["record_type"],
         "action_id": data["action_id"],
@@ -1079,10 +1454,186 @@ def _tombstone(data: dict[str, Any]) -> dict[str, Any]:
         "terminal_digest": (
             data["terminal"]["wire_digest"] if data["terminal"] else None
         ),
+        **(
+            {field: data[field] for field in _BOUND_FIELDS}
+            if data["schema_version"] == "1.1"
+            else {}
+        ),
     }
 
 
-def _transport_fact(reply: Any, audit_id: str) -> tuple[Any, int | None, str | None]:
+def _validate_reconciliation(data: dict[str, Any]) -> None:
+    """A finite, append-only history can never grant or invent an action."""
+    lineage = data["reconciliation"]
+    tombstone = data["record_type"] == "tombstone"
+    if lineage is None:
+        if not tombstone and data["phase"] in {"permanent_rejected", _EXPLICIT_PHASE}:
+            raise ValueError
+        return
+    if not isinstance(lineage, dict) or set(lineage) != {
+        "original_rejection",
+        "attempts",
+    }:
+        raise ValueError
+    original = lineage["original_rejection"]
+    if not isinstance(original, dict) or set(original) != {
+        "audit_id",
+        "wire_digest",
+        "item_kind",
+        "http_status",
+        "error_code",
+        "observed_at_ms",
+    }:
+        raise ValueError
+    if original["error_code"] != "receipt_permanently_rejected":
+        raise ValueError
+    owner = data.get("owner_kind", data["record_type"])
+
+    def bound_item(value: dict[str, Any]) -> None:
+        stage = value["item_kind"]
+        if (
+            stage not in {"start", "terminal"}
+            or owner == "receipt"
+            and stage != "terminal"
+        ):
+            raise ValueError
+        if tombstone:
+            audit_id, digest = data[f"{stage}_audit_id"], data[f"{stage}_digest"]
+        else:
+            item = data[stage]
+            if item is None:
+                raise ValueError
+            audit_id, digest = item["audit_id"], item["wire_digest"]
+        if value["audit_id"] != audit_id or value["wire_digest"] != digest:
+            raise ValueError
+
+    def moment(value: Any, *, nullable: bool = False) -> None:
+        if nullable and value is None:
+            return
+        if type(value) is not int or not 0 <= value <= 2**53 - 1:
+            raise ValueError
+
+    def http(value: Any) -> None:
+        if value is not None and (type(value) is not int or not 100 <= value <= 599):
+            raise ValueError
+
+    bound_item(original)
+    moment(original["observed_at_ms"], nullable=True)
+    http(original["http_status"])
+    if not _permanent_http(original["http_status"]):
+        raise ValueError
+    attempts = lineage["attempts"]
+    if not isinstance(attempts, list) or len(attempts) > _MAX_RECONCILIATION_ATTEMPTS:
+        raise ValueError
+    identities: set[str] = set()
+    start_confirmed = original["item_kind"] == "terminal"
+    previous_time = original["observed_at_ms"] or 0
+    terminal_confirmed = False
+    for index, attempt in enumerate(attempts):
+        if not isinstance(attempt, dict) or set(attempt) != {
+            "attempt_id",
+            "audit_id",
+            "wire_digest",
+            "item_kind",
+            "prepared_at_ms",
+            "finished_at_ms",
+            "outcome",
+            "http_status",
+            "error_code",
+        }:
+            raise ValueError
+        identity = attempt["attempt_id"]
+        if (
+            not isinstance(identity, str)
+            or re.fullmatch(r"reconcile_[0-9a-f]{32}", identity) is None
+            or identity in identities
+        ):
+            raise ValueError
+        identities.add(identity)
+        bound_item(attempt)
+        moment(attempt["prepared_at_ms"])
+        moment(attempt["finished_at_ms"], nullable=True)
+        http(attempt["http_status"])
+        if attempt["prepared_at_ms"] < previous_time or terminal_confirmed:
+            raise ValueError
+        if attempt["item_kind"] != ("terminal" if start_confirmed else "start"):
+            raise ValueError
+        outcome = attempt["outcome"]
+        if outcome in {"prepared", "outcome_unknown"}:
+            if (
+                attempt["finished_at_ms"] is not None
+                or attempt["http_status"] is not None
+                or attempt["error_code"] is not None
+            ):
+                raise ValueError
+            if outcome == "prepared" and index != len(attempts) - 1:
+                raise ValueError
+            if outcome == "outcome_unknown" and index == len(attempts) - 1:
+                raise ValueError
+        elif outcome in {"recorded", "retryable", "permanent_rejected", "failed"}:
+            if (
+                attempt["finished_at_ms"] is None
+                or attempt["finished_at_ms"] < attempt["prepared_at_ms"]
+            ):
+                raise ValueError
+            if outcome == "recorded":
+                if (
+                    attempt["error_code"] is not None
+                    or type(attempt["http_status"]) is not int
+                    or not 200 <= attempt["http_status"] < 300
+                ):
+                    raise ValueError
+                if attempt["item_kind"] == "start":
+                    start_confirmed = True
+                else:
+                    terminal_confirmed = True
+            elif attempt["error_code"] not in _LOCAL_CODES | _DELIVERY_CODES:
+                raise ValueError
+            if outcome == "permanent_rejected" and (
+                not _permanent_http(attempt["http_status"])
+                or attempt["error_code"] != "receipt_permanently_rejected"
+            ):
+                raise ValueError
+        else:
+            raise ValueError
+        previous_time = attempt["finished_at_ms"] or attempt["prepared_at_ms"]
+    if tombstone:
+        if not terminal_confirmed:
+            raise ValueError
+    else:
+        if terminal_confirmed or data["phase"] not in {
+            "permanent_rejected",
+            _EXPLICIT_PHASE,
+            "failed",
+        }:
+            raise ValueError
+        if (
+            data["record_type"] == "action"
+            and data["start_acknowledged"] != start_confirmed
+        ):
+            raise ValueError
+        if data["phase"] == "permanent_rejected" and attempts:
+            raise ValueError
+        if data["phase"] == "permanent_rejected" and (
+            data["http_status"] != original["http_status"]
+            or data["error_code"] != original["error_code"]
+        ):
+            raise ValueError
+        if data["phase"] == _EXPLICIT_PHASE and not attempts:
+            raise ValueError
+        if attempts and (data["phase"] == "failed") != (
+            attempts[-1]["outcome"] == "failed"
+        ):
+            raise ValueError
+
+
+def _permanent_http(value: Any) -> bool:
+    return type(value) is int and 300 <= value < 500 and value not in {408, 429}
+
+
+def _transport_fact(
+    reply: Any, audit_id: str, *, strict_http: bool = False
+) -> tuple[Any, int | None, str | None]:
     if not isinstance(reply, ProductReceiptTransportResult) or reply.status not in {
         "recorded",
         "retryable",
@@ -1096,9 +1647,21 @@ def _transport_fact(reply: Any, audit_id: str) -> tuple[Any, int | None, str | N
         else None
     )
     if reply.status == "recorded":
-        if reply.audit_id != audit_id or status is not None and not 200 <= status < 300:
+        if (
+            reply.audit_id != audit_id
+            or strict_http
+            and status is None
+            or status is not None
+            and not 200 <= status < 300
+        ):
             return "failed", status, "receipt_acknowledgement_invalid"
         return "recorded", status, None
+    if (
+        strict_http
+        and reply.status == "permanent_rejected"
+        and not _permanent_http(status)
+    ):
+        return "failed", status, "receipt_transport_invalid"
     code = {
         "retryable": "receipt_retry_pending",
         "permanent_rejected": "receipt_permanently_rejected",

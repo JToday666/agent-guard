@@ -30,6 +30,11 @@ from .product_delivery import (
     ProductReceiptTransportResult,
 )
 from .product_outbox import ProductReceiptOutbox, ProductOutboxStatus
+from .product_receipt_recovery import (
+    ProductReceiptRecovery,
+    load_product_recovery_config,
+    open_product_receipt_recovery,
+)
 from .product_action_barrier import (
     ProductActionBarrier,
     ProductActionTicket,
@@ -97,6 +102,9 @@ __all__ = [
     "ProductReceiptTransportResult",
     "ProductReceiptOutbox",
     "ProductOutboxStatus",
+    "ProductReceiptRecovery",
+    "load_product_recovery_config",
+    "open_product_receipt_recovery",
     "ProductActionBarrier",
     "ProductActionTicket",
     "BeginActionResult",

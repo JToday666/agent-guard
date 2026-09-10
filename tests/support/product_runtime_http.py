@@ -29,6 +29,8 @@ from fastapi import FastAPI, Request
 from guard_api.main import create_app
 from guard_api.security_state import SecurityStateService
 from guard_api.storage.memory import MemoryControlPlaneStore
+from guard_api.storage.base import ControlPlaneStore
+from guard_api.storage.postgres import PostgresControlPlaneStore
 from tests.support.auth import add_adapter_credential
 from tests.support.product_activation import (
     ProductActivationFixture,
@@ -53,7 +55,7 @@ class CapturedProductRequest:
 @dataclass(slots=True)
 class ProductRuntimeHttpHarness:
     fixture: ProductActivationFixture = field(repr=False)
-    store: MemoryControlPlaneStore = field(repr=False)
+    store: ControlPlaneStore = field(repr=False)
     client: httpx.Client = field(repr=False)
     manifest_path: Path
     observation: ProductRuntimeObservation
@@ -156,6 +158,7 @@ def product_runtime_http(
     product_tool_catalog_path: Path | None = None,
     task_text: str = "exercise the public Product Active HTTP chain",
     policy: PolicyBundle | None = None,
+    store: ControlPlaneStore | None = None,
 ) -> Iterator[ProductRuntimeHttpHarness]:
     """Seed the peer over HTTP; the tested SDK must establish its own heartbeat."""
 
@@ -177,7 +180,11 @@ def product_runtime_http(
     settings.llm_approval_api_key = None
     settings.v21_semantic_enabled = False
     settings.v21_semantic_api_key = None
-    store = MemoryControlPlaneStore()
+    store = store if store is not None else MemoryControlPlaneStore()
+    if isinstance(store, PostgresControlPlaneStore):
+        settings.storage_backend = "postgres"
+        settings.database_url = store.database_url
+        store.initialize()
     store.save_policy_snapshot(
         policy, expected_revision=0, updated_by="sdk-http-contract-test"
     )

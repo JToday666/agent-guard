@@ -70,6 +70,7 @@ export interface OpenClawProductEnvelopeStoreOptions {
   directory: string;
   keyPath: string;
   namespace: OpenClawProductStoreNamespace;
+  existingOnly?: boolean;
   maxRecords?: number;
   maxRecordBytes?: number;
   maxTotalBytes?: number;
@@ -131,6 +132,7 @@ export class OpenClawStoredEnvelope {
  * change or directory copying. Only same-boot/namespace process restart is supported.
  */
 export class OpenClawProductEnvelopeStore {
+  #existingOnly: boolean;
   #directory: string;
   #keyPath: string;
   #identity: Readonly<OpenClawProductStoreNamespace>;
@@ -144,6 +146,7 @@ export class OpenClawProductEnvelopeStore {
   #keyDirectoryMetadata?: fs.BigIntStats;
   #anchorMetadata?: fs.BigIntStats;
   #anchorBytes?: Buffer;
+  #createdAnchor = false;
   #key?: Buffer;
   #keyDigest?: Buffer;
   #server?: Server;
@@ -154,6 +157,12 @@ export class OpenClawProductEnvelopeStore {
   #closePromise?: Promise<void>;
 
   private constructor(options: OpenClawProductEnvelopeStoreOptions) {
+    if (
+      options.existingOnly !== undefined &&
+      typeof options.existingOnly !== "boolean"
+    )
+      fail("invalid_configuration");
+    this.#existingOnly = options.existingOnly ?? false;
     this.#directory = absolutePath(options.directory);
     this.#keyPath = absolutePath(options.keyPath);
     const ns = options.namespace;
@@ -211,13 +220,19 @@ export class OpenClawProductEnvelopeStore {
       )
         fail("unsupported_platform");
       store = new OpenClawProductEnvelopeStore(options);
-      store.#directoryFd = openPrivateDirectory(store.#directory);
+      store.#directoryFd = openPrivateDirectory(
+        store.#directory,
+        !store.#existingOnly,
+      );
       store.#directoryMetadata = fs.fstatSync(store.#directoryFd, {
         bigint: true,
       });
       store.#initializeAnchor();
       await store.#acquireLock();
-      store.#keyDirectoryFd = openPrivateDirectory(dirname(store.#keyPath));
+      store.#keyDirectoryFd = openPrivateDirectory(
+        dirname(store.#keyPath),
+        !store.#existingOnly,
+      );
       store.#keyDirectoryMetadata = fs.fstatSync(store.#keyDirectoryFd, {
         bigint: true,
       });
@@ -234,6 +249,10 @@ export class OpenClawProductEnvelopeStore {
 
   get namespace(): Readonly<OpenClawProductStoreNamespace> {
     return this.#identity;
+  }
+  /** Only this open initialized a previously absent owner anchor; never inferred from an empty journal. */
+  get freshForProducer(): boolean {
+    return this.#createdAnchor;
   }
   toJSON(): object {
     return { closed: this.#closed };
@@ -346,6 +365,7 @@ export class OpenClawProductEnvelopeStore {
       readPrivateFile(this.#directoryFd, ANCHOR, 2048);
     } catch (error) {
       if (!hasCode(error, "ENOENT")) throw error;
+      if (this.#existingOnly) fail("owner_anchor_missing");
       if (fs.readdirSync(at(this.#directoryFd)).length !== 0)
         fail("owner_anchor_missing");
       let fd = -1;
@@ -362,6 +382,7 @@ export class OpenClawProductEnvelopeStore {
         writeAll(fd, expected);
         fs.fsyncSync(fd);
         fs.fsyncSync(this.#directoryFd);
+        this.#createdAnchor = true;
       } catch (creationError) {
         if (!hasCode(creationError, "EEXIST"))
           throw fixed(creationError, "write_failed");
@@ -451,6 +472,7 @@ export class OpenClawProductEnvelopeStore {
       return readPrivateFile(this.#keyDirectoryFd, name, 32, true);
     } catch (error) {
       if (!hasCode(error, "ENOENT")) throw error;
+      if (this.#existingOnly) fail("key_missing");
       if (fs.readdirSync(at(this.#directoryFd)).some((name) => name !== ANCHOR))
         fail("key_missing");
     }
@@ -844,7 +866,7 @@ function checkDirectoryIdentity(
   if (!sameInode(held, expected) || !sameInode(held, named))
     fail("permission_denied");
 }
-function openPrivateDirectory(path: string): number {
+function openPrivateDirectory(path: string, create = true): number {
   let fd = fs.openSync("/", fs.constants.O_RDONLY | fs.constants.O_DIRECTORY);
   try {
     for (const part of path.split(sep).filter(Boolean)) {
@@ -857,7 +879,7 @@ function openPrivateDirectory(path: string): number {
             fs.constants.O_NOFOLLOW,
         );
       } catch (error) {
-        if (!hasCode(error, "ENOENT")) throw error;
+        if (!create || !hasCode(error, "ENOENT")) throw error;
         try {
           fs.mkdirSync(at(fd, part), { mode: 0o700 });
           fs.fsyncSync(fd);

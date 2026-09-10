@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -66,6 +67,10 @@ _SHADOW_SECRET_B64 = base64.urlsafe_b64encode(
 ProductReplayRuntime = Literal["langgraph", "openclaw"]
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @dataclass(frozen=True, slots=True)
 class ProductEvaluationHarness:
     fixture: ProductActivationFixture
@@ -79,6 +84,7 @@ class ProductEvaluationHarness:
     auth_context: AuthContext
     runtime: ProductReplayRuntime
     activation_ack_token: str
+    clock: Callable[[], datetime]
 
     def evaluate(self, event: GuardEvent):
         return self.evaluation.evaluate(
@@ -98,7 +104,7 @@ class ProductEvaluationHarness:
             event_type="tool_call_proposed",
             runtime=self.runtime,
             trace_id="trace:product-replay",
-            timestamp=datetime.now(timezone.utc).isoformat(),
+            timestamp=self.clock().isoformat(),
             pre_execution=True,
             security_context=SecurityContext(
                 agent_id="main",
@@ -140,12 +146,19 @@ def create_product_evaluation_harness(
     *,
     runtime: ProductReplayRuntime = "langgraph",
     action_types: tuple[str, ...] = ("tool_call",),
+    clock: Callable[[], datetime] | None = None,
 ) -> ProductEvaluationHarness:
-    """Create one fully signed in-memory Product authority environment."""
+    """Create signed in-memory authority; only explicit fixtures use a test clock.
 
+    The default remains live UTC for HTTP/expiry callers. Offline report fixtures
+    may supply one clock for issuance, events and both server authority checks;
+    they must advance it explicitly when exercising a time boundary.
+    """
+
+    evaluation_clock = clock or _utc_now
     policy = PolicyBundle()
     fixture = build_test_product_activation(
-        now=datetime.now(timezone.utc),
+        now=evaluation_clock(),
         policy_digest=canonical_sha256(policy.model_dump(mode="json")),
     )
     activation_path = tmp_path / f"product-replay-activation-{runtime}.json"
@@ -155,7 +168,9 @@ def create_product_evaluation_harness(
     store.save_policy_snapshot(policy, expected_revision=0, updated_by="replay-test")
     activation_ack_tokens: dict[str, str] = {}
     for observed_runtime in ("langgraph", "openclaw"):
-        status = product_runtime_status_for_activation(fixture, observed_runtime)
+        status = product_runtime_status_for_activation(
+            fixture, observed_runtime, last_heartbeat_at=evaluation_clock()
+        )
         ack = product_activation_ack_for_status(fixture, status)
         store.save_product_runtime_status(
             status,
@@ -183,11 +198,14 @@ def create_product_evaluation_harness(
     )
     activation = load_frozen_product_activation(settings)
     assert activation is not None
-    resolver = RuntimeBindingResolver(product_activation=activation)
+    resolver = RuntimeBindingResolver(
+        product_activation=activation, clock=evaluation_clock
+    )
     product_authority = ProductActivationAuthorityService(
         activation=activation,
         store=store,
         server_secret=fixture.server_secret,
+        clock=evaluation_clock,
     )
     task = TaskIngressService(
         store=store,
@@ -253,6 +271,7 @@ def create_product_evaluation_harness(
         auth_context=auth_context,
         runtime=runtime,
         activation_ack_token=activation_ack_tokens[runtime],
+        clock=evaluation_clock,
     )
 
 

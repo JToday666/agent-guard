@@ -44,7 +44,7 @@ from .product_delivery import ProductReceiptDeliveryResult
 from .product_envelope_store import ProductEnvelopeStore, ProductStoreNamespace
 
 if TYPE_CHECKING:
-    from .product_outbox import ProductReceiptOutbox
+    from .product_outbox import ProductOutboxStatus, ProductReceiptOutbox
     from .product_action_barrier import ProductActionBarrier
 
 TOOL_METADATA = {
@@ -141,7 +141,9 @@ class LangGraphAdapter:
                 ),
             )
             self._product_outbox = ProductReceiptOutbox(
-                store, send_receipt=client.submit_product_receipt_wire
+                store,
+                send_receipt=client.submit_product_receipt_wire,
+                transport_binding_digest=client.product_receipt_transport_binding_digest,
             )
             self._product_barrier = ProductActionBarrier(self._product_outbox)
             self._product_outbox.start()
@@ -158,7 +160,7 @@ class LangGraphAdapter:
             raise ProductActivationError("product_delivery_unavailable")
         return self._product_barrier
 
-    def product_delivery_status(self) -> Any:
+    def product_delivery_status(self) -> ProductOutboxStatus:
         if self._product_outbox is None:
             raise ProductActivationError("product_delivery_unavailable")
         return self._product_outbox.status()
@@ -168,9 +170,11 @@ class LangGraphAdapter:
             raise ProductActivationError("product_delivery_unavailable")
         return self._product_outbox.drain_once()
 
-    def close_product_delivery(self) -> None:
+    def close_product_delivery(self) -> ProductOutboxStatus | None:
+        """Stop new delivery and report whether an existing sender still owns the queue."""
         if self._product_outbox is not None:
-            self._product_outbox.close()
+            return self._product_outbox.close()
+        return None
 
     def submit_product_receipt(
         self, receipt: AuditEvent | RuntimeOutcomeReceipt

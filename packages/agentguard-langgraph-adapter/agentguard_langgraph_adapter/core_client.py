@@ -113,6 +113,25 @@ class AgentGuardCoreClient:
             )
 
     @property
+    def product_receipt_transport_binding_digest(self) -> str:
+        """Identify the captured sender without reading mutable compatibility config."""
+        from .product_envelope_store import ProductStoreNamespace
+        from .product_transport import product_transport_binding_digest
+
+        transport, manifest = self._product_transport, self._product_manifest
+        if transport is None or manifest is None:
+            raise ProductActivationError("product_transport_unavailable")
+        return product_transport_binding_digest(
+            base_url=transport[0],
+            namespace=ProductStoreNamespace(
+                runtime=manifest.runtime,
+                agent_id=manifest.agent_id,
+                principal_id=manifest.principal_id,
+                runtime_binding_id=manifest.runtime_binding_id,
+            ),
+        )
+
+    @property
     def product_enabled(self) -> bool:
         # Keep the original opt-in even if the mutable compatibility config is
         # subsequently changed to None or to defense-off.

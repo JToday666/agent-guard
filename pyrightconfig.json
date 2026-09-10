@@ -6,7 +6,8 @@
     "packages/agentguard-langgraph-adapter/agentguard_langgraph_adapter",
     "scripts/product_runtime",
     "scripts/product-runtime-candidate.py",
-    "scripts/product-runtime-admission.py"
+    "scripts/product-runtime-admission.py",
+    "scripts/product-runtime-receipts.py"
   ],
   "exclude": [
     "**/.*",

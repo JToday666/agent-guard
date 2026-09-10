@@ -620,6 +620,8 @@ test(
     for (const name of [
       "profile.mjs",
       "profile.d.mts",
+      "receipt-recovery.mjs",
+      "receipt-recovery.d.mts",
       "factory.mjs",
       "factory.d.mts",
       "memory.mjs",
@@ -638,6 +640,20 @@ test(
       root,
     ]);
     const installed = path.join(root, "package");
+    const recoveryImport = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `
+      const entry = await import(${JSON.stringify(pathToFileURL(path.join(root, "package/product-runtime/receipt-recovery.mjs")).href)});
+      if (Object.keys(entry).join() !== "openOpenClawProductReceiptRecovery") process.exitCode = 1;
+      else process.stdout.write("receipts-only-import");
+    `,
+      ],
+      { encoding: "utf8", timeout: 30000 },
+    );
+    assert.equal(recoveryImport, "receipts-only-import");
     for (const relative of [
       "package.json",
       "openclaw.plugin.json",
